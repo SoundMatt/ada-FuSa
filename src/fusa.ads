@@ -13,7 +13,17 @@ package Fusa is
 
    Tool_Name    : constant String := "ada-FuSa";
    Version      : constant String := "0.1.0";
-   Spec_Version : constant String := "1.11";
+
+   --  §2.8: two DISTINCT keys, never conflate them. Schema_Version is
+   --  MAJOR.MINOR only (spec §3.1 "schemaVersion" field on report
+   --  documents); Spec_Version is the full spec release ada-FuSa
+   --  implements (§9.1 "specVersion" field on `version`/`capabilities`),
+   --  matching the sibling tools' convention of tracking the full patch
+   --  version in their SpecVersion/SPEC_VERSION constants (e.g.
+   --  go-FuSa/c-FuSa/cpp-FuSa/rust-FuSa/py-FuSa all correct theirs to
+   --  strings like "1.10.4", not truncated to "1.10").
+   Schema_Version : constant String := "1.11";
+   Spec_Version   : constant String := "1.11.0";
 
    --  §2.3 exit codes
    Exit_Ok        : constant := 0; --  success, no gate failure

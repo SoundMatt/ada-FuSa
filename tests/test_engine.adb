@@ -7,22 +7,10 @@ with Fusa.Source_Scan;
 with Fusa.Config;
 with Fusa.Rules_Style;
 pragma Unreferenced (Fusa.Rules_Style);
+with Test_Engine_Rules;
 with Test_Framework; use Test_Framework;
 
 procedure Test_Engine is
-
-   type Dummy_Rule is new Fusa.Engine.Rule_Interface with null record;
-
-   overriding function Id (R : Dummy_Rule) return String is ("ADA001");
-   overriding function Description (R : Dummy_Rule) return String is ("dummy");
-   overriding function Run
-     (R : Dummy_Rule; Project_Root : String; Files : String_List) return Finding_List
-   is
-      Empty : Finding_List;
-   begin
-      return Empty;
-   end Run;
-
    Root : constant String := "tmp_test_engine";
 begin
    Check (Fusa.Engine.Rule_Count >= 8, "at least the 8 starter rules are registered");
@@ -45,16 +33,34 @@ begin
    end;
 
    declare
-      D      : aliased Dummy_Rule;
+      --  Fusa.Engine's registry is a process-lifetime singleton, so a Rule
+      --  handed to Register must outlive this test procedure -- allocate
+      --  on the heap (matching how Rule_Access is meant to be populated),
+      --  not a stack-local 'Access, which would dangle the moment this
+      --  declare block exits and corrupt every later Run_All call.
+      D      : constant Fusa.Engine.Rule_Access := new Test_Engine_Rules.Dummy_Rule;
       Raised : Boolean := False;
    begin
       begin
-         Fusa.Engine.Register (D'Unchecked_Access);
+         Fusa.Engine.Register (D);
       exception
          when Fusa.Engine.Duplicate_Rule_Error =>
             Raised := True;
       end;
       Check (Raised, "registering a duplicate rule id raises Duplicate_Rule_Error");
+   end;
+
+   declare
+      --  Sorts before every already-registered rule id ("ADA001".."ADA008"),
+      --  exercising Register's "insert before an existing entry" branch,
+      --  which the 8 starter rules never hit since they self-register in
+      --  already-ascending order.
+      F : constant Fusa.Engine.Rule_Access := new Test_Engine_Rules.First_Rule;
+   begin
+      Fusa.Engine.Register (F);
+      Check (Fusa.Engine.Get_Rule (1).Id = "AAA001",
+             "a rule sorting before all existing ones is inserted at the front, "
+             & "not appended to the end");
    end;
 
    if Ada.Directories.Exists (Root) then
@@ -79,11 +85,11 @@ begin
       Hits_X, Hits_Y : Natural := 0;
    begin
       Check (Natural (Files.Length) = 2, "source scan finds both fixture files");
-      for F of Findings loop
-         if To_String (F.Rule_Id) = "ADA001" then
-            if To_String (F.Loc.File) = "src/x.adb" then
+      for Fnd of Findings loop
+         if To_String (Fnd.Rule_Id) = "ADA001" then
+            if To_String (Fnd.Loc.File) = "src/x.adb" then
                Hits_X := Hits_X + 1;
-            elsif To_String (F.Loc.File) = "src/y.adb" then
+            elsif To_String (Fnd.Loc.File) = "src/y.adb" then
                Hits_Y := Hits_Y + 1;
             end if;
          end if;

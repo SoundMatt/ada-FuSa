@@ -6,6 +6,7 @@ bin/
 *.gcno
 *.gcov
 .fusa-qualify-tmp/
+tmp_test_*/
 fusa-report.json
 qualify-report.json
 sbom.json

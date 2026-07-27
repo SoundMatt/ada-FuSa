@@ -18,7 +18,7 @@ package body Fusa.Report is
 
    procedure Write_Header (W : in out Fusa.Json.Writer.Instance; Kind : String) is
    begin
-      W.Field ("schemaVersion", Fusa.Spec_Version);
+      W.Field ("schemaVersion", Fusa.Schema_Version);
       W.Field ("kind", Kind);
       W.Field ("tool", Fusa.Tool_Name);
       W.Field ("toolVersion", Fusa.Version);
