@@ -1,0 +1,14 @@
+obj/
+bin/
+*.ali
+*.o
+*.gcda
+*.gcno
+*.gcov
+.fusa-qualify-tmp/
+fusa-report.json
+qualify-report.json
+sbom.json
+provenance.json
+artifact-manifest.json
+audit-pack.zip

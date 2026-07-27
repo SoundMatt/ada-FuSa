@@ -1,0 +1,974 @@
+with Ada.Text_IO;
+with Ada.Directories;
+with Ada.Strings.Fixed;
+with Ada.Strings.Unbounded; use Ada.Strings.Unbounded;
+with Ada.Containers.Indefinite_Vectors;
+with Interfaces.C; use Interfaces.C;
+
+with Fusa.Config;
+with Fusa.Files;
+with Fusa.Source_Scan;
+with Fusa.Engine;
+with Fusa.Annotations; use Fusa.Annotations;
+with Fusa.Report;
+with Fusa.Json.Writer;
+with Fusa.Sha256;
+with Fusa.Zip;
+
+package body Fusa.Cli is
+
+   function Trim_Img (N : Integer) return String is
+     (Ada.Strings.Fixed.Trim (Integer'Image (N), Ada.Strings.Left));
+
+   ----------------------------------------------------------------------
+   --  Flag parsing
+   ----------------------------------------------------------------------
+
+   function Flag_Value
+     (Args : String_List; Name : String; Default : String := "") return String
+   is
+   begin
+      for I in 1 .. Natural (Args.Length) loop
+         declare
+            A : constant String := Args.Element (I);
+         begin
+            if A = Name and then I < Natural (Args.Length) then
+               return Args.Element (I + 1);
+            elsif A'Length > Name'Length + 1
+              and then A (A'First .. A'First + Name'Length - 1) = Name
+              and then A (A'First + Name'Length) = '='
+            then
+               return A (A'First + Name'Length + 1 .. A'Last);
+            end if;
+         end;
+      end loop;
+      return Default;
+   end Flag_Value;
+
+   function Has_Flag (Args : String_List; Name : String) return Boolean is
+   begin
+      for A of Args loop
+         if A = Name then
+            return True;
+         end if;
+      end loop;
+      return False;
+   end Has_Flag;
+
+   function Dir_Of (Args : String_List) return String is
+     (Flag_Value (Args, "--dir", "."));
+
+   function Is_TTY return Boolean is
+      function C_Isatty (FD : Interfaces.C.int) return Interfaces.C.int;
+      pragma Import (C, C_Isatty, "isatty");
+   begin
+      return C_Isatty (0) /= 0;
+   end Is_TTY;
+
+   procedure Emit (Args : String_List; Content : String) is
+      Out_File : constant String := Flag_Value (Args, "--output", "");
+   begin
+      if Out_File'Length > 0 then
+         Fusa.Files.Write_File (Out_File, Content & ASCII.LF);
+      else
+         Ada.Text_IO.Put_Line (Content);
+      end if;
+   end Emit;
+
+   function Emit_Runtime_Error
+     (Args : String_List; Kind, Code, Message : String) return Integer
+   is
+      Format : constant String := Flag_Value (Args, "--format", "text");
+   begin
+      if Format = "json" then
+         declare
+            W : Fusa.Json.Writer.Instance;
+         begin
+            W.Object_Start;
+            Fusa.Report.Write_Header (W, Kind);
+            W.Key ("error");
+            W.Object_Start;
+            W.Field ("code", Code);
+            W.Field ("message", Message);
+            W.Object_End;
+            W.Object_End;
+            Emit (Args, Fusa.Json.Writer.To_String (W));
+         end;
+      else
+         Ada.Text_IO.Put_Line (Ada.Text_IO.Standard_Error, "ada-FuSa: " & Message);
+      end if;
+      return Exit_Runtime;
+   end Emit_Runtime_Error;
+
+   ----------------------------------------------------------------------
+   --  version
+   ----------------------------------------------------------------------
+
+   function Cmd_Version (Args : String_List) return Integer is
+   begin
+      if Flag_Value (Args, "--format", "text") = "json" then
+         declare
+            W : Fusa.Json.Writer.Instance;
+         begin
+            W.Object_Start;
+            W.Field ("tool", Fusa.Tool_Name);
+            W.Field ("version", Fusa.Version);
+            W.Field ("specVersion", Fusa.Spec_Version);
+            W.Object_End;
+            Ada.Text_IO.Put_Line (Fusa.Json.Writer.To_String (W));
+         end;
+      else
+         Ada.Text_IO.Put_Line (Fusa.Tool_Name & " " & Fusa.Version);
+      end if;
+      return Exit_Ok;
+   end Cmd_Version;
+
+   ----------------------------------------------------------------------
+   --  capabilities
+   ----------------------------------------------------------------------
+
+   function Cmd_Capabilities (Args : String_List) return Integer is
+      W : Fusa.Json.Writer.Instance;
+   begin
+      W.Object_Start;
+      Fusa.Report.Write_Header (W, "capabilities");
+      W.Field ("specVersion", Fusa.Spec_Version);
+
+      W.Key ("commands");
+      W.Array_Start;
+      W.Value ("version");
+      W.Value ("capabilities");
+      W.Value ("init");
+      W.Value ("check");
+      W.Value ("trace");
+      W.Value ("qualify");
+      W.Value ("release");
+      W.Value ("audit-pack");
+      W.Value ("report");
+      W.Array_End;
+
+      W.Key ("formats");
+      W.Object_Start;
+      W.Key ("version");      W.Array_Start; W.Value ("text"); W.Value ("json"); W.Array_End;
+      W.Key ("capabilities"); W.Array_Start; W.Value ("json"); W.Array_End;
+      W.Key ("init");         W.Array_Start; W.Value ("text"); W.Array_End;
+      W.Key ("check");        W.Array_Start; W.Value ("text"); W.Value ("json"); W.Value ("sarif"); W.Array_End;
+      W.Key ("trace");        W.Array_Start; W.Value ("text"); W.Value ("json"); W.Array_End;
+      W.Key ("qualify");      W.Array_Start; W.Value ("text"); W.Value ("json"); W.Array_End;
+      W.Key ("release");      W.Array_Start; W.Value ("json"); W.Array_End;
+      W.Key ("audit-pack");   W.Array_Start; W.Value ("json"); W.Array_End;
+      W.Key ("report");       W.Array_Start; W.Value ("text"); W.Value ("json"); W.Value ("sarif"); W.Array_End;
+      W.Object_End;
+
+      W.Key ("standards");
+      W.Array_Start;
+      W.Array_End;
+
+      W.Object_End;
+      Emit (Args, Fusa.Json.Writer.To_String (W));
+      return Exit_Ok;
+   end Cmd_Capabilities;
+
+   ----------------------------------------------------------------------
+   --  init
+   ----------------------------------------------------------------------
+
+   function Cmd_Init (Args : String_List) return Integer is
+      Dir   : constant String := Dir_Of (Args);
+      Force : constant Boolean := Has_Flag (Args, "--force");
+      Name     : Unbounded_String := To_Unbounded_String (Flag_Value (Args, "--name", ""));
+      Standard : Unbounded_String := To_Unbounded_String (Flag_Value (Args, "--standard", ""));
+      Asil     : constant String := Flag_Value (Args, "--asil", "");
+      Sil      : constant String := Flag_Value (Args, "--sil", "");
+      Dal      : constant String := Flag_Value (Args, "--dal", "");
+      Pver     : constant String := Flag_Value (Args, "--project-version", "");
+   begin
+      if Length (Name) = 0 then
+         declare
+            I : Positive := 1;
+         begin
+            while I <= Natural (Args.Length) loop
+               declare
+                  A : constant String := Args.Element (I);
+               begin
+                  if A = "--dir" or else A = "--name" or else A = "--standard"
+                    or else A = "--asil" or else A = "--sil" or else A = "--dal"
+                    or else A = "--project-version"
+                  then
+                     I := I + 2; --  skip the flag and its value
+                  elsif A = "--force" then
+                     I := I + 1; --  boolean flag, no value to skip
+                  elsif A'Length > 0 and then A (A'First) /= '-' then
+                     Name := To_Unbounded_String (A);
+                     exit;
+                  else
+                     I := I + 1; --  unrecognised flag: skip it alone
+                  end if;
+               end;
+            end loop;
+         end;
+      end if;
+
+      if Length (Name) = 0 then
+         if Is_TTY then
+            Ada.Text_IO.Put ("Project name: ");
+            Name := To_Unbounded_String (Ada.Text_IO.Get_Line);
+         end if;
+         if Length (Name) = 0 then
+            Ada.Text_IO.Put_Line
+              (Ada.Text_IO.Standard_Error,
+               "ada-FuSa: init requires --name (or a positional <name>) " &
+               "when not run interactively");
+            return Exit_Usage;
+         end if;
+      end if;
+
+      if Length (Standard) = 0 then
+         if Is_TTY then
+            Ada.Text_IO.Put ("Standard [generic]: ");
+            declare
+               S : constant String := Ada.Text_IO.Get_Line;
+            begin
+               Standard := To_Unbounded_String (if S'Length = 0 then "generic" else S);
+            end;
+         else
+            Standard := To_Unbounded_String ("generic");
+         end if;
+      end if;
+
+      declare
+         Config_Path : constant String := Fusa.Files.Join (Dir, Fusa.Config.Config_File);
+         Reqs_Path   : constant String := Fusa.Files.Join (Dir, Fusa.Config.Reqs_File);
+      begin
+         if Force or else not Fusa.Files.Exists (Config_Path) then
+            declare
+               Cfg : Fusa.Config.Project_Config :=
+                 Fusa.Config.Default_Config (To_String (Name));
+            begin
+               Cfg.Standard := Standard;
+               Cfg.Asil := To_Unbounded_String (Asil);
+               Cfg.Sil  := To_Unbounded_String (Sil);
+               Cfg.Dal  := To_Unbounded_String (Dal);
+               if Pver'Length > 0 then
+                  Cfg.Version := To_Unbounded_String (Pver);
+               end if;
+               Fusa.Config.Save (Dir, Cfg);
+            end;
+            Ada.Text_IO.Put_Line ("created " & Config_Path);
+         else
+            Ada.Text_IO.Put_Line
+              (Ada.Text_IO.Standard_Error,
+               "ada-FuSa: " & Config_Path &
+               " already exists, leaving unchanged (use --force to overwrite)");
+         end if;
+
+         if Force or else not Fusa.Files.Exists (Reqs_Path) then
+            Fusa.Config.Save_Requirements (Dir, Fusa.Config.Requirement_Vectors.Empty_Vector);
+            Ada.Text_IO.Put_Line ("created " & Reqs_Path);
+         else
+            Ada.Text_IO.Put_Line
+              (Ada.Text_IO.Standard_Error,
+               "ada-FuSa: " & Reqs_Path &
+               " already exists, leaving unchanged (use --force to overwrite)");
+         end if;
+      end;
+      return Exit_Ok;
+   end Cmd_Init;
+
+   ----------------------------------------------------------------------
+   --  check
+   ----------------------------------------------------------------------
+
+   function Cmd_Check (Args : String_List) return Integer is
+      Dir    : constant String := Dir_Of (Args);
+      Format : constant String := Flag_Value (Args, "--format", "text");
+      Strict : constant Boolean := Has_Flag (Args, "--strict");
+   begin
+      if Format /= "text" and then Format /= "json" and then Format /= "sarif" then
+         Ada.Text_IO.Put_Line
+           (Ada.Text_IO.Standard_Error,
+            "ada-FuSa: check: unsupported --format '" & Format &
+            "' (supported: text, json, sarif)");
+         return Exit_Usage;
+      end if;
+
+      declare
+         Cfg : Fusa.Config.Project_Config;
+      begin
+         begin
+            Cfg := Fusa.Config.Load (Dir);
+         exception
+            when Fusa.Config.No_Config_Error =>
+               return Emit_Runtime_Error
+                 (Args, "check-report", "no-config", "no .fusa.json found in " & Dir);
+            when Fusa.Config.Invalid_Config_Error =>
+               return Emit_Runtime_Error
+                 (Args, "check-report", "invalid-config", "invalid .fusa.json in " & Dir);
+         end;
+
+         declare
+            Effective_Strict : constant Boolean := Strict or else Cfg.Strict;
+            Files    : constant String_List := Fusa.Source_Scan.Find_Source_Files (Dir, Cfg);
+            Findings : Finding_List := Fusa.Engine.Run_All (Dir, Files);
+            Dup_Findings : Finding_List;
+            Reqs : constant Fusa.Config.Requirement_List :=
+              Fusa.Config.Load_Requirements (Dir, Dup_Findings);
+         begin
+            for F of Dup_Findings loop
+               Findings.Append (F);
+            end loop;
+
+            if Format = "json" then
+               declare
+                  W : Fusa.Json.Writer.Instance;
+               begin
+                  W.Object_Start;
+                  Fusa.Report.Write_Header (W, "check-report");
+                  Fusa.Report.Write_Report_Extension
+                    (W, Dir, To_String (Cfg.Name), To_String (Cfg.Standard),
+                     To_String (Cfg.Asil), To_String (Cfg.Sil), To_String (Cfg.Dal));
+                  Fusa.Report.Write_Findings_Array (W, Findings);
+                  Fusa.Report.Write_Summary (W, Findings);
+                  W.Object_End;
+                  Emit (Args, Fusa.Json.Writer.To_String (W));
+               end;
+            elsif Format = "sarif" then
+               Emit (Args, Fusa.Report.Render_Sarif (Findings));
+            else
+               Emit (Args, Fusa.Report.Render_Text (Findings));
+            end if;
+
+            if Fusa.Report.Has_Gate_Failure (Findings, Effective_Strict) then
+               return Exit_Gate_Fail;
+            end if;
+            return Exit_Ok;
+         end;
+      end;
+   end Cmd_Check;
+
+   ----------------------------------------------------------------------
+   --  trace
+   ----------------------------------------------------------------------
+
+   function Cmd_Trace (Args : String_List) return Integer is
+      Dir    : constant String := Dir_Of (Args);
+      Format : constant String := Flag_Value (Args, "--format", "text");
+      Gaps   : constant Boolean := Has_Flag (Args, "--gaps");
+      Strict : constant Boolean := Has_Flag (Args, "--strict");
+      Req_Cov_Str    : constant String := Flag_Value (Args, "--req-coverage", "");
+      Sec_Tested_Str : constant String := Flag_Value (Args, "--sec-tested", "");
+   begin
+      if Format /= "text" and then Format /= "json" then
+         Ada.Text_IO.Put_Line
+           (Ada.Text_IO.Standard_Error,
+            "ada-FuSa: trace: unsupported --format '" & Format &
+            "' (supported: text, json)");
+         return Exit_Usage;
+      end if;
+
+      declare
+         Cfg : Fusa.Config.Project_Config;
+      begin
+         begin
+            Cfg := Fusa.Config.Load (Dir);
+         exception
+            when Fusa.Config.No_Config_Error =>
+               return Emit_Runtime_Error
+                 (Args, "trace-matrix", "no-config", "no .fusa.json found in " & Dir);
+            when Fusa.Config.Invalid_Config_Error =>
+               return Emit_Runtime_Error
+                 (Args, "trace-matrix", "invalid-config", "invalid .fusa.json in " & Dir);
+         end;
+
+         declare
+            Dup_Findings : Finding_List;
+            Reqs  : constant Fusa.Config.Requirement_List :=
+              Fusa.Config.Load_Requirements (Dir, Dup_Findings);
+            Files : constant String_List := Fusa.Source_Scan.Find_Source_Files (Dir, Cfg);
+            Ann_Findings : Finding_List;
+            Tags  : constant Fusa.Annotations.Tag_List :=
+              Fusa.Annotations.Scan (Dir, Files, Ann_Findings);
+            Total : constant Natural := Natural (Reqs.Length);
+
+            type Req_Status is record
+               Traced, Tested, Sec_Tested : Boolean := False;
+            end record;
+            Statuses : array (1 .. Integer'Max (Total, 1)) of Req_Status;
+
+            function Index_Of (Id : String) return Natural is
+            begin
+               for I in 1 .. Total loop
+                  if To_String (Reqs.Element (I).Id) = Id then
+                     return I;
+                  end if;
+               end loop;
+               return 0;
+            end Index_Of;
+
+            Traced_Count, Tested_Count, Sec_Tested_Count : Natural := 0;
+         begin
+            for F of Dup_Findings loop
+               Ada.Text_IO.Put_Line
+                 (Ada.Text_IO.Standard_Error, "ada-FuSa: warning: " & To_String (F.Message));
+            end loop;
+            for F of Ann_Findings loop
+               Ada.Text_IO.Put_Line
+                 (Ada.Text_IO.Standard_Error, "ada-FuSa: warning: " & To_String (F.Message));
+            end loop;
+
+            for T of Tags loop
+               declare
+                  Idx : constant Natural := Index_Of (To_String (T.Requirement_Id));
+               begin
+                  if Idx > 0 then
+                     Statuses (Idx).Traced := True;
+                     if T.Kind = Fusa.Annotations.Test
+                       or else T.Kind = Fusa.Annotations.Sec_Test
+                     then
+                        Statuses (Idx).Tested := True;
+                     end if;
+                     if T.Kind = Fusa.Annotations.Sec_Test then
+                        Statuses (Idx).Sec_Tested := True;
+                     end if;
+                  end if;
+               end;
+            end loop;
+            for I in 1 .. Total loop
+               if Statuses (I).Traced then
+                  Traced_Count := Traced_Count + 1;
+               end if;
+               if Statuses (I).Tested then
+                  Tested_Count := Tested_Count + 1;
+               end if;
+               if Statuses (I).Sec_Tested then
+                  Sec_Tested_Count := Sec_Tested_Count + 1;
+               end if;
+            end loop;
+
+            declare
+               Req_Cov_Pct    : constant Natural :=
+                 (if Total = 0 then 100 else Traced_Count * 100 / Total);
+               Sec_Tested_Pct : constant Natural :=
+                 (if Total = 0 then 100 else Sec_Tested_Count * 100 / Total);
+               Req_Threshold  : Natural := 0;
+               Sec_Threshold  : Natural := 0;
+               Gate_Fail      : Boolean := False;
+            begin
+               if Strict and then Req_Cov_Str'Length = 0 and then Sec_Tested_Str'Length = 0 then
+                  Req_Threshold := 100;
+                  Sec_Threshold := 100;
+               else
+                  if Req_Cov_Str'Length > 0 then
+                     Req_Threshold := Natural'Value (Req_Cov_Str);
+                  end if;
+                  if Sec_Tested_Str'Length > 0 then
+                     Sec_Threshold := Natural'Value (Sec_Tested_Str);
+                  end if;
+               end if;
+
+               if Req_Threshold > 0 and then Req_Cov_Pct < Req_Threshold then
+                  Gate_Fail := True;
+               end if;
+               if Sec_Threshold > 0 and then Sec_Tested_Pct < Sec_Threshold then
+                  Gate_Fail := True;
+               end if;
+
+               if Format = "json" then
+                  declare
+                     W : Fusa.Json.Writer.Instance;
+                  begin
+                     W.Object_Start;
+                     Fusa.Report.Write_Header (W, "trace-matrix");
+
+                     W.Key ("requirements");
+                     W.Array_Start;
+                     for I in 1 .. Total loop
+                        if not Gaps or else not Statuses (I).Tested then
+                           declare
+                              R : constant Fusa.Config.Requirement := Reqs.Element (I);
+                           begin
+                              W.Object_Start;
+                              W.Field ("id", To_String (R.Id));
+                              W.Field_If_Non_Blank ("title", To_String (R.Title));
+                              W.Field_If_Non_Blank ("text", To_String (R.Text));
+                              W.Field_If_Non_Blank ("standard", To_String (R.Standard));
+                              W.Field_If_Non_Blank ("level", To_String (R.Level));
+                              W.Field_If_Non_Blank ("asil", To_String (R.Asil));
+                              W.Object_End;
+                           end;
+                        end if;
+                     end loop;
+                     W.Array_End;
+
+                     W.Key ("tags");
+                     W.Array_Start;
+                     for T of Tags loop
+                        declare
+                           Idx     : constant Natural := Index_Of (To_String (T.Requirement_Id));
+                           Include : Boolean := True;
+                        begin
+                           if Gaps then
+                              Include := Idx > 0 and then not Statuses (Idx).Tested;
+                           end if;
+                           if Include then
+                              W.Object_Start;
+                              W.Field ("requirementId", To_String (T.Requirement_Id));
+                              W.Field ("file", To_String (T.File));
+                              W.Field ("line", T.Line);
+                              W.Field ("kind",
+                                (case T.Kind is
+                                   when Fusa.Annotations.Impl     => "impl",
+                                   when Fusa.Annotations.Test     => "test",
+                                   when Fusa.Annotations.Sec_Test => "sec-test"));
+                              W.Object_End;
+                           end if;
+                        end;
+                     end loop;
+                     W.Array_End;
+
+                     W.Key ("coverage");
+                     W.Object_Start;
+                     W.Field ("totalRequirements", Total);
+                     W.Field ("tracedRequirements", Traced_Count);
+                     W.Field ("testedRequirements", Tested_Count);
+                     W.Field ("secTestedRequirements", Sec_Tested_Count);
+                     W.Object_End;
+
+                     W.Object_End;
+                     Emit (Args, Fusa.Json.Writer.To_String (W));
+                  end;
+               else
+                  declare
+                     Buf : Unbounded_String := Null_Unbounded_String;
+                  begin
+                     Append (Buf, "requirements:" & Trim_Img (Total) &
+                               " traced:" & Trim_Img (Traced_Count) &
+                               " tested:" & Trim_Img (Tested_Count) &
+                               " sec-tested:" & Trim_Img (Sec_Tested_Count) & ASCII.LF);
+                     for I in 1 .. Total loop
+                        if not Gaps or else not Statuses (I).Tested then
+                           Append (Buf, "  " & To_String (Reqs.Element (I).Id) &
+                                     (if Statuses (I).Tested then " [tested]"
+                                      elsif Statuses (I).Traced then " [traced]"
+                                      else " [gap]") & ASCII.LF);
+                        end if;
+                     end loop;
+                     Emit (Args, To_String (Buf));
+                  end;
+               end if;
+
+               if Gate_Fail then
+                  return Exit_Gate_Fail;
+               end if;
+               return Exit_Ok;
+            end;
+         end;
+      end;
+   end Cmd_Trace;
+
+   ----------------------------------------------------------------------
+   --  qualify
+   ----------------------------------------------------------------------
+
+   type Case_Result is record
+      Name   : Unbounded_String;
+      Result : Unbounded_String;
+   end record;
+   package Case_Vectors is new Ada.Containers.Indefinite_Vectors (Positive, Case_Result);
+
+   function Cmd_Qualify (Args : String_List) return Integer is
+      Dir      : constant String := Dir_Of (Args);
+      Format   : constant String := Flag_Value (Args, "--format", "text");
+      Out_Path : constant String := Flag_Value (Args, "--output", "");
+      Effective_Out : constant String :=
+        (if Out_Path'Length > 0 then Out_Path
+         else Fusa.Files.Join (Dir, "qualify-report.json"));
+      Tmp : constant String := Fusa.Files.Join (Dir, ".fusa-qualify-tmp");
+      Cases : Case_Vectors.Vector;
+
+      procedure Check_Rule (Rule_Id : String; Fixture : String) is
+         File_Path : constant String := Fusa.Files.Join (Tmp, "fixture.adb");
+      begin
+         Fusa.Files.Write_File (File_Path, Fixture);
+         declare
+            Rel   : constant String := Fusa.Files.Relative_To (Dir, File_Path);
+            Files : String_List;
+         begin
+            Files.Append (Rel);
+            declare
+               Findings : constant Finding_List := Fusa.Engine.Run_All (Dir, Files);
+               Hit      : Boolean := False;
+            begin
+               for F of Findings loop
+                  if To_String (F.Rule_Id) = Rule_Id then
+                     Hit := True;
+                  end if;
+               end loop;
+               Cases.Append
+                 (Case_Result'(Name   => To_Unbounded_String ("rule-" & Rule_Id & "-known-answer"),
+                               Result => To_Unbounded_String (if Hit then "PASS" else "FAIL")));
+            end;
+         end;
+      end Check_Rule;
+   begin
+      if Format /= "text" and then Format /= "json" then
+         Ada.Text_IO.Put_Line
+           (Ada.Text_IO.Standard_Error,
+            "ada-FuSa: qualify: unsupported --format '" & Format & "'");
+         return Exit_Usage;
+      end if;
+
+      Ada.Directories.Create_Path (Tmp);
+
+      Check_Rule ("ADA001",
+        "procedure P is" & ASCII.LF &
+        "   pragma Suppress (All_Checks);" & ASCII.LF &
+        "begin" & ASCII.LF & "   null;" & ASCII.LF & "end P;" & ASCII.LF);
+      Check_Rule ("ADA002",
+        "procedure P is" & ASCII.LF & "begin" & ASCII.LF & "   null;" & ASCII.LF &
+        "exception" & ASCII.LF & "   when others =>" & ASCII.LF &
+        "      null;" & ASCII.LF & "end P;" & ASCII.LF);
+      Check_Rule ("ADA003",
+        "procedure P is" & ASCII.LF &
+        "   function Conv is new Unchecked_Conversion (Integer, Float);" & ASCII.LF &
+        "begin" & ASCII.LF & "   null;" & ASCII.LF & "end P;" & ASCII.LF);
+      Check_Rule ("ADA004",
+        "procedure P is" & ASCII.LF &
+        "   procedure Free is new Unchecked_Deallocation (Integer, Int_Access);" & ASCII.LF &
+        "begin" & ASCII.LF & "   null;" & ASCII.LF & "end P;" & ASCII.LF);
+      Check_Rule ("ADA005",
+        "procedure P is" & ASCII.LF & "begin" & ASCII.LF &
+        "   null; -- " & (1 .. 90 => '-') & ASCII.LF & "end P;" & ASCII.LF);
+      Check_Rule ("ADA006",
+        "procedure P is" & ASCII.LF & ASCII.HT & "begin" & ASCII.LF &
+        "   null;" & ASCII.LF & "end P;" & ASCII.LF);
+      Check_Rule ("ADA007",
+        "procedure P is" & ASCII.LF & "begin" & ASCII.LF &
+        "   null; -- TODO fix" & ASCII.LF & "end P;" & ASCII.LF);
+      Check_Rule ("ADA008",
+        "pragma Warnings (Off, ""x"");" & ASCII.LF & "procedure P is" & ASCII.LF &
+        "begin" & ASCII.LF & "   null;" & ASCII.LF & "end P;" & ASCII.LF);
+
+      if Ada.Directories.Exists (Tmp) then
+         Ada.Directories.Delete_Tree (Tmp);
+      end if;
+
+      declare
+         Total, Passed, Failed : Natural := 0;
+      begin
+         for C of Cases loop
+            Total := Total + 1;
+            if To_String (C.Result) = "PASS" then
+               Passed := Passed + 1;
+            else
+               Failed := Failed + 1;
+            end if;
+         end loop;
+
+         declare
+            W : Fusa.Json.Writer.Instance;
+         begin
+            W.Object_Start;
+            Fusa.Report.Write_Header (W, "qualification");
+            W.Field ("total", Total);
+            W.Field ("passed", Passed);
+            W.Field ("failed", Failed);
+            W.Key ("results");
+            W.Array_Start;
+            for C of Cases loop
+               W.Object_Start;
+               W.Field ("name", To_String (C.Name));
+               W.Field ("result", To_String (C.Result));
+               W.Object_End;
+            end loop;
+            W.Array_End;
+            W.Object_End;
+            Fusa.Files.Write_File (Effective_Out, Fusa.Json.Writer.To_String (W) & ASCII.LF);
+
+            if Format = "json" and then Out_Path'Length = 0 then
+               Ada.Text_IO.Put_Line (Fusa.Json.Writer.To_String (W));
+            end if;
+         end;
+
+         if Format /= "json" then
+            declare
+               Buf : Unbounded_String := Null_Unbounded_String;
+            begin
+               for C of Cases loop
+                  Append (Buf, To_String (C.Name) & ": " & To_String (C.Result) & ASCII.LF);
+               end loop;
+               Append (Buf, Trim_Img (Total) & " total, " & Trim_Img (Passed) &
+                         " passed, " & Trim_Img (Failed) & " failed");
+               Ada.Text_IO.Put_Line (To_String (Buf));
+            end;
+         end if;
+
+         if Failed > 0 then
+            return Exit_Gate_Fail;
+         end if;
+         return Exit_Ok;
+      end;
+   end Cmd_Qualify;
+
+   ----------------------------------------------------------------------
+   --  release
+   ----------------------------------------------------------------------
+
+   function Cmd_Audit_Pack (Args : String_List) return Integer;
+
+   function Cmd_Release (Args : String_List) return Integer is
+      Dir        : constant String := Dir_Of (Args);
+      Output_Dir : constant String := Flag_Value (Args, "--output-dir", Dir);
+      Full       : constant Boolean := Has_Flag (Args, "--full");
+      Cfg        : Fusa.Config.Project_Config;
+   begin
+      begin
+         Cfg := Fusa.Config.Load (Dir);
+      exception
+         when Fusa.Config.No_Config_Error =>
+            return Emit_Runtime_Error (Args, "sbom", "no-config", "no .fusa.json found in " & Dir);
+         when Fusa.Config.Invalid_Config_Error =>
+            return Emit_Runtime_Error (Args, "sbom", "invalid-config", "invalid .fusa.json in " & Dir);
+      end;
+
+      if not Fusa.Files.Exists (Output_Dir) then
+         Ada.Directories.Create_Path (Output_Dir);
+      end if;
+
+      declare
+         W : Fusa.Json.Writer.Instance;
+      begin
+         W.Object_Start;
+         Fusa.Report.Write_Header (W, "sbom");
+         W.Field ("format", "x-FuSa SBOM v1");
+         W.Field ("module",
+           "github.com/SoundMatt/" & To_String (Cfg.Name) & "@" & To_String (Cfg.Version));
+         W.Key ("components");
+         W.Array_Start;
+         W.Array_End;
+         W.Object_End;
+         Fusa.Files.Write_File
+           (Fusa.Files.Join (Output_Dir, "sbom.json"), Fusa.Json.Writer.To_String (W) & ASCII.LF);
+      end;
+      Ada.Text_IO.Put_Line ("wrote " & Fusa.Files.Join (Output_Dir, "sbom.json"));
+
+      if Full then
+         declare
+            W2 : Fusa.Json.Writer.Instance;
+         begin
+            W2.Object_Start;
+            Fusa.Report.Write_Header (W2, "provenance");
+            W2.Field ("buildType", "https://github.com/SoundMatt/ada-FuSa");
+            W2.Object_End;
+            Fusa.Files.Write_File
+              (Fusa.Files.Join (Output_Dir, "provenance.json"),
+               Fusa.Json.Writer.To_String (W2) & ASCII.LF);
+         end;
+         declare
+            W3 : Fusa.Json.Writer.Instance;
+         begin
+            W3.Object_Start;
+            Fusa.Report.Write_Header (W3, "artifact-manifest");
+            W3.Key ("files");
+            W3.Array_Start;
+            W3.Array_End;
+            W3.Object_End;
+            Fusa.Files.Write_File
+              (Fusa.Files.Join (Output_Dir, "artifact-manifest.json"),
+               Fusa.Json.Writer.To_String (W3) & ASCII.LF);
+         end;
+         Ada.Text_IO.Put_Line
+           (Ada.Text_IO.Standard_Error, "ada-FuSa: skipping fmea (not yet implemented)");
+         Ada.Text_IO.Put_Line
+           (Ada.Text_IO.Standard_Error, "ada-FuSa: skipping boundary (not yet implemented)");
+         Ada.Text_IO.Put_Line
+           (Ada.Text_IO.Standard_Error, "ada-FuSa: skipping vuln (not yet implemented)");
+         declare
+            Rc : constant Integer := Cmd_Audit_Pack (Args);
+         begin
+            if Rc /= Exit_Ok then
+               return Rc;
+            end if;
+         end;
+      end if;
+      return Exit_Ok;
+   end Cmd_Release;
+
+   ----------------------------------------------------------------------
+   --  audit-pack
+   ----------------------------------------------------------------------
+
+   function Cmd_Audit_Pack (Args : String_List) return Integer is
+      Dir      : constant String := Dir_Of (Args);
+      Out_Path : constant String :=
+        Flag_Value (Args, "--output", Fusa.Files.Join (Dir, "audit-pack.zip"));
+      Entries  : Fusa.Zip.Entry_List;
+
+      procedure Add_If_Exists (Name : String) is
+         Full : constant String := Fusa.Files.Join (Dir, Name);
+      begin
+         if Fusa.Files.Exists (Full) and then not Fusa.Files.Is_Directory (Full) then
+            declare
+               Data : constant String := Fusa.Files.Read_File (Full);
+            begin
+               Entries.Append
+                 (Fusa.Zip.Zip_Entry'(Name => To_Unbounded_String (Name),
+                                      Data => To_Unbounded_String (Data)));
+            end;
+         end if;
+      end Add_If_Exists;
+   begin
+      Add_If_Exists (Fusa.Config.Config_File);
+      Add_If_Exists (Fusa.Config.Reqs_File);
+      Add_If_Exists ("fusa-report.json");
+      Add_If_Exists ("qualify-report.json");
+      Add_If_Exists ("sbom.json");
+      Add_If_Exists ("provenance.json");
+      Add_If_Exists ("artifact-manifest.json");
+
+      declare
+         W : Fusa.Json.Writer.Instance;
+      begin
+         W.Object_Start;
+         Fusa.Report.Write_Header (W, "audit-manifest");
+         W.Key ("files");
+         W.Array_Start;
+         for E of Entries loop
+            W.Object_Start;
+            W.Field ("path", To_String (E.Name));
+            W.Field ("size", Natural (Length (E.Data)));
+            W.Field ("sha256", Fusa.Sha256.Hex_Digest (To_String (E.Data)));
+            W.Object_End;
+         end loop;
+         W.Array_End;
+         W.Object_End;
+         Entries.Append
+           (Fusa.Zip.Zip_Entry'(Name => To_Unbounded_String ("manifest.json"),
+                                Data => To_Unbounded_String (Fusa.Json.Writer.To_String (W))));
+      end;
+
+      Fusa.Zip.Write_Zip (Out_Path, Entries);
+      Ada.Text_IO.Put_Line ("wrote " & Out_Path);
+      return Exit_Ok;
+   end Cmd_Audit_Pack;
+
+   ----------------------------------------------------------------------
+   --  report
+   ----------------------------------------------------------------------
+
+   function Cmd_Report (Args : String_List) return Integer is
+      Dir    : constant String := Dir_Of (Args);
+      Format : constant String := Flag_Value (Args, "--format", "text");
+   begin
+      if Has_Flag (Args, "--strict") then
+         Ada.Text_IO.Put_Line
+           (Ada.Text_IO.Standard_Error,
+            "ada-FuSa: report: --strict is not a valid flag for report");
+         return Exit_Usage;
+      end if;
+      if Format /= "text" and then Format /= "json" and then Format /= "sarif" then
+         Ada.Text_IO.Put_Line
+           (Ada.Text_IO.Standard_Error,
+            "ada-FuSa: report: unsupported --format '" & Format &
+            "' (supported: text, json, sarif)");
+         return Exit_Usage;
+      end if;
+
+      declare
+         Cfg : Fusa.Config.Project_Config;
+      begin
+         begin
+            Cfg := Fusa.Config.Load (Dir);
+         exception
+            when Fusa.Config.No_Config_Error =>
+               return Emit_Runtime_Error
+                 (Args, "report", "no-config", "no .fusa.json found in " & Dir);
+            when Fusa.Config.Invalid_Config_Error =>
+               return Emit_Runtime_Error
+                 (Args, "report", "invalid-config", "invalid .fusa.json in " & Dir);
+         end;
+
+         declare
+            Files    : constant String_List := Fusa.Source_Scan.Find_Source_Files (Dir, Cfg);
+            Findings : constant Finding_List := Fusa.Engine.Run_All (Dir, Files);
+         begin
+            if Format = "json" then
+               declare
+                  W : Fusa.Json.Writer.Instance;
+               begin
+                  W.Object_Start;
+                  Fusa.Report.Write_Header (W, "report");
+                  Fusa.Report.Write_Report_Extension
+                    (W, Dir, To_String (Cfg.Name), To_String (Cfg.Standard),
+                     To_String (Cfg.Asil), To_String (Cfg.Sil), To_String (Cfg.Dal));
+                  Fusa.Report.Write_Findings_Array (W, Findings);
+                  Fusa.Report.Write_Summary (W, Findings);
+                  W.Object_End;
+                  Emit (Args, Fusa.Json.Writer.To_String (W));
+               end;
+            elsif Format = "sarif" then
+               Emit (Args, Fusa.Report.Render_Sarif (Findings));
+            else
+               Emit (Args, Fusa.Report.Render_Text (Findings));
+            end if;
+         end;
+      end;
+      return Exit_Ok;
+   end Cmd_Report;
+
+   ----------------------------------------------------------------------
+   --  Usage / dispatch
+   ----------------------------------------------------------------------
+
+   procedure Print_Usage is
+   begin
+      Ada.Text_IO.Put_Line (Ada.Text_IO.Standard_Error,
+        "usage: adafusa <command> [options]" & ASCII.LF &
+        "commands: version capabilities init check trace qualify release audit-pack report");
+   end Print_Usage;
+
+   function Run (Args : String_List) return Integer is
+   begin
+      if Args.Is_Empty then
+         Ada.Text_IO.Put_Line (Ada.Text_IO.Standard_Error, "ada-FuSa: missing command");
+         Print_Usage;
+         return Exit_Usage;
+      end if;
+
+      declare
+         Cmd  : constant String := Args.Element (1);
+         Rest : String_List := Args;
+      begin
+         Rest.Delete_First;
+
+         if Cmd = "version" then
+            return Cmd_Version (Rest);
+         elsif Cmd = "capabilities" then
+            return Cmd_Capabilities (Rest);
+         elsif Cmd = "init" then
+            return Cmd_Init (Rest);
+         elsif Cmd = "check" then
+            return Cmd_Check (Rest);
+         elsif Cmd = "trace" then
+            return Cmd_Trace (Rest);
+         elsif Cmd = "qualify" then
+            return Cmd_Qualify (Rest);
+         elsif Cmd = "release" then
+            return Cmd_Release (Rest);
+         elsif Cmd = "audit-pack" then
+            return Cmd_Audit_Pack (Rest);
+         elsif Cmd = "report" then
+            return Cmd_Report (Rest);
+         elsif Cmd = "--help" or else Cmd = "-h" or else Cmd = "help" then
+            Print_Usage;
+            return Exit_Ok;
+         else
+            Ada.Text_IO.Put_Line
+              (Ada.Text_IO.Standard_Error, "ada-FuSa: unknown command '" & Cmd & "'");
+            Print_Usage;
+            return Exit_Usage;
+         end if;
+      end;
+   end Run;
+
+end Fusa.Cli;

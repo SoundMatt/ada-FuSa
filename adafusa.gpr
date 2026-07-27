@@ -1,0 +1,31 @@
+project Adafusa is
+
+   for Languages use ("Ada");
+   for Source_Dirs use ("src");
+   for Object_Dir use "obj";
+   for Exec_Dir use "bin";
+   for Main use ("adafusa_main.adb");
+
+   package Builder is
+      for Executable ("adafusa_main.adb") use "adafusa";
+   end Builder;
+
+   package Compiler is
+      for Default_Switches ("Ada") use
+        ("-gnatwa",   --  all warnings
+         "-gnatVa",   --  all validity checks
+         "-gnaty",    --  default style checks
+         "-gnat2022", --  Ada 2022
+         "-O2",
+         "-g");
+   end Compiler;
+
+   package Binder is
+      for Default_Switches ("Ada") use ("-Es"); --  symbolic tracebacks
+   end Binder;
+
+   package Linker is
+      for Default_Switches ("Ada") use ("-static-libgcc");
+   end Linker;
+
+end Adafusa;
