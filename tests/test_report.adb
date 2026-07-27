@@ -77,6 +77,7 @@ begin
       Findings.Append
         (Make_Finding ("ADA001", Error, "e", Make_Location ("a.adb")));
       W.Object_Start;
+      --  fusa:test REQ-003
       Fusa.Report.Write_Header (W, "check-report");
       Fusa.Report.Write_Report_Extension (W, "/root", "proj", "iso26262", "ASIL-B", "", "");
       Fusa.Report.Write_Findings_Array (W, Findings);

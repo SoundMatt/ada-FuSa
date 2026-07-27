@@ -31,6 +31,7 @@ begin
    begin
       Files.Append ("src/a.ads");
       declare
+         --  fusa:test REQ-016
          Tags : constant Fusa.Annotations.Tag_List :=
            Fusa.Annotations.Scan (Root, Files, Findings);
          Req_001_Impl, Req_001_Sec, Req_002_Impl : Natural := 0;
@@ -54,6 +55,35 @@ begin
          for F of Findings loop
             Check (F.Severity = Warning, "malformed annotation findings are WARNING");
          end loop;
+      end;
+   end;
+
+   --  Regression: the marker used to be matched anywhere in the raw line
+   --  text, so it false-positived on string literals containing example
+   --  annotation text (e.g. test fixtures) and on doc comments describing
+   --  the annotation syntax itself (e.g. this very package's own header).
+   Fusa.Files.Write_File
+     (Root & "/src/b.adb",
+      "procedure B is" & ASCII.LF &
+      "   S : constant String := ""   -- fusa:req REQ-999"";" & ASCII.LF &
+      "   --  see the annotation syntax: -- fusa:test <ID>" & ASCII.LF &
+      "begin" & ASCII.LF & "   null;" & ASCII.LF & "end B;" & ASCII.LF);
+
+   declare
+      Files    : String_List;
+      Findings : Finding_List;
+   begin
+      Files.Append ("src/b.adb");
+      declare
+         Tags : constant Fusa.Annotations.Tag_List :=
+           Fusa.Annotations.Scan (Root, Files, Findings);
+      begin
+         Check (Tags.Is_Empty,
+                "marker text inside a string literal or doc-comment prose "
+                & "does not produce a tag");
+         Check (Findings.Is_Empty,
+                "marker text inside a string literal or doc-comment prose "
+                & "does not produce a spurious malformed-annotation warning either");
       end;
    end;
 

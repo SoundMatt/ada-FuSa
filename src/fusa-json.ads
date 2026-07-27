@@ -49,6 +49,7 @@ package Fusa.Json is
    --  Parses Text as a single JSON document. Raises Json_Error with a
    --  human-readable message (including a 1-based character position) on
    --  malformed input.
+   --  fusa:req REQ-018
    function Parse (Text : String) return Value_Access;
 
    --  ── Fail-safe accessors (mirror java-FuSa's Json.str/obj/arr helpers) ──

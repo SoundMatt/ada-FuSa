@@ -33,6 +33,7 @@ begin
    Check (Fusa.Derive_Category ("") = Fusa.Other, "empty rule id -> other category");
 
    --  Image() for every enum literal (not just the ones exercised above).
+   --  fusa:test REQ-002
    Check (Fusa.Image (Fusa.Info) = "INFO", "Severity Image: INFO");
    Check (Fusa.Image (Fusa.Warning) = "WARNING", "Severity Image: WARNING");
    Check (Fusa.Image (Fusa.Error) = "ERROR", "Severity Image: ERROR");
@@ -68,6 +69,7 @@ begin
       F3 : constant Finding :=
         Make_Finding ("ADA002", Error, "bad thing", Make_Location ("src/x.adb", 10));
    begin
+      --  fusa:test REQ-004
       Check (Length (F1.Fingerprint) = 71, --  "sha256:" (7) + 64 hex chars
              "fingerprint has the expected 'sha256:' + 64-hex-char length");
       Check (F1.Fingerprint = F2.Fingerprint,

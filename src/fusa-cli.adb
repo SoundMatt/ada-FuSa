@@ -34,10 +34,13 @@ package body Fusa.Cli is
          begin
             if A = Name and then I < Natural (Args.Length) then
                return Args.Element (I + 1);
-            elsif A'Length > Name'Length + 1
+            elsif A'Length >= Name'Length + 1
               and then A (A'First .. A'First + Name'Length - 1) = Name
               and then A (A'First + Name'Length) = '='
             then
+               --  A'Length = Name'Length + 1 means "--flag=" with nothing
+               --  after the '=' -- the slice below is then a legal null
+               --  range, correctly yielding "".
                return A (A'First + Name'Length + 1 .. A'Last);
             end if;
          end;
@@ -48,7 +51,7 @@ package body Fusa.Cli is
    function Has_Flag (Args : String_List; Name : String) return Boolean is
    begin
       for A of Args loop
-         if A = Name then
+         if A = Name or else A = Name & "=true" then
             return True;
          end if;
       end loop;
@@ -96,6 +99,13 @@ package body Fusa.Cli is
          end;
       else
          Ada.Text_IO.Put_Line (Ada.Text_IO.Standard_Error, "ada-FuSa: " & Message);
+         declare
+            Out_File : constant String := Flag_Value (Args, "--output", "");
+         begin
+            if Out_File'Length > 0 then
+               Fusa.Files.Write_File (Out_File, "ada-FuSa: " & Message & ASCII.LF);
+            end if;
+         end;
       end if;
       return Exit_Runtime;
    end Emit_Runtime_Error;
@@ -104,6 +114,7 @@ package body Fusa.Cli is
    --  version
    ----------------------------------------------------------------------
 
+   --  fusa:req REQ-007
    function Cmd_Version (Args : String_List) return Integer is
    begin
       if Flag_Value (Args, "--format", "text") = "json" then
@@ -127,6 +138,7 @@ package body Fusa.Cli is
    --  capabilities
    ----------------------------------------------------------------------
 
+   --  fusa:req REQ-008
    function Cmd_Capabilities (Args : String_List) return Integer is
       W : Fusa.Json.Writer.Instance;
    begin
@@ -173,6 +185,7 @@ package body Fusa.Cli is
    --  init
    ----------------------------------------------------------------------
 
+   --  fusa:req REQ-009
    function Cmd_Init (Args : String_List) return Integer is
       Dir   : constant String := Dir_Of (Args);
       Force : constant Boolean := Has_Flag (Args, "--force");
@@ -279,6 +292,7 @@ package body Fusa.Cli is
    --  check
    ----------------------------------------------------------------------
 
+   --  fusa:req REQ-010
    function Cmd_Check (Args : String_List) return Integer is
       Dir    : constant String := Dir_Of (Args);
       Format : constant String := Flag_Value (Args, "--format", "text");
@@ -350,6 +364,7 @@ package body Fusa.Cli is
    --  trace
    ----------------------------------------------------------------------
 
+   --  fusa:req REQ-011
    function Cmd_Trace (Args : String_List) return Integer is
       Dir    : constant String := Dir_Of (Args);
       Format : constant String := Flag_Value (Args, "--format", "text");
@@ -454,16 +469,38 @@ package body Fusa.Cli is
                Sec_Threshold  : Natural := 0;
                Gate_Fail      : Boolean := False;
             begin
-               if Strict and then Req_Cov_Str'Length = 0 and then Sec_Tested_Str'Length = 0 then
-                  Req_Threshold := 100;
-                  Sec_Threshold := 100;
-               else
-                  if Req_Cov_Str'Length > 0 then
+               --  Each threshold is parsed (and, under --strict, defaulted
+               --  to 100) independently of the other -- --strict must not
+               --  silently drop the implicit 100% default for one axis
+               --  just because the other axis got an explicit value.
+               if Req_Cov_Str'Length > 0 then
+                  begin
                      Req_Threshold := Natural'Value (Req_Cov_Str);
-                  end if;
-                  if Sec_Tested_Str'Length > 0 then
+                  exception
+                     when Constraint_Error =>
+                        Ada.Text_IO.Put_Line
+                          (Ada.Text_IO.Standard_Error,
+                           "ada-FuSa: trace: --req-coverage must be a " &
+                           "non-negative integer");
+                        return Exit_Usage;
+                  end;
+               elsif Strict then
+                  Req_Threshold := 100;
+               end if;
+
+               if Sec_Tested_Str'Length > 0 then
+                  begin
                      Sec_Threshold := Natural'Value (Sec_Tested_Str);
-                  end if;
+                  exception
+                     when Constraint_Error =>
+                        Ada.Text_IO.Put_Line
+                          (Ada.Text_IO.Standard_Error,
+                           "ada-FuSa: trace: --sec-tested must be a " &
+                           "non-negative integer");
+                        return Exit_Usage;
+                  end;
+               elsif Strict then
+                  Sec_Threshold := 100;
                end if;
 
                if Req_Threshold > 0 and then Req_Cov_Pct < Req_Threshold then
@@ -576,6 +613,7 @@ package body Fusa.Cli is
    end record;
    package Case_Vectors is new Ada.Containers.Indefinite_Vectors (Positive, Case_Result);
 
+   --  fusa:req REQ-012
    function Cmd_Qualify (Args : String_List) return Integer is
       Dir      : constant String := Dir_Of (Args);
       Format   : constant String := Flag_Value (Args, "--format", "text");
@@ -618,6 +656,12 @@ package body Fusa.Cli is
          return Exit_Usage;
       end if;
 
+      --  Self-heal from a prior interrupted run (Ctrl-C, crash, disk full,
+      --  etc. between Create_Path and the end-of-run Delete_Tree below)
+      --  that left a stale fixture behind -- not just at the end.
+      if Ada.Directories.Exists (Tmp) then
+         Ada.Directories.Delete_Tree (Tmp);
+      end if;
       Ada.Directories.Create_Path (Tmp);
 
       Check_Rule ("ADA001",
@@ -690,7 +734,7 @@ package body Fusa.Cli is
             end if;
          end;
 
-         if Format /= "json" then
+         if Format /= "json" and then Out_Path'Length = 0 then
             declare
                Buf : Unbounded_String := Null_Unbounded_String;
             begin
@@ -716,6 +760,7 @@ package body Fusa.Cli is
 
    function Cmd_Audit_Pack (Args : String_List) return Integer;
 
+   --  fusa:req REQ-013
    function Cmd_Release (Args : String_List) return Integer is
       Dir        : constant String := Dir_Of (Args);
       Output_Dir : constant String := Flag_Value (Args, "--output-dir", Dir);
@@ -798,6 +843,7 @@ package body Fusa.Cli is
    --  audit-pack
    ----------------------------------------------------------------------
 
+   --  fusa:req REQ-014
    function Cmd_Audit_Pack (Args : String_List) return Integer is
       Dir      : constant String := Dir_Of (Args);
       Out_Path : constant String :=
@@ -856,6 +902,7 @@ package body Fusa.Cli is
    --  report
    ----------------------------------------------------------------------
 
+   --  fusa:req REQ-015
    function Cmd_Report (Args : String_List) return Integer is
       Dir    : constant String := Dir_Of (Args);
       Format : constant String := Flag_Value (Args, "--format", "text");

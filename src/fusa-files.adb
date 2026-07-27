@@ -50,32 +50,75 @@ package body Fusa.Files is
       Close (File);
    end Write_File;
 
-   function Join (Dir, Name : String) return String is
+   --  Removes "." path segments (a bare "." segment, e.g. from "./src" or
+   --  "src/./sub") and collapses repeated "/" separators, so a sourceDirs
+   --  entry like "./src" produces the same relative paths as plain "src"
+   --  would, rather than leaking a literal "./" into every Loc.File value
+   --  built from it.
+   function Normalize_Dot_Segments (Path : String) return String is
+      Result        : String (1 .. Path'Length);
+      Out_Len       : Natural := 0;
+      I             : Positive;
+      Leading_Slash : constant Boolean :=
+        Path'Length > 0 and then Path (Path'First) = '/';
    begin
-      if Dir'Length = 0 then
-         return Name;
-      elsif Dir (Dir'Last) = '/' then
-         return Dir & Name;
-      else
-         return Dir & "/" & Name;
+      if Path'Length = 0 then
+         return Path;
       end if;
+      if Leading_Slash then
+         Out_Len := 1;
+         Result (1) := '/';
+         I := Path'First + 1;
+      else
+         I := Path'First;
+      end if;
+      while I <= Path'Last loop
+         declare
+            Seg_Start : constant Positive := I;
+         begin
+            while I <= Path'Last and then Path (I) /= '/' loop
+               I := I + 1;
+            end loop;
+            declare
+               Seg : constant String := Path (Seg_Start .. I - 1);
+            begin
+               if Seg /= "." and then Seg'Length > 0 then
+                  if Out_Len > 0 and then Result (Out_Len) /= '/' then
+                     Out_Len := Out_Len + 1;
+                     Result (Out_Len) := '/';
+                  end if;
+                  Result (Out_Len + 1 .. Out_Len + Seg'Length) := Seg;
+                  Out_Len := Out_Len + Seg'Length;
+               end if;
+            end;
+            if I <= Path'Last then
+               I := I + 1; --  skip the separating '/'
+            end if;
+         end;
+      end loop;
+      return Result (1 .. Out_Len);
+   end Normalize_Dot_Segments;
+
+   function Join (Dir, Name : String) return String is
+      Raw : constant String :=
+        (if Dir'Length = 0 then Name
+         elsif Dir (Dir'Last) = '/' then Dir & Name
+         else Dir & "/" & Name);
+   begin
+      return Normalize_Dot_Segments (Raw);
    end Join;
 
    function Relative_To (Root, Path : String) return String is
    begin
+      --  A prefix match alone is not enough: Root="/foo/bar" must not be
+      --  treated as a prefix of the unrelated sibling Path="/foo/barbaz/x"
+      --  just because the characters happen to match -- the character
+      --  immediately after the matched prefix must be a path separator.
       if Path'Length > Root'Length
         and then Path (Path'First .. Path'First + Root'Length - 1) = Root
+        and then Path (Path'First + Root'Length) = '/'
       then
-         declare
-            Rest : constant String :=
-              Path (Path'First + Root'Length .. Path'Last);
-         begin
-            if Rest'Length > 0 and then Rest (Rest'First) = '/' then
-               return Rest (Rest'First + 1 .. Rest'Last);
-            else
-               return Rest;
-            end if;
-         end;
+         return Path (Path'First + Root'Length + 1 .. Path'Last);
       end if;
       return Path;
    end Relative_To;

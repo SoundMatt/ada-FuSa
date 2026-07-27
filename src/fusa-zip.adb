@@ -19,6 +19,23 @@ package body Fusa.Zip is
       end loop;
    end Put_U32;
 
+   --  True if Name contains any byte >= 0x80 (a UTF-8 multi-byte sequence,
+   --  per this codebase's "Character = one raw byte" convention).
+   function Has_Non_Ascii (Name : String) return Boolean is
+   begin
+      for C of Name loop
+         if Character'Pos (C) >= 16#80# then
+            return True;
+         end if;
+      end loop;
+      return False;
+   end Has_Non_Ascii;
+
+   --  PKZIP APPNOTE general-purpose bit 11 ("Language encoding flag /
+   --  EFS"): tells readers the filename is UTF-8, not the local codepage.
+   function Zip_Flags (Name : String) return Unsigned_16 is
+     (if Has_Non_Ascii (Name) then 16#0800# else 0);
+
    procedure Write_Zip (Path : String; Entries : Entry_List) is
       Buf     : Unbounded_String := Null_Unbounded_String;
       Count   : constant Natural := Natural (Entries.Length);
@@ -37,7 +54,7 @@ package body Fusa.Zip is
             Crcs (Idx) := Crc;
             Put_U32 (Buf, 16#0403_4b50#);              --  local file header sig
             Put_U16 (Buf, 20);                          --  version needed
-            Put_U16 (Buf, 0);                            --  flags
+            Put_U16 (Buf, Zip_Flags (Name));             --  flags
             Put_U16 (Buf, 0);                            --  method: stored
             Put_U16 (Buf, 0);                            --  mod time
             Put_U16 (Buf, 16#21#);                       --  mod date (1980-01-01)
@@ -63,7 +80,7 @@ package body Fusa.Zip is
                Put_U32 (Buf, 16#0201_4b50#);            --  central dir header sig
                Put_U16 (Buf, 20);                        --  version made by
                Put_U16 (Buf, 20);                        --  version needed
-               Put_U16 (Buf, 0);                          --  flags
+               Put_U16 (Buf, Zip_Flags (Name));           --  flags
                Put_U16 (Buf, 0);                          --  method: stored
                Put_U16 (Buf, 0);                          --  mod time
                Put_U16 (Buf, 16#21#);                     --  mod date

@@ -3,6 +3,7 @@ with Test_Framework; use Test_Framework;
 
 procedure Test_Sha256 is
 begin
+   --  fusa:test REQ-019
    Check (Fusa.Sha256.Hex_Digest ("") =
             "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
           "sha256('') matches known vector");

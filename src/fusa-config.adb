@@ -68,6 +68,12 @@ package body Fusa.Config is
                Cfg.Name    := To_Unbounded_String (Fusa.Json.Get_String (Proj, "name"));
                Cfg.Version :=
                  To_Unbounded_String (Fusa.Json.Get_String (Proj, "version", "0.1.0"));
+            elsif Proj /= null then
+               --  Present, but neither the legacy string form nor the
+               --  nested object form -- distinguish this from "absent" so
+               --  the error doesn't misleadingly say "missing".
+               raise Invalid_Config_Error with
+                 "'project' must be a string or an object in " & To_String (Path);
             end if;
 
             Cfg.Standard :=
@@ -232,6 +238,23 @@ package body Fusa.Config is
                         R.Parent   := To_Unbounded_String (Fusa.Json.Get_String (Item, "parent"));
                         Result.Append (R);
                      end if;
+                  else
+                     --  A missing/empty/non-string id is just as much a
+                     --  spec violation as a duplicate id (both are MUST
+                     --  "id" requirements per §1.2) -- it must not vanish
+                     --  silently with zero diagnostic output.
+                     Findings.Append
+                       (Make_Finding
+                          (Rule_Id     => "REQ002",
+                           Severity    => Error,
+                           Message     =>
+                             "requirement at index" & Integer'Image (I) &
+                             " has a missing, empty, or non-string id in " &
+                             Reqs_File,
+                           Loc         => Make_Location (Rel),
+                           Category    => Fusa.Requirement,
+                           Remediation =>
+                             "give this requirement a non-empty string ""id"""));
                   end if;
                end;
             end loop;

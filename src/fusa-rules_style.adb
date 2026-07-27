@@ -6,6 +6,46 @@ package body Fusa.Rules_Style is
 
    Max_Line_Length : constant := 79; --  AQSG-recommended line length limit
 
+   --  How many lines after the matched one a "-- fusa:unsafe" justification
+   --  may appear on and still suppress the finding -- covers a pragma or
+   --  statement that was wrapped (e.g. to satisfy ADA005's line-length
+   --  limit) with its justification comment on the following line.
+   Suppress_Lookahead : constant := 2;
+
+   --  Uppercases and collapses whitespace runs to a single space, so
+   --  substring matching against Ada source is both case-insensitive
+   --  (Ada keywords/identifiers are case-insensitive by language
+   --  definition -- "PRAGMA SUPPRESS" is exactly as legal as
+   --  "pragma Suppress") and tolerant of extra alignment whitespace
+   --  (e.g. "when   others   =>").
+   function Normalize_For_Match (S : String) return String is
+      Result   : String (1 .. S'Length);
+      Out_Len  : Natural := 0;
+      In_Space : Boolean := False;
+   begin
+      for C of S loop
+         declare
+            Uc : Character := C;
+         begin
+            if Uc in 'a' .. 'z' then
+               Uc := Character'Val (Character'Pos (Uc) - 32);
+            end if;
+            if Uc = ' ' or else Uc = ASCII.HT then
+               if not In_Space and then Out_Len > 0 then
+                  Out_Len := Out_Len + 1;
+                  Result (Out_Len) := ' ';
+               end if;
+               In_Space := True;
+            else
+               Out_Len := Out_Len + 1;
+               Result (Out_Len) := Uc;
+               In_Space := False;
+            end if;
+         end;
+      end loop;
+      return Result (1 .. Out_Len);
+   end Normalize_For_Match;
+
    function Scan_Substring
      (Project_Root      : String;
       Files             : String_List;
@@ -16,7 +56,8 @@ package body Fusa.Rules_Style is
       Remediation       : String;
       Require_No_Unsafe : Boolean) return Finding_List
    is
-      Result : Finding_List;
+      Result      : Finding_List;
+      Norm_Needle : constant String := Normalize_For_Match (Needle);
    begin
       for Rel of Files loop
          declare
@@ -26,24 +67,43 @@ package body Fusa.Rules_Style is
                declare
                   Content : constant String := Fusa.Files.Read_File (Full);
                   Lines   : constant String_List := Fusa.Files.Split_Lines (Content);
-                  Line_No : Positive := 1;
                begin
-                  for Line of Lines loop
-                     if Ada.Strings.Fixed.Index (Line, Needle) > 0
-                       and then
-                         (not Require_No_Unsafe
-                          or else Ada.Strings.Fixed.Index (Line, "fusa:unsafe") = 0)
-                     then
-                        Result.Append
-                          (Make_Finding
-                             (Rule_Id     => Rule_Id,
-                              Severity    => Severity,
-                              Message     => Message,
-                              Loc         => Make_Location (Rel, Line_No),
-                              Category    => Derive_Category (Rule_Id),
-                              Remediation => Remediation));
-                     end if;
-                     Line_No := Line_No + 1;
+                  for I in 1 .. Natural (Lines.Length) loop
+                     declare
+                        Line : constant String := Lines.Element (I);
+                     begin
+                        if Ada.Strings.Fixed.Index
+                             (Normalize_For_Match (Line), Norm_Needle) > 0
+                        then
+                           declare
+                              Suppressed : Boolean := False;
+                           begin
+                              if Require_No_Unsafe then
+                                 for J in I .. Natural'Min
+                                   (I + Suppress_Lookahead, Natural (Lines.Length))
+                                 loop
+                                    if Ada.Strings.Fixed.Index
+                                         (Lines.Element (J), "fusa:unsafe") > 0
+                                    then
+                                       Suppressed := True;
+                                       exit;
+                                    end if;
+                                 end loop;
+                              end if;
+
+                              if not Suppressed then
+                                 Result.Append
+                                   (Make_Finding
+                                      (Rule_Id     => Rule_Id,
+                                       Severity    => Severity,
+                                       Message     => Message,
+                                       Loc         => Make_Location (Rel, I),
+                                       Category    => Derive_Category (Rule_Id),
+                                       Remediation => Remediation));
+                              end if;
+                           end;
+                        end if;
+                     end;
                   end loop;
                end;
             end if;

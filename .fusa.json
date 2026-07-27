@@ -1,0 +1,8 @@
+{
+  "configVersion": "1.0",
+  "project": {
+    "name": "ada-fusa",
+    "version": "0.1.0"
+  },
+  "standard": "generic"
+}

@@ -2,14 +2,24 @@ with Ada.Strings.Unbounded; use Ada.Strings.Unbounded;
 
 package body Fusa.Json is
 
+   --  Recursion-depth bound: .fusa.json/.fusa-reqs.json are external files
+   --  this tool reads, so a malformed or adversarial deeply-nested input
+   --  must not be able to blow the stack (STORAGE_ERROR) -- it should
+   --  raise the documented Json_Error instead.
+   Max_Nesting_Depth : constant := 500;
+
    procedure Expect (S : String; Pos : in out Positive; Ch : Character);
    procedure Skip_Ws (S : String; Pos : in out Positive);
-   function Parse_Value (S : String; Pos : in out Positive) return Value_Access;
-   function Parse_Object (S : String; Pos : in out Positive) return Value_Access;
-   function Parse_Array (S : String; Pos : in out Positive) return Value_Access;
+   function Parse_Value
+     (S : String; Pos : in out Positive; Depth : Natural) return Value_Access;
+   function Parse_Object
+     (S : String; Pos : in out Positive; Depth : Natural) return Value_Access;
+   function Parse_Array
+     (S : String; Pos : in out Positive; Depth : Natural) return Value_Access;
    function Parse_String_Literal
      (S : String; Pos : in out Positive) return Unbounded_String;
    function Parse_Number (S : String; Pos : in out Positive) return Value_Access;
+   function Parse_Hex4 (S : String; Pos : in out Positive) return Natural;
    procedure Append_Utf8 (Result : in out Unbounded_String; Code : Natural);
 
    ----------------------------------------------------------------------
@@ -33,6 +43,9 @@ package body Fusa.Json is
       end loop;
    end Skip_Ws;
 
+   --  §4.2's UTF-8 encoder, extended to the full Unicode range (4-byte
+   --  sequences for codepoints above 0xFFFF, reachable once combined
+   --  surrogate pairs are supported -- see Parse_String_Literal).
    procedure Append_Utf8 (Result : in out Unbounded_String; Code : Natural) is
    begin
       if Code <= 16#7F# then
@@ -40,12 +53,48 @@ package body Fusa.Json is
       elsif Code <= 16#7FF# then
          Append (Result, Character'Val (16#C0# + Code / 64));
          Append (Result, Character'Val (16#80# + Code mod 64));
-      else
+      elsif Code <= 16#FFFF# then
          Append (Result, Character'Val (16#E0# + Code / 4096));
+         Append (Result, Character'Val (16#80# + (Code / 64) mod 64));
+         Append (Result, Character'Val (16#80# + Code mod 64));
+      else
+         Append (Result, Character'Val (16#F0# + Code / 262144));
+         Append (Result, Character'Val (16#80# + (Code / 4096) mod 64));
          Append (Result, Character'Val (16#80# + (Code / 64) mod 64));
          Append (Result, Character'Val (16#80# + Code mod 64));
       end if;
    end Append_Utf8;
+
+   --  Reads exactly 4 hex digits at Pos, advances Pos past them, and
+   --  returns their value. Raises Json_Error on insufficient length or an
+   --  invalid hex digit.
+   function Parse_Hex4 (S : String; Pos : in out Positive) return Natural is
+      Code : Natural := 0;
+   begin
+      if Pos + 3 > S'Last then
+         raise Json_Error with "invalid \u escape";
+      end if;
+      for I in 0 .. 3 loop
+         declare
+            Hc : constant Character := S (Pos + I);
+            D  : Natural;
+         begin
+            case Hc is
+               when '0' .. '9' =>
+                  D := Character'Pos (Hc) - Character'Pos ('0');
+               when 'a' .. 'f' =>
+                  D := Character'Pos (Hc) - Character'Pos ('a') + 10;
+               when 'A' .. 'F' =>
+                  D := Character'Pos (Hc) - Character'Pos ('A') + 10;
+               when others =>
+                  raise Json_Error with "invalid hex digit in \u escape";
+            end case;
+            Code := Code * 16 + D;
+         end;
+      end loop;
+      Pos := Pos + 4;
+      return Code;
+   end Parse_Hex4;
 
    function Parse_String_Literal
      (S : String; Pos : in out Positive) return Unbounded_String
@@ -82,32 +131,44 @@ package body Fusa.Json is
                   when 't'    => Append (Result, ASCII.HT);  Pos := Pos + 1;
                   when 'u' =>
                      Pos := Pos + 1;
-                     if Pos + 3 > S'Last then
-                        raise Json_Error with "invalid \u escape";
-                     end if;
                      declare
-                        Code : Natural := 0;
+                        Code : constant Natural := Parse_Hex4 (S, Pos);
                      begin
-                        for I in 0 .. 3 loop
-                           declare
-                              Hc : constant Character := S (Pos + I);
-                              D  : Natural;
-                           begin
-                              case Hc is
-                                 when '0' .. '9' =>
-                                    D := Character'Pos (Hc) - Character'Pos ('0');
-                                 when 'a' .. 'f' =>
-                                    D := Character'Pos (Hc) - Character'Pos ('a') + 10;
-                                 when 'A' .. 'F' =>
-                                    D := Character'Pos (Hc) - Character'Pos ('A') + 10;
-                                 when others =>
-                                    raise Json_Error with "invalid hex digit in \u escape";
-                              end case;
-                              Code := Code * 16 + D;
-                           end;
-                        end loop;
-                        Pos := Pos + 4;
-                        Append_Utf8 (Result, Code);
+                        if Code in 16#D800# .. 16#DBFF# then
+                           --  High surrogate: must be immediately followed
+                           --  by a "\uXXXX" low surrogate to combine into
+                           --  a single codepoint above the BMP. A lone,
+                           --  unpaired surrogate can never be validly
+                           --  represented in UTF-8, so it's rejected.
+                           if Pos + 1 <= S'Last
+                             and then S (Pos) = '\' and then S (Pos + 1) = 'u'
+                           then
+                              declare
+                                 Low_Pos : Positive := Pos + 2;
+                                 Low     : constant Natural := Parse_Hex4 (S, Low_Pos);
+                              begin
+                                 if Low in 16#DC00# .. 16#DFFF# then
+                                    Pos := Low_Pos;
+                                    Append_Utf8
+                                      (Result,
+                                       16#10000# +
+                                         (Code - 16#D800#) * 16#400# +
+                                         (Low - 16#DC00#));
+                                 else
+                                    raise Json_Error with
+                                      "unpaired UTF-16 high surrogate in \u escape";
+                                 end if;
+                              end;
+                           else
+                              raise Json_Error with
+                                "unpaired UTF-16 high surrogate in \u escape";
+                           end if;
+                        elsif Code in 16#DC00# .. 16#DFFF# then
+                           raise Json_Error with
+                             "unpaired UTF-16 low surrogate in \u escape";
+                        else
+                           Append_Utf8 (Result, Code);
+                        end if;
                      end;
                   when others =>
                      raise Json_Error with "invalid escape character";
@@ -121,6 +182,13 @@ package body Fusa.Json is
       return Result;
    end Parse_String_Literal;
 
+   --  RFC 8259 §6 number grammar: optional '-', an integer part that is
+   --  either a single '0' or a nonzero digit followed by digits (a
+   --  leading zero followed by more digits, e.g. "01", is invalid), an
+   --  optional '.' fraction requiring at least one digit, and an optional
+   --  'e'/'E' exponent requiring at least one digit (after an optional
+   --  sign) -- "1e" / "1e+" / "1." are all rejected rather than handed to
+   --  Long_Float'Value, which would raise an unguarded CONSTRAINT_ERROR.
    function Parse_Number (S : String; Pos : in out Positive) return Value_Access is
       Start : constant Positive := Pos;
    begin
@@ -130,24 +198,46 @@ package body Fusa.Json is
       if Pos > S'Last or else S (Pos) not in '0' .. '9' then
          raise Json_Error with "invalid number at position" & Positive'Image (Pos);
       end if;
-      while Pos <= S'Last and then S (Pos) in '0' .. '9' loop
+
+      if S (Pos) = '0' then
          Pos := Pos + 1;
-      end loop;
-      if Pos <= S'Last and then S (Pos) = '.' then
-         Pos := Pos + 1;
+         if Pos <= S'Last and then S (Pos) in '0' .. '9' then
+            raise Json_Error with
+              "invalid number: leading zero at position" & Positive'Image (Pos);
+         end if;
+      else
          while Pos <= S'Last and then S (Pos) in '0' .. '9' loop
             Pos := Pos + 1;
          end loop;
       end if;
-      if Pos <= S'Last and then (S (Pos) = 'e' or else S (Pos) = 'E') then
+
+      if Pos <= S'Last and then S (Pos) = '.' then
          Pos := Pos + 1;
-         if Pos <= S'Last and then (S (Pos) = '+' or else S (Pos) = '-') then
-            Pos := Pos + 1;
+         if Pos > S'Last or else S (Pos) not in '0' .. '9' then
+            raise Json_Error with
+              "invalid number: expected digit after '.' at position" &
+              Positive'Image (Pos);
          end if;
          while Pos <= S'Last and then S (Pos) in '0' .. '9' loop
             Pos := Pos + 1;
          end loop;
       end if;
+
+      if Pos <= S'Last and then (S (Pos) = 'e' or else S (Pos) = 'E') then
+         Pos := Pos + 1;
+         if Pos <= S'Last and then (S (Pos) = '+' or else S (Pos) = '-') then
+            Pos := Pos + 1;
+         end if;
+         if Pos > S'Last or else S (Pos) not in '0' .. '9' then
+            raise Json_Error with
+              "invalid number: expected digit in exponent at position" &
+              Positive'Image (Pos);
+         end if;
+         while Pos <= S'Last and then S (Pos) in '0' .. '9' loop
+            Pos := Pos + 1;
+         end loop;
+      end if;
+
       declare
          V : constant Value_Access := new Value (Json_Number);
       begin
@@ -156,9 +246,14 @@ package body Fusa.Json is
       end;
    end Parse_Number;
 
-   function Parse_Object (S : String; Pos : in out Positive) return Value_Access is
+   function Parse_Object
+     (S : String; Pos : in out Positive; Depth : Natural) return Value_Access
+   is
       V : constant Value_Access := new Value (Json_Object);
    begin
+      if Depth > Max_Nesting_Depth then
+         raise Json_Error with "maximum nesting depth exceeded";
+      end if;
       Expect (S, Pos, '{');
       Skip_Ws (S, Pos);
       if Pos <= S'Last and then S (Pos) = '}' then
@@ -174,9 +269,22 @@ package body Fusa.Json is
             Expect (S, Pos, ':');
             Skip_Ws (S, Pos);
             declare
-               Val : constant Value_Access := Parse_Value (S, Pos);
+               Val   : constant Value_Access := Parse_Value (S, Pos, Depth + 1);
+               Found : Boolean := False;
             begin
-               V.Members.Append (Member'(Key => Key, Val => Val));
+               --  Last-value-wins on a duplicate key, matching common JSON
+               --  tooling (JS JSON.parse, Python json, jq) rather than
+               --  silently keeping both members.
+               for I in 1 .. Natural (V.Members.Length) loop
+                  if V.Members.Element (I).Key = Key then
+                     V.Members.Replace_Element (I, Member'(Key => Key, Val => Val));
+                     Found := True;
+                     exit;
+                  end if;
+               end loop;
+               if not Found then
+                  V.Members.Append (Member'(Key => Key, Val => Val));
+               end if;
             end;
          end;
          Skip_Ws (S, Pos);
@@ -193,9 +301,14 @@ package body Fusa.Json is
       return V;
    end Parse_Object;
 
-   function Parse_Array (S : String; Pos : in out Positive) return Value_Access is
+   function Parse_Array
+     (S : String; Pos : in out Positive; Depth : Natural) return Value_Access
+   is
       V : constant Value_Access := new Value (Json_Array);
    begin
+      if Depth > Max_Nesting_Depth then
+         raise Json_Error with "maximum nesting depth exceeded";
+      end if;
       Expect (S, Pos, '[');
       Skip_Ws (S, Pos);
       if Pos <= S'Last and then S (Pos) = ']' then
@@ -205,7 +318,7 @@ package body Fusa.Json is
       loop
          Skip_Ws (S, Pos);
          declare
-            Item : constant Value_Access := Parse_Value (S, Pos);
+            Item : constant Value_Access := Parse_Value (S, Pos, Depth + 1);
          begin
             V.Items.Append (Item);
          end;
@@ -223,16 +336,18 @@ package body Fusa.Json is
       return V;
    end Parse_Array;
 
-   function Parse_Value (S : String; Pos : in out Positive) return Value_Access is
+   function Parse_Value
+     (S : String; Pos : in out Positive; Depth : Natural) return Value_Access
+   is
    begin
       if Pos > S'Last then
          raise Json_Error with "unexpected end of input";
       end if;
       case S (Pos) is
          when '{' =>
-            return Parse_Object (S, Pos);
+            return Parse_Object (S, Pos, Depth);
          when '[' =>
-            return Parse_Array (S, Pos);
+            return Parse_Array (S, Pos, Depth);
          when '"' =>
             declare
                V : constant Value_Access := new Value (Json_String);
@@ -285,7 +400,7 @@ package body Fusa.Json is
       end if;
       Pos := Text'First;
       Skip_Ws (Text, Pos);
-      V := Parse_Value (Text, Pos);
+      V := Parse_Value (Text, Pos, 0);
       Skip_Ws (Text, Pos);
       if Pos <= Text'Last then
          raise Json_Error with "trailing data at position" & Positive'Image (Pos);

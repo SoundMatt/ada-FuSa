@@ -23,6 +23,7 @@ package Fusa.Annotations is
    --  with zero or more-than-one following token is malformed and MUST
    --  NOT be silently dropped: it is reported as a WARNING finding
    --  (category requirement) in Findings instead of producing a Tag.
+   --  fusa:req REQ-016
    function Scan
      (Project_Root : String;
       Files        : String_List;

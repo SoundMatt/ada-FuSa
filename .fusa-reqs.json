@@ -1,0 +1,124 @@
+{
+  "requirements": [
+    {
+      "id": "REQ-001",
+      "title": "x-FuSa spec §2.3 exit codes",
+      "text": "Every command returns exactly one of: 0 (ok), 1 (gate failure), 2 (usage error), 3 (runtime error).",
+      "level": "SW"
+    },
+    {
+      "id": "REQ-002",
+      "title": "x-FuSa spec §2.4 severity enum",
+      "text": "Finding severity is exactly one of ERROR, WARNING, INFO (uppercase).",
+      "level": "SW"
+    },
+    {
+      "id": "REQ-003",
+      "title": "x-FuSa spec §2.8 distinct version keys",
+      "text": "schemaVersion (report envelopes, MAJOR.MINOR) and specVersion (version/capabilities, full spec release) are never conflated into a single constant.",
+      "level": "SW"
+    },
+    {
+      "id": "REQ-004",
+      "title": "x-FuSa spec §4.2 fingerprint algorithm",
+      "text": "Finding.fingerprint = sha256:hex(ruleId US location.file US normalizedMessage), with digit runs folded to '#' and whitespace collapsed.",
+      "level": "SW"
+    },
+    {
+      "id": "REQ-005",
+      "title": "x-FuSa spec §1.2 .fusa.json load",
+      "text": "project.name and standard are read (MUST); at most one of asil/sil/dal is read; the legacy flat project string form is accepted and normalised.",
+      "level": "SW"
+    },
+    {
+      "id": "REQ-006",
+      "title": "x-FuSa spec §1.2 .fusa-reqs.json integrity",
+      "text": "A duplicate or missing/empty/non-string requirement id surfaces as an ERROR finding rather than being silently merged or dropped.",
+      "level": "SW"
+    },
+    {
+      "id": "REQ-007",
+      "title": "x-FuSa spec §9.1 version command",
+      "text": "adafusa version prints '<tool> <version>' and, under --format json, {tool, version, specVersion} with no envelope.",
+      "level": "SW"
+    },
+    {
+      "id": "REQ-008",
+      "title": "x-FuSa spec §9.1 capabilities command",
+      "text": "adafusa capabilities reports the commands, per-command formats, and standards this build actually supports.",
+      "level": "SW"
+    },
+    {
+      "id": "REQ-009",
+      "title": "x-FuSa spec §9.1 init command",
+      "text": "adafusa init creates .fusa.json and .fusa-reqs.json; --force overwrites; a missing required value with no TTY exits 2, never a placeholder.",
+      "level": "SW"
+    },
+    {
+      "id": "REQ-010",
+      "title": "x-FuSa spec §4 check command",
+      "text": "adafusa check runs every registered rule, emits a findings[] + summary, and gates (exit 1) on any open ERROR (or WARNING under --strict).",
+      "level": "SW"
+    },
+    {
+      "id": "REQ-011",
+      "title": "x-FuSa spec §5 trace command",
+      "text": "adafusa trace computes tracedRequirements/testedRequirements/secTestedRequirements and gates on --req-coverage/--sec-tested/--strict thresholds.",
+      "level": "SW"
+    },
+    {
+      "id": "REQ-012",
+      "title": "Tool qualification (qualify command)",
+      "text": "adafusa qualify runs a known-answer test against every registered rule and writes qualify-report.json.",
+      "level": "SW"
+    },
+    {
+      "id": "REQ-013",
+      "title": "Release evidence (release command)",
+      "text": "adafusa release writes sbom.json (x-FuSa SBOM v1); --full additionally writes provenance.json, artifact-manifest.json, and audit-pack.zip.",
+      "level": "SW"
+    },
+    {
+      "id": "REQ-014",
+      "title": "Evidence bundling (audit-pack command)",
+      "text": "adafusa audit-pack bundles every existing input/generated evidence file plus a manifest.json into a single flat ZIP archive.",
+      "level": "SW"
+    },
+    {
+      "id": "REQ-015",
+      "title": "x-FuSa spec §9.1 report command",
+      "text": "adafusa report re-runs analysis fresh and always exits 0 regardless of findings (only usage/runtime errors apply).",
+      "level": "SW"
+    },
+    {
+      "id": "REQ-016",
+      "title": "x-FuSa spec §1.4 annotation scanning",
+      "text": "-- fusa:req / -- fusa:test / -- fusa:sec-test comments are scanned for exactly one requirement id per line, without false-positiving on prose or string-literal content that merely mentions the marker.",
+      "level": "SW"
+    },
+    {
+      "id": "REQ-017",
+      "title": "Starter Ada coding-standard rule pack",
+      "text": "8 rules (ADA001-ADA008), drawn from the Ada Quality and Style Guide, are registered and match case-insensitively against Ada source (Ada is a case-insensitive language).",
+      "level": "SW"
+    },
+    {
+      "id": "REQ-018",
+      "title": "Zero-dependency JSON parser/writer",
+      "text": "JSON parsing and serialisation are implemented against the Ada standard library only, reject malformed input (RFC 8259) with Json_Error rather than crashing, and bound recursion depth.",
+      "level": "SW"
+    },
+    {
+      "id": "REQ-019",
+      "title": "Zero-dependency SHA-256",
+      "text": "SHA-256 (FIPS 180-4) is implemented against the Ada standard library only and matches the standard test vectors.",
+      "level": "SW"
+    },
+    {
+      "id": "REQ-020",
+      "title": "Zero-dependency ZIP writer",
+      "text": "A STORED-method ZIP archive writer is implemented against the Ada standard library only, producing archives that pass standard unzip integrity checks.",
+      "level": "SW"
+    }
+  ]
+}

@@ -1,9 +1,12 @@
 with Ada.Directories;
+with Ada.Text_IO;
+with Ada.Strings.Fixed;
 with Ada.Strings.Unbounded; use Ada.Strings.Unbounded;
 with Fusa; use Fusa;
 with Fusa.Cli;
 with Fusa.Files;
 with Fusa.Config;
+with Fusa.Source_Scan;
 with Test_Framework; use Test_Framework;
 
 procedure Test_Cli is
@@ -26,7 +29,30 @@ procedure Test_Cli is
       if A8'Length > 0 then L.Append (A8); end if;
       return L;
    end Args;
+
+   --  Redirects standard output to a temp file for the duration of Run,
+   --  so tests can assert on what a command did (or, for --output tests,
+   --  deliberately did NOT) print to stdout.
+   function Run_Capturing_Stdout
+     (A : String_List; Exit_Code : out Integer) return String
+   is
+      Capture_Path : constant String := "tmp_test_cli_stdout_capture.txt";
+      Capture_File : Ada.Text_IO.File_Type;
+   begin
+      Ada.Text_IO.Create (Capture_File, Ada.Text_IO.Out_File, Capture_Path);
+      Ada.Text_IO.Set_Output (Capture_File);
+      Exit_Code := Fusa.Cli.Run (A);
+      Ada.Text_IO.Set_Output (Ada.Text_IO.Standard_Output);
+      Ada.Text_IO.Close (Capture_File);
+      declare
+         Content : constant String := Fusa.Files.Read_File (Capture_Path);
+      begin
+         Ada.Directories.Delete_File (Capture_Path);
+         return Content;
+      end;
+   end Run_Capturing_Stdout;
 begin
+   --  fusa:test REQ-001
    Check (Fusa.Cli.Run (Args ("bogus")) = Exit_Usage, "unknown command exits 2 (usage)");
 
    declare
@@ -35,7 +61,9 @@ begin
       Check (Fusa.Cli.Run (Empty) = Exit_Usage, "no command exits 2 (usage)");
    end;
 
+   --  fusa:test REQ-007
    Check (Fusa.Cli.Run (Args ("version")) = Exit_Ok, "version exits 0");
+   --  fusa:test REQ-008
    Check (Fusa.Cli.Run (Args ("capabilities")) = Exit_Ok, "capabilities exits 0");
 
    if Ada.Directories.Exists (Root) then
@@ -48,11 +76,13 @@ begin
    Check (Fusa.Cli.Run (Args ("check", "--dir", Root, "--format", "bogus")) = Exit_Usage,
           "check with an unsupported --format exits 2 (usage)");
 
+   --  fusa:test REQ-009
    Check (Fusa.Cli.Run (Args ("init", "--dir", Root, "--name", "t")) = Exit_Ok,
           "init exits 0 and creates config files");
    Check (Fusa.Files.Exists (Root & "/.fusa.json"), "init created .fusa.json");
    Check (Fusa.Files.Exists (Root & "/.fusa-reqs.json"), "init created .fusa-reqs.json");
 
+   --  fusa:test REQ-010
    Check (Fusa.Cli.Run (Args ("check", "--dir", Root)) = Exit_Ok,
           "check on a clean project exits 0");
 
@@ -66,11 +96,13 @@ begin
           "check exits 0 for a WARNING-only finding without --strict");
    Check (Fusa.Cli.Run (Args ("check", "--dir", Root, "--strict")) = Exit_Gate_Fail,
           "check --strict exits 1 (gate fail) once a WARNING is present");
+   --  fusa:test REQ-015
    Check (Fusa.Cli.Run (Args ("report", "--dir", Root)) = Exit_Ok,
           "report always exits 0, even with findings present");
    Check (Fusa.Cli.Run (Args ("report", "--dir", Root, "--strict")) = Exit_Usage,
           "report rejects --strict with a usage error");
 
+   --  fusa:test REQ-012
    Check (Fusa.Cli.Run (Args ("qualify", "--dir", Root)) = Exit_Ok,
           "qualify passes its own known-answer tests");
    Check (Fusa.Files.Exists (Root & "/qualify-report.json"),
@@ -80,6 +112,7 @@ begin
    Check (Fusa.Cli.Run (Args ("qualify", "--dir", Root, "--format", "bogus")) = Exit_Usage,
           "qualify rejects an unsupported --format with a usage error");
 
+   --  fusa:test REQ-013
    Check (Fusa.Cli.Run (Args ("release", "--dir", Root)) = Exit_Ok, "release exits 0");
    Check (Fusa.Files.Exists (Root & "/sbom.json"), "release writes sbom.json");
    Check (Fusa.Cli.Run (Args ("release", "--dir", Root, "--full")) = Exit_Ok,
@@ -91,6 +124,7 @@ begin
    Check (Fusa.Files.Exists (Root & "/audit-pack.zip"),
           "release --full also produces audit-pack.zip as its final step");
 
+   --  fusa:test REQ-014
    Check (Fusa.Cli.Run (Args ("audit-pack", "--dir", Root)) = Exit_Ok, "audit-pack exits 0");
    Check (Fusa.Files.Exists (Root & "/audit-pack.zip"), "audit-pack writes audit-pack.zip");
    Check (Fusa.Cli.Run
@@ -99,6 +133,7 @@ begin
    Check (Fusa.Files.Exists (Root & "/custom.zip"), "audit-pack wrote to the custom path");
 
    --  trace: no requirements yet -> zero totals, still exits 0
+   --  fusa:test REQ-011
    Check (Fusa.Cli.Run (Args ("trace", "--dir", Root)) = Exit_Ok,
           "trace with no requirements file exits 0");
    Check (Fusa.Cli.Run (Args ("trace", "--dir", Root, "--format", "json")) = Exit_Ok,
@@ -135,6 +170,93 @@ begin
    Check (Fusa.Cli.Run
             (Args ("trace", "--dir", Root, "--sec-tested", "10")) = Exit_Gate_Fail,
           "trace --sec-tested 10 gate-fails since no sec-test tags exist");
+
+   --  Regression: a non-numeric threshold used to crash with an unhandled
+   --  CONSTRAINT_ERROR and exit 1 (colliding with Exit_Gate_Fail) instead
+   --  of a clean Exit_Usage.
+   Check (Fusa.Cli.Run (Args ("trace", "--dir", Root, "--req-coverage", "abc")) = Exit_Usage,
+          "trace --req-coverage abc exits 2 (usage), not a crash");
+   Check (Fusa.Cli.Run (Args ("trace", "--dir", Root, "--sec-tested", "-5")) = Exit_Usage,
+          "trace --sec-tested -5 exits 2 (usage), not a crash "
+          & "(Natural'Value rejects negative numbers too)");
+
+   --  Regression: boolean flags silently ignored the --flag=value form
+   --  that Flag_Value-based flags already supported.
+   Check (Fusa.Cli.Run (Args ("check", "--dir", Root, "--strict=true")) = Exit_Gate_Fail,
+          "check --strict=true gates on a WARNING finding, same as bare --strict");
+
+   --  Regression: qualify's text-format output printed the summary to
+   --  stdout even when --output was given, unlike every other command.
+   declare
+      Exit_Code : Integer;
+      Captured  : constant String :=
+        Run_Capturing_Stdout
+          (Args ("qualify", "--dir", Root, "--output", Root & "/q2.json"), Exit_Code);
+   begin
+      Check (Exit_Code = Exit_Ok, "qualify --output still exits 0");
+      --  Ada.Text_IO.Create/Close on an unwritten file may itself leave a
+      --  trailing line terminator, so check for absence of the actual
+      --  summary content rather than requiring exactly zero bytes.
+      Check (Ada.Strings.Fixed.Index (Captured, "known-answer") = 0
+             and then Ada.Strings.Fixed.Index (Captured, "total,") = 0,
+             "qualify (text format) prints nothing to stdout when --output is given");
+      Check (Fusa.Files.Exists (Root & "/q2.json"),
+             "qualify still wrote the JSON report to the given --output path");
+   end;
+
+   --  Regression: the empty equals-value form --output= was treated as if
+   --  --output had never been given at all (fell through to Default).
+   declare
+      Exit_Code : Integer;
+      Captured  : constant String :=
+        Run_Capturing_Stdout (Args ("check", "--dir", Root, "--output="), Exit_Code);
+   begin
+      Check (Captured'Length > 0,
+             "check --output= (empty value) still prints to stdout, "
+             & "matching --output entirely absent");
+   end;
+
+   --  Regression: Emit_Runtime_Error's text-format branch never honoured
+   --  --output, unlike its --format json branch.
+   declare
+      No_Cfg_Dir : constant String := Root & "/nocfg";
+   begin
+      Ada.Directories.Create_Path (No_Cfg_Dir);
+      Check (Fusa.Cli.Run
+               (Args ("check", "--dir", No_Cfg_Dir, "--output",
+                      Root & "/err.txt")) = Exit_Runtime,
+             "check --output on a no-config directory still exits 3");
+      Check (Fusa.Files.Exists (Root & "/err.txt"),
+             "the text-format runtime error was written to --output, not just stderr");
+   end;
+
+   --  Regression: an interrupted qualify run's leftover
+   --  .fusa-qualify-tmp/ directory used to be scanned as real project
+   --  source, producing a phantom finding at a fake location.
+   declare
+      Leftover_Dir : constant String := Root & "/.fusa-qualify-tmp";
+   begin
+      Ada.Directories.Create_Path (Leftover_Dir);
+      Fusa.Files.Write_File
+        (Leftover_Dir & "/fixture.adb",
+         "procedure P is" & ASCII.LF &
+         "   pragma Suppress (All_Checks);" & ASCII.LF &
+         "begin" & ASCII.LF & "   null;" & ASCII.LF & "end P;" & ASCII.LF);
+      declare
+         Cfg   : constant Fusa.Config.Project_Config := Fusa.Config.Load (Root);
+         Files : constant String_List := Fusa.Source_Scan.Find_Source_Files (Root, Cfg);
+         Found_Leftover : Boolean := False;
+      begin
+         for F of Files loop
+            if F = ".fusa-qualify-tmp/fixture.adb" then
+               Found_Leftover := True;
+            end if;
+         end loop;
+         Check (not Found_Leftover,
+                "a leftover .fusa-qualify-tmp/ directory is excluded from source scans");
+      end;
+      Ada.Directories.Delete_Tree (Leftover_Dir);
+   end;
 
    Ada.Directories.Delete_Tree (Root);
 

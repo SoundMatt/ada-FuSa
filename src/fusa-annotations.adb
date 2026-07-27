@@ -12,6 +12,26 @@ package body Fusa.Annotations is
    --  second id on the same line, which is malformed. Plain trailing
    --  descriptive text (e.g. "REQ-AUTH-001 password must be validated")
    --  is not malformed.
+   --  True if Token is plausibly an identifier (letters, digits, '-', '_',
+   --  '.' only) rather than prose punctuation leaking in from a sentence
+   --  that merely *mentions* the marker (e.g. a doc comment describing
+   --  the annotation syntax itself, quoted with backticks/commas). Real
+   --  requirement ids are always plain identifiers; anything else is
+   --  treated as "this line isn't really an annotation" rather than a
+   --  malformed one, so it's silently skipped instead of raising a
+   --  spurious warning.
+   function Is_Plausible_Token (Token : String) return Boolean is
+   begin
+      for C of Token loop
+         if not (C in 'A' .. 'Z' or else C in 'a' .. 'z' or else C in '0' .. '9'
+                 or else C = '-' or else C = '_' or else C = '.')
+         then
+            return False;
+         end if;
+      end loop;
+      return True;
+   end Is_Plausible_Token;
+
    function Has_Second_Req_Token (Rest : String) return Boolean is
       Idx : Integer := Rest'First;
    begin
@@ -38,6 +58,24 @@ package body Fusa.Annotations is
       return False;
    end Has_Second_Req_Token;
 
+   --  Approximate "is Pos inside a string literal" check: counts
+   --  double-quote characters before Pos on the line. An odd count means
+   --  Pos falls inside an (unterminated-so-far) quoted region -- this
+   --  doesn't handle Ada's doubled-quote ("") escape inside a string
+   --  literal, but is enough to avoid treating example annotation text
+   --  embedded in a string literal (e.g. a test fixture, or a Put_Line
+   --  argument) as a real annotation.
+   function In_String_Literal (Line : String; Pos : Positive) return Boolean is
+      Quote_Count : Natural := 0;
+   begin
+      for I in Line'First .. Pos - 1 loop
+         if Line (I) = '"' then
+            Quote_Count := Quote_Count + 1;
+         end if;
+      end loop;
+      return Quote_Count mod 2 = 1;
+   end In_String_Literal;
+
    procedure Process_Marker
      (Line     : String;
       Marker   : String;
@@ -49,7 +87,7 @@ package body Fusa.Annotations is
    is
       Pos : constant Natural := Ada.Strings.Fixed.Index (Line, Marker);
    begin
-      if Pos = 0 then
+      if Pos = 0 or else In_String_Literal (Line, Pos) then
          return;
       end if;
 
@@ -83,6 +121,8 @@ package body Fusa.Annotations is
                      Loc         => Make_Location (Rel, Line_No),
                      Category    => Fusa.Requirement,
                      Remediation => "add exactly one requirement id after " & Marker));
+            elsif not Is_Plausible_Token (Token) then
+               null;  --  prose mentioning the marker, not a real annotation
             elsif Has_Second_Req_Token (Rest) then
                Findings.Append
                  (Make_Finding

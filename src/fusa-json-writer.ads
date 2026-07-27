@@ -8,6 +8,17 @@ package Fusa.Json.Writer is
 
    Max_Depth : constant := 32;
 
+   --  Raised on caller protocol misuse: Object_End/Array_End with nothing
+   --  open, Object_End/Array_End that doesn't match the innermost open
+   --  container's kind, a value written inside an object with no
+   --  preceding Key(), two Key() calls in a row, or nesting beyond
+   --  Max_Depth. Every real call site in this codebase is statically
+   --  well-formed, so this should never fire outside of a future
+   --  programming error -- it exists so such an error fails loudly with a
+   --  clear diagnostic instead of silently emitting corrupt JSON or
+   --  crashing with a raw CONSTRAINT_ERROR.
+   Writer_Error : exception;
+
    type Instance is tagged limited private;
 
    procedure Object_Start (W : in out Instance);
