@@ -67,6 +67,12 @@ jobs:
       - name: Tool qualification
         run: bin/adafusa qualify
 
+      - name: Self-check (dogfood adafusa against its own source)
+        run: |
+          bin/adafusa init --name ada-fusa --standard generic
+          bin/adafusa check --format json --output fusa-report.json
+        continue-on-error: true
+
       - name: Generate evidence artifacts
         run: |
           bin/adafusa release
@@ -77,6 +83,7 @@ jobs:
         with:
           name: evidence-artifacts
           path: |
+            fusa-report.json
             qualify-report.json
             sbom.json
             audit-pack.zip
