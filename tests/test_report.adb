@@ -1,3 +1,4 @@
+with Ada.Strings.Fixed;
 with Ada.Strings.Unbounded; use Ada.Strings.Unbounded;
 with Fusa; use Fusa;
 with Fusa.Report;
@@ -80,6 +81,48 @@ begin
             Check (Props /= null and then Fusa.Json.Has_Key (Props, "category"),
                    "SARIF result carries a properties.category (spec section 2.9)");
          end;
+      end;
+   end;
+
+   --  fusa:test REQ-073
+   --  fusa:test REQ-074
+   Check (Fusa.Report.Render_Html (Finding_Vectors.Empty_Vector)'Length > 0,
+          "Render_Html produces non-empty output for an empty findings list");
+   Check (Fusa.Report.Render_Md (Finding_Vectors.Empty_Vector)'Length > 0,
+          "Render_Md produces non-empty output for an empty findings list");
+
+   declare
+      Findings : Finding_List;
+   begin
+      Findings.Append
+        (Make_Finding ("ADA001", Error, "a <b> & ""c"" message",
+                       Make_Location ("a.adb", 3)));
+      Findings.Append
+        (Make_Finding ("ADA002", Warning, "a | pipe in the message",
+                       Make_Location ("b.adb")));
+
+      declare
+         Html : constant String := Fusa.Report.Render_Html (Findings);
+      begin
+         Check (Ada.Strings.Fixed.Index (Html, "<!doctype html>") = 1,
+                "Render_Html starts with a doctype declaration");
+         Check (Ada.Strings.Fixed.Index (Html, "ADA001") > 0
+                and then Ada.Strings.Fixed.Index (Html, "ADA002") > 0,
+                "Render_Html includes every finding's rule id");
+         Check (Ada.Strings.Fixed.Index (Html, "a &lt;b&gt; &amp; &quot;c&quot; message") > 0,
+                "Render_Html HTML-escapes <, >, &, and """" in the message");
+      end;
+
+      declare
+         Md : constant String := Fusa.Report.Render_Md (Findings);
+      begin
+         Check (Ada.Strings.Fixed.Index (Md, "# " & Fusa.Tool_Name) = 1,
+                "Render_Md starts with a level-1 heading");
+         Check (Ada.Strings.Fixed.Index (Md, "| ERROR | ADA001") > 0,
+                "Render_Md includes a table row for each finding");
+         Check (Ada.Strings.Fixed.Index (Md, "a \| pipe in the message") > 0,
+                "Render_Md escapes a literal '|' in the message so it doesn't "
+                & "split the GFM table");
       end;
    end;
 

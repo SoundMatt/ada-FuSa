@@ -77,12 +77,12 @@ the simplest route, since GNAT is not distributed via Homebrew.
 | `adafusa version [--format text\|json]` | Print tool + spec version | text, json |
 | `adafusa capabilities [--format json]` | Machine-readable command/format inventory | json |
 | `adafusa init [name] [--name] [--standard] [--asil\|--sil\|--dal] [--force]` | Create `.fusa.json` + `.fusa-reqs.json` | text |
-| `adafusa check [--dir] [--strict]` | Run all rules and report findings | text, json, sarif |
-| `adafusa trace [--dir] [--gaps] [--req-coverage N] [--sec-tested N] [--func-coverage N]` | Requirement ↔ code traceability matrix | text, json |
+| `adafusa check [--dir] [--strict]` | Run all rules and report findings | text, json, sarif, html |
+| `adafusa trace [--dir] [--gaps] [--req-coverage N] [--sec-tested N] [--func-coverage N]` | Requirement ↔ code traceability matrix | text, json, html, md |
 | `adafusa qualify [--dir]` | Run the tool-qualification known-answer suite | text, json |
 | `adafusa release [--dir] [--output-dir] [--full]` | Generate `sbom.json` (+ full evidence pipeline) | json |
 | `adafusa audit-pack [--dir] [--output]` | Bundle all evidence artifacts into a ZIP | json |
-| `adafusa report [--dir]` | Re-run analysis; always exits 0 | text, json, sarif |
+| `adafusa report [--dir]` | Re-run analysis; always exits 0 | text, json, sarif, html, md |
 
 **Shared flags:** `--dir <path>` (project root, default `.`), `--output <file>` (write instead of
 stdout), `--no-color` (accepted; ada-FuSa does not currently emit ANSI colour), `--format <fmt>`.
@@ -234,8 +234,6 @@ with the other six x-FuSa tools:
   meant to land once the proof-coverage schema has shipped and proven itself against `gnatprove`'s
   sibling `cbmc`-based tools first.
 - Only 8 starter rules ship, versus 40+ in the more mature sibling tools.
-- `html`/`md` output formats are not implemented for any command; `capabilities` accurately reports
-  only the formats each command actually supports.
 - `init`'s interactive TTY prompting only asks for name/standard; ASIL/SIL/DAL must be passed as
   flags even when run interactively.
 - CI currently targets **Linux only**. macOS and Windows GNAT toolchain availability has not been

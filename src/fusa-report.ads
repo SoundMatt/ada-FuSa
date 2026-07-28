@@ -35,10 +35,21 @@ package Fusa.Report is
    --  fusa:req REQ-022
    function Render_Sarif (Findings : Finding_List) return String;
 
+   --  A self-contained HTML page with a findings table, suitable for
+   --  sharing outside a terminal (e.g. as a CI artifact opened in a
+   --  browser).
+   --  fusa:req REQ-073
+   function Render_Html (Findings : Finding_List) return String;
+
+   --  A findings table in GitHub-Flavored Markdown, embeddable in a PR
+   --  description or project docs.
+   --  fusa:req REQ-074
+   function Render_Md (Findings : Finding_List) return String;
+
    --  True if Findings contains an open ERROR (or open WARNING when
-   --  Strict) finding. Disposition support is not implemented in v0.1, so
-   --  every finding is open (spec §4.1: "if unimplemented, every finding
-   --  is open").
+   --  Strict) finding, per section 4.1's disposition/gate rules (an
+   --  "accepted"/"deferred" waiver suppresses the gate; "rejected" does
+   --  not).
    --  fusa:req REQ-069
    function Has_Gate_Failure
      (Findings : Finding_List; Strict : Boolean) return Boolean;
