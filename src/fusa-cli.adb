@@ -17,6 +17,7 @@ with Fusa.Badge;
 with Fusa.Deps;
 with Fusa.Analyze;
 with Fusa.Rules_Lint;
+with Fusa.Fix;
 with Fusa.Report;
 with Fusa.Json.Writer;
 with Fusa.Sha256;
@@ -203,6 +204,7 @@ package body Fusa.Cli is
       W.Value ("lint");
       W.Value ("sas");
       W.Value ("template");
+      W.Value ("fix");
       W.Array_End;
 
       W.Key ("formats");
@@ -247,6 +249,7 @@ package body Fusa.Cli is
       W.Key ("lint");         W.Array_Start; W.Value ("text"); W.Value ("json"); W.Array_End;
       W.Key ("sas");          W.Array_Start; W.Value ("json"); W.Value ("md"); W.Array_End;
       W.Key ("template");     W.Array_Start; W.Value ("text"); W.Value ("json"); W.Array_End;
+      W.Key ("fix");          W.Array_Start; W.Value ("text"); W.Value ("json"); W.Array_End;
       W.Object_End;
 
       W.Key ("standards");
@@ -4712,6 +4715,107 @@ package body Fusa.Cli is
    end Cmd_Template;
 
    ----------------------------------------------------------------------
+   --  fix -- safe auto-fix (spec section 9.3 MAY)
+   ----------------------------------------------------------------------
+
+   --  The first command that writes to a user's actual source files --
+   --  see Fusa.Fix's own header comment for why the transform it applies
+   --  is deliberately narrow (whitespace/formatting only, never anything
+   --  requiring a judgement call). Defaults to a DRY RUN: without
+   --  --apply, nothing is ever written, and the command gate-fails if any
+   --  file WOULD change -- the same "gofmt -l"/"prettier --check" CI
+   --  pattern, so a project can fail CI on unformatted code without
+   --  fix ever touching a file unless a human explicitly asks it to
+   --  (--apply, typically run locally, not in CI).
+   --  fusa:req REQ-116
+   function Cmd_Fix (Args : String_List) return Integer is
+      Dir    : constant String := Dir_Of (Args);
+      Format : constant String := Flag_Value (Args, "--format", "text");
+      Apply  : constant Boolean := Has_Flag (Args, "--apply");
+   begin
+      if Format /= "text" and then Format /= "json" then
+         Ada.Text_IO.Put_Line
+           (Ada.Text_IO.Standard_Error,
+            "ada-FuSa: fix: unsupported --format '" & Format &
+            "' (supported: text, json)");
+         return Exit_Usage;
+      end if;
+
+      declare
+         Cfg : Fusa.Config.Project_Config;
+      begin
+         begin
+            Cfg := Fusa.Config.Load (Dir);
+         exception
+            when Fusa.Config.No_Config_Error =>
+               return Emit_Runtime_Error (Args, "fix", "no-config", "no .fusa.json found in " & Dir);
+            when Fusa.Config.Invalid_Config_Error =>
+               return Emit_Runtime_Error (Args, "fix", "invalid-config", "invalid .fusa.json in " & Dir);
+         end;
+
+         declare
+            Files   : constant String_List := Fusa.Source_Scan.Find_Source_Files (Dir, Cfg);
+            Changed : String_List;
+         begin
+            for Rel of Files loop
+               declare
+                  Full : constant String := Fusa.Files.Join (Dir, Rel);
+               begin
+                  if Fusa.Files.Exists (Full) then
+                     declare
+                        Original : constant String := Fusa.Files.Read_File (Full);
+                        Fixed    : constant String := Fusa.Fix.Fix_Content (Original);
+                     begin
+                        if Fixed /= Original then
+                           Changed.Append (Rel);
+                           if Apply then
+                              Fusa.Files.Write_File (Full, Fixed);
+                           end if;
+                        end if;
+                     end;
+                  end if;
+               end;
+            end loop;
+
+            if Format = "json" then
+               declare
+                  W : Fusa.Json.Writer.Instance;
+               begin
+                  W.Object_Start;
+                  Fusa.Report.Write_Header (W, "fix-report");
+                  W.Field ("applied", Apply);
+                  W.Key ("files");
+                  W.Array_Start;
+                  for F of Changed loop
+                     W.Value (F);
+                  end loop;
+                  W.Array_End;
+                  W.Object_End;
+                  Emit (Args, Fusa.Json.Writer.To_String (W));
+               end;
+            else
+               declare
+                  Buf : Unbounded_String := Null_Unbounded_String;
+               begin
+                  for F of Changed loop
+                     Append (Buf, (if Apply then "fixed  " else "would fix  ") & F & ASCII.LF);
+                  end loop;
+                  Append (Buf, Trim_Img (Natural (Changed.Length)) &
+                            (if Apply then " file(s) fixed" else " file(s) would be fixed " &
+                               "(re-run with --apply to write the changes)"));
+                  Emit (Args, To_String (Buf));
+               end;
+            end if;
+
+            if not Apply and then not Changed.Is_Empty then
+               return Exit_Gate_Fail;
+            end if;
+            return Exit_Ok;
+         end;
+      end;
+   end Cmd_Fix;
+
+   ----------------------------------------------------------------------
    --  Usage / dispatch
    ----------------------------------------------------------------------
 
@@ -4723,7 +4827,7 @@ package body Fusa.Cli is
         "report comp hara tara vuln req disposition pr metrics sign hooks " &
         "do178 iso26262 iso21434 iec61508 iec62443 unece slsa " &
         "verify diff badge boundary impact coupling fmea safety-case " &
-        "cyber sci analyze lint sas template");
+        "cyber sci analyze lint sas template fix");
    end Print_Usage;
 
    function Run (Args : String_List) return Integer is
@@ -4820,6 +4924,8 @@ package body Fusa.Cli is
             return Cmd_Sas (Rest);
          elsif Cmd = "template" then
             return Cmd_Template (Rest);
+         elsif Cmd = "fix" then
+            return Cmd_Fix (Rest);
          elsif Cmd = "--help" or else Cmd = "-h" or else Cmd = "help" then
             Print_Usage;
             return Exit_Ok;
