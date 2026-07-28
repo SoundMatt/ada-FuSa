@@ -1,7 +1,7 @@
 # ada-FuSa — Ada/SPARK Functional Safety Toolkit
 
 [![CI](https://github.com/SoundMatt/ada-FuSa/actions/workflows/ci.yml/badge.svg)](https://github.com/SoundMatt/ada-FuSa/actions/workflows/ci.yml)
-[![x-FuSa spec](https://img.shields.io/badge/x--FuSa%20spec-v1.11-blue)](https://github.com/SoundMatt/FuSaOps)
+[![x-FuSa spec](https://img.shields.io/badge/x--FuSa%20spec-v1.15-blue)](https://github.com/SoundMatt/FuSaOps)
 [![License: MPL-2.0](https://img.shields.io/badge/license-MPL--2.0-green)](LICENSE)
 
 **adafusa** is the Ada implementation of the [x-FuSa specification](https://github.com/SoundMatt/FuSaOps) — a
@@ -88,8 +88,8 @@ the simplest route, since GNAT is not distributed via Homebrew.
 | `adafusa audit-pack [--dir] [--output]` | Bundle all evidence artifacts into a ZIP | json |
 | `adafusa report [--dir]` | Re-run analysis; always exits 0 | text, json, sarif, html, md |
 | `adafusa comp [--dir] [--threshold N] [--dal DAL-A\|B\|C\|D]` | McCabe cyclomatic complexity per function (DO-178C §6.3.4) | text, json |
-| `adafusa hara [--dir] [--init]` | Load/validate `.fusa-hara.json` hazard analysis (ISO 26262-3, section 1.2.5 canonical shape); `--init` scaffolds an empty template if absent, otherwise a missing file is a runtime error | text, json |
-| `adafusa tara [--dir] [--init] [--min-coverage N]` | Load/validate `.fusa-tara.json` threat analysis (ISO 21434 ch.15, section 9.2 canonical shape); `--init` scaffolds an empty template if absent, otherwise a missing file is a runtime error | text, json |
+| `adafusa hara [--dir] [--init] [--require-attestation] [--strict]` | Load/validate `.fusa-hara.json` hazard analysis (ISO 26262-3, section 1.2.5 canonical shape); `--init` scaffolds an empty template if absent, otherwise a missing file is a runtime error | text, json |
+| `adafusa tara [--dir] [--init] [--min-coverage N] [--require-attestation] [--strict]` | Load/validate `.fusa-tara.json` threat analysis (ISO 21434 ch.15, section 9.2 canonical shape); `--init` scaffolds an empty template if absent, otherwise a missing file is a runtime error | text, json |
 | `adafusa vuln [--dir]` | Dependency vulnerability scan (no CVE database integrated yet — see limitations) | text, json |
 | `adafusa req list\|add <id> <title>` | Manage `.fusa-reqs.json` from the CLI | text, json |
 | `adafusa disposition list\|add <fp-or-ruleId> <status> [rationale]` | Manage `.fusa-dispositions.json` waivers from the CLI | text, json |
@@ -104,8 +104,8 @@ the simplest route, since GNAT is not distributed via Homebrew.
 | `adafusa boundary [--dir] [--format dot\|mermaid]` | Package/unit dependency graph from `with`-clause scanning; always exits 0 | dot, mermaid |
 | `adafusa impact <file...> [--dir]` | Which project units are (transitively) affected by changing the given files; always exits 0 | text, json |
 | `adafusa coupling [--dir]` | Structural fan-in/fan-out coupling metric per unit; always exits 0 | text, json |
-| `adafusa fmea [--dir] [--min-coverage N]` | Load/validate `.fusa-fmea.json` design FMEA (IEC 60812 / AIAG-VDA, section 9.2 canonical shape); scaffolds a template if absent | text, json, csv |
-| `adafusa safety-case [--dir]` | Load/validate/render `.fusa-safety-case.json` GSN safety case; scaffolds a template if absent | text, json, md, mermaid |
+| `adafusa fmea [--dir] [--min-coverage N] [--require-attestation] [--strict]` | Load/validate `.fusa-fmea.json` design FMEA (IEC 60812 / AIAG-VDA, section 9.2 canonical shape); scaffolds a template if absent | text, json, csv |
+| `adafusa safety-case [--dir] [--require-attestation] [--strict]` | Load/validate/render `.fusa-safety-case.json` GSN safety case; scaffolds a template if absent | text, json, md, mermaid |
 | `adafusa cyber [--dir] [--strict]` | `check`'s findings narrowed to `security` category, as a dedicated `cyber-report` | text, json |
 | `adafusa sci [--dir]` | Software Configuration Index: every source file + evidence artifact, `sha256:`-prefixed hash + version + size; always exits 0 | text, json |
 | `adafusa analyze [--dir] [--strict]` | Deeper own-pass static analysis (unused with-clauses, long parameter lists), separate from `check` | text, json |
@@ -409,6 +409,24 @@ anything else this tool does, so its scope is deliberately narrow:
   never claims the argument itself is valid or complete. Both scaffold an empty template on first
   run and gate only on structural errors (missing id; for `safety-case`, also a dangling
   reference — a false evidence claim is a WARNING, not a gate failure).
+- **Content-quality baseline (section 1.6/1.6.1/1.6.2)**: `hara`/`fmea`/`tara`/`safety-case` each
+  scan the qualitative fields they just loaded (hazard `description`, fmea
+  `failureMode`/`effect`/`cause`, tara `threat`, a GSN node's `text`) for two things. **Rule A**
+  (`FUSA-STUB001`, always an ERROR) flags literal placeholder/instructional text (bracket-wrapped,
+  or a case-insensitive `"replace with"`/`"example hazard"`/`"TBD"`/`"lorem ipsum"`/`"fill in"`) —
+  disposition-suppressible only, never by an attestation. **Rule B** (`FUSA-STUB002`, a WARNING by
+  default) flags a field whose distinct-value ratio drops below 0.1 across 10+ entries — the same
+  boilerplate text copy-pasted across many rows. A document MAY carry a top-level `attestation`
+  object (`status: "reviewed"`, an `independentReviewer` distinct from `implementationAuthor`, and
+  a `contentHash` pinned via the same RFC 8785 canonicalization `qualify`'s hash uses); a fresh,
+  non-stale one suppresses Rule B entirely. `--require-attestation` (and `--strict`, which implies
+  it) escalates an unsuppressed Rule B finding to exit `1`. Since `sas` has no input file of its
+  own, it instead carries an existing `sas.json`'s attestation forward across every regeneration
+  rather than silently discarding it (section 1.6.2's carry-forward MUST).
+- **`coveragePct` is clamped to 100 (`fmea`/`tara`, section 9.2 MUST)**: a user-supplied
+  `componentsInProject`/`assetsInProject` override smaller than the number of entries actually
+  analyzed produces `Natural'Min(100, analyzed * 100 / inProject)`, never an impossible value like
+  200%.
 
 ## Evidence Artifacts
 

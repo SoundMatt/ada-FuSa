@@ -19,6 +19,7 @@ with Test_Deps;
 with Test_Analyze;
 with Test_Rules_Lint;
 with Test_Fix;
+with Test_Stub_Detect;
 with Test_Cli;
 
 procedure Run_Tests is
@@ -42,6 +43,7 @@ begin
    Test_Analyze;
    Test_Rules_Lint;
    Test_Fix;
+   Test_Stub_Detect;
    Test_Cli;
 
    if Test_Framework.Report then

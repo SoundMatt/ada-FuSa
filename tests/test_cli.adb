@@ -8,6 +8,9 @@ with Fusa.Cli;
 with Fusa.Files;
 with Fusa.Config;
 with Fusa.Source_Scan;
+with Fusa.Attestation;
+with Fusa.Json;
+use type Fusa.Json.Value_Access;
 with Test_Framework; use Test_Framework;
 
 procedure Test_Cli is
@@ -450,6 +453,123 @@ begin
    Check (Fusa.Cli.Run (Args ("hara", "--dir", Root)) = Exit_Gate_Fail,
           "hara gate-fails once a hazard with no id is present (ERROR finding)");
 
+   --  fusa:test REQ-119 / REQ-120: section 1.6.1/1.6.2 detection and
+   --  attestation, exercised end-to-end through the hara command (the
+   --  underlying Rule A/B/attestation logic itself is unit-tested in
+   --  test_stub_detect.adb; this locks in that hara actually wires it in).
+   declare
+      Stub_Root : constant String := "tmp_test_cli_stub_hara";
+      Many      : Unbounded_String := Null_Unbounded_String;
+
+      function Hazards_Json (Descriptions : String) return String is
+        ("{""hazards"":[" & Descriptions & "],""safetyGoals"":[]}");
+
+      function One_Hazard (Id, Desc : String) return String is
+        ("{""id"":""" & Id & """,""description"":""" & Desc &
+           """,""situations"":[],""risk"":{""severity"":""S1""," &
+           """exposure"":""E1"",""controllability"":""C1""}," &
+           """safetyGoals"":[]}");
+
+      function Hazards_With_Attestation
+        (Descriptions, Hash : String) return String is
+        ("{""hazards"":[" & Descriptions & "],""safetyGoals"":[]," &
+           """attestation"":{""status"":""reviewed""," &
+           """implementationAuthor"":""auto""," &
+           """independentReviewer"":""Jane Doe <jane@example.com>""," &
+           """reviewedAt"":""2026-07-28T00:00:00Z""," &
+           """contentHash"":""" & Hash & """}}");
+   begin
+      if Ada.Directories.Exists (Stub_Root) then
+         Ada.Directories.Delete_Tree (Stub_Root);
+      end if;
+      Ada.Directories.Create_Path (Stub_Root);
+      Fusa.Files.Write_File
+        (Stub_Root & "/.fusa.json",
+         "{""project"":{""name"":""t""},""standard"":""iso26262""}");
+      Fusa.Files.Write_File
+        (Stub_Root & "/.fusa-hara.json",
+         Hazards_Json (One_Hazard ("H1", "[describe hazard]")));
+      Check (Fusa.Cli.Run (Args ("hara", "--dir", Stub_Root)) = Exit_Gate_Fail,
+             "hara gate-fails on a Rule A (FUSA-STUB001) placeholder hazard "
+             & "description, even though it's a WARNING-free document "
+             & "otherwise -- disposition-suppressible only, always-on");
+
+      for I in 1 .. 11 loop
+         if I > 1 then
+            Append (Many, ",");
+         end if;
+         Append (Many, One_Hazard
+                   ("H" & Ada.Strings.Fixed.Trim
+                            (Integer'Image (I), Ada.Strings.Left),
+                    "generic hazard"));
+      end loop;
+      Fusa.Files.Write_File
+        (Stub_Root & "/.fusa-hara.json", Hazards_Json (To_String (Many)));
+      Check (Fusa.Cli.Run (Args ("hara", "--dir", Stub_Root)) = Exit_Ok,
+             "hara does not gate-fail on a Rule B (FUSA-STUB002) blanket "
+             & "fallback WARNING by default -- it's advisory");
+      Check (Fusa.Cli.Run
+               (Args ("hara", "--dir", Stub_Root, "--require-attestation")) =
+               Exit_Gate_Fail,
+             "hara --require-attestation escalates the unsuppressed Rule B "
+             & "WARNING to exit 1");
+      Check (Fusa.Cli.Run (Args ("hara", "--dir", Stub_Root, "--strict")) =
+               Exit_Gate_Fail,
+             "hara --strict implies --require-attestation");
+
+      --  A fresh, independently-reviewed attestation whose contentHash
+      --  matches the current document suppresses Rule B entirely (not
+      --  merely dispositions it) -- exit goes back to 0 even under
+      --  --require-attestation.
+      declare
+         Root_Val : constant Fusa.Json.Value_Access :=
+           Fusa.Json.Parse
+             (Fusa.Files.Read_File (Stub_Root & "/.fusa-hara.json"));
+         Hash : constant String :=
+           Fusa.Attestation.Canonical_Content_Hash (Root_Val);
+      begin
+         Fusa.Files.Write_File
+           (Stub_Root & "/.fusa-hara.json",
+            Hazards_With_Attestation (To_String (Many), Hash));
+      end;
+      Check (Fusa.Cli.Run
+               (Args ("hara", "--dir", Stub_Root, "--require-attestation")) =
+               Exit_Ok,
+             "a fresh, independently-reviewed attestation whose contentHash "
+             & "matches the current document suppresses Rule B, even under "
+             & "--require-attestation");
+      declare
+         Exit_Code : Integer;
+         Out_Text  : constant String :=
+           Run_Capturing_Stdout
+             (Args ("hara", "--dir", Stub_Root, "--format", "json"),
+              Exit_Code);
+      begin
+         Check (Ada.Strings.Fixed.Index (Out_Text, """attestation"":") > 0
+                and then Ada.Strings.Fixed.Index
+                           (Out_Text, """status"": ""reviewed""") > 0,
+                "hara's JSON output passes the input file's attestation "
+                & "through verbatim");
+      end;
+
+      --  Mutating the document without updating contentHash makes the
+      --  carried-forward attestation stale -- it falls back to
+      --  "heuristic" and Rule B's WARNING reappears.
+      Append (Many, "," & One_Hazard ("H99", "generic hazard"));
+      Fusa.Files.Write_File
+        (Stub_Root & "/.fusa-hara.json",
+         Hazards_With_Attestation
+           (To_String (Many),
+            "sha256:0000000000000000000000000000000000000000000000" &
+              "0000000000000000"));
+      Check (Fusa.Cli.Run
+               (Args ("hara", "--dir", Stub_Root, "--require-attestation")) =
+               Exit_Gate_Fail,
+             "a stale attestation (contentHash no longer matching) no "
+             & "longer suppresses Rule B");
+      Ada.Directories.Delete_Tree (Stub_Root);
+   end;
+
    --  fusa:test REQ-085
    Check (not Fusa.Files.Exists (Root & "/.fusa-tara.json"), "no .fusa-tara.json initially");
    declare
@@ -481,10 +601,51 @@ begin
              "tara --format json includes the section 9.2 canonical summary "
              & "block (assetsAnalyzed/assetsInProject/coveragePct)");
    end;
+
+   --  fusa:test REQ-085: section 9.2 MUST (spec v1.15.0) -- coveragePct
+   --  must never exceed 100, even when an understated assetsInProject
+   --  override would otherwise produce an impossible value like 200%.
+   Fusa.Files.Write_File
+     (Root & "/.fusa-tara.json",
+      "{""assetsInProject"":1,""threats"":[" &
+        "{""id"":""T1"",""asset"":""a1"",""threat"":""t1""," &
+        """attackVector"":""network"",""attackFeasibility"":""medium""," &
+        """impact"":{""safety"":""moderate"",""financial"":""moderate""," &
+        """operational"":""moderate"",""privacy"":""moderate""}}," &
+        "{""id"":""T2"",""asset"":""a2"",""threat"":""t2""," &
+        """attackVector"":""network"",""attackFeasibility"":""medium""," &
+        """impact"":{""safety"":""moderate"",""financial"":""moderate""," &
+        """operational"":""moderate"",""privacy"":""moderate""}}]}");
+   declare
+      Exit_Code : Integer;
+      Out_Text  : constant String :=
+        Run_Capturing_Stdout
+          (Args ("tara", "--dir", Root, "--format", "json"), Exit_Code);
+   begin
+      Check (Ada.Strings.Fixed.Index (Out_Text, """coveragePct"": 100") > 0,
+             "tara clamps coveragePct to 100 rather than reporting 200% "
+             & "when assetsInProject understates the real denominator");
+   end;
+
    Fusa.Files.Write_File
      (Root & "/.fusa-tara.json", "{""threats"":[{""threat"":""no id or asset""}]}");
    Check (Fusa.Cli.Run (Args ("tara", "--dir", Root)) = Exit_Gate_Fail,
           "tara gate-fails once a threat with no id/asset is present (ERROR finding)");
+
+   --  fusa:test REQ-119: same Rule A wiring as hara (test_stub_detect.adb
+   --  unit-tests the underlying logic; test above end-to-end verifies
+   --  hara's Rule B/attestation wiring in full) -- this locks in that
+   --  tara wires Rule A in too, over its "threat" field.
+   Fusa.Files.Write_File
+     (Root & "/.fusa-tara.json",
+      "{""threats"":[{""id"":""T1"",""asset"":""a"",""threat"":" &
+        """[fill in]"",""attackVector"":""network""," &
+        """attackFeasibility"":""medium"",""impact"":{""safety"":" &
+        """moderate"",""financial"":""moderate"",""operational"":" &
+        """moderate"",""privacy"":""moderate""}}]}");
+   Check (Fusa.Cli.Run (Args ("tara", "--dir", Root)) = Exit_Gate_Fail,
+          "tara gate-fails on a Rule A (FUSA-STUB001) placeholder threat "
+          & "description");
 
    --  fusa:test REQ-097
    Check (not Fusa.Files.Exists (Root & "/.fusa-do178c-objectives.json"),
@@ -957,6 +1118,35 @@ begin
                 "the config-validation findings tally is under ""findingsSummary"", "
                 & "and ratingScale is present since occurrence/detection were emitted");
       end;
+      --  section 9.2 MUST (spec v1.15.0) -- coveragePct must never
+      --  exceed 100, even when an understated componentsInProject
+      --  override would otherwise produce an impossible value like 200%.
+      Fusa.Files.Write_File
+        (Fmea_Cov_Root & "/.fusa-fmea.json",
+         "{""componentsInProject"":1,""entries"":[" &
+           "{""id"":""FMEA-001"",""item"":""Pkg.A""," &
+           """file"":""src/pkg.ads""," &
+           """failureMode"":""fm1"",""effect"":""ef1"",""severity"":8}," &
+           "{""id"":""FMEA-002"",""item"":""Pkg.B""," &
+           """file"":""src/pkg.ads""," &
+           """failureMode"":""fm2"",""effect"":""ef2"",""severity"":8}]}");
+      declare
+         Exit_Code : Integer;
+         Out_Text  : constant String :=
+           Run_Capturing_Stdout
+             (Args ("fmea", "--dir", Fmea_Cov_Root, "--format", "json"),
+              Exit_Code);
+      begin
+         Check (Ada.Strings.Fixed.Index (Out_Text, """coveragePct"": 100") > 0,
+                "fmea clamps coveragePct to 100 rather than reporting 200% "
+                & "when componentsInProject understates the real denominator");
+      end;
+      Fusa.Files.Write_File
+        (Fmea_Cov_Root & "/.fusa-fmea.json",
+         "{""entries"":[{""id"":""FMEA-001"",""item"":""Pkg.A""," &
+         """file"":""src/pkg.ads""," &
+         """failureMode"":""fm"",""effect"":""ef""," &
+         """severity"":8,""occurrence"":3,""detection"":4}]}");
       Check (Fusa.Cli.Run
                (Args ("fmea", "--dir", Fmea_Cov_Root, "--min-coverage", "60")) = Exit_Gate_Fail,
              "fmea --min-coverage 60 gate-fails when coveragePct (50) is below it");
@@ -973,6 +1163,17 @@ begin
      (Root & "/.fusa-fmea.json", "{""entries"":[{""failureMode"":""no id""}]}");
    Check (Fusa.Cli.Run (Args ("fmea", "--dir", Root)) = Exit_Gate_Fail,
           "fmea gate-fails once an entry with no id is present (ERROR finding)");
+
+   --  fusa:test REQ-119: same Rule A wiring as hara/tara, over fmea's
+   --  failureMode/effect/cause fields.
+   Fusa.Files.Write_File
+     (Root & "/.fusa-fmea.json",
+      "{""entries"":[{""id"":""E1"",""item"":""comp"",""file"":" &
+        """src/x.adb"",""failureMode"":""[describe failure]""," &
+        """effect"":""system fails"",""severity"":5}]}");
+   Check (Fusa.Cli.Run (Args ("fmea", "--dir", Root)) = Exit_Gate_Fail,
+          "fmea gate-fails on a Rule A (FUSA-STUB001) placeholder "
+          & "failureMode");
 
    --  fusa:test REQ-107
    Check (not Fusa.Files.Exists (Root & "/.fusa-safety-case.json"),
@@ -1039,6 +1240,16 @@ begin
    Check (Fusa.Cli.Run (Args ("safety-case", "--dir", Root)) = Exit_Gate_Fail,
           "safety-case gate-fails once a dangling supportedBy reference is present "
           & "(ERROR finding)");
+
+   --  fusa:test REQ-119: same Rule A wiring as hara/tara/fmea, over a GSN
+   --  node's text field.
+   Fusa.Files.Write_File
+     (Root & "/.fusa-safety-case.json",
+      "{""rootGoal"":""G1"",""nodes"":[{""id"":""G1"",""type"":""goal""," &
+        """text"":""[describe goal]""}]}");
+   Check (Fusa.Cli.Run (Args ("safety-case", "--dir", Root)) = Exit_Gate_Fail,
+          "safety-case gate-fails on a Rule A (FUSA-STUB001) placeholder "
+          & "goal text");
 
    --  fusa:test REQ-108
    Check (Fusa.Cli.Run (Args ("cyber", "--dir", Root, "--format", "bogus")) = Exit_Usage,
@@ -1289,6 +1500,39 @@ begin
          Check (Ada.Strings.Fixed.Index (Md, "Software Requirements Data") > 0
                 and then Ada.Strings.Fixed.Index (Md, "3/20 present") > 0,
                 "sas.md's checklist table and summary match sas.json");
+      end;
+
+      --  fusa:test REQ-120: sas has no input file of its own, so section
+      --  1.6.2's carry-forward MUST is exercised by re-running the
+      --  command over an sas.json a prior run (or a human) already
+      --  attested -- the same attestation object must come back
+      --  unchanged rather than being silently dropped.
+      declare
+         Doc : Unbounded_String :=
+           To_Unbounded_String
+             (Fusa.Files.Read_File (Sas_Root & "/sas.json"));
+         Close_Brace : constant Natural :=
+           Ada.Strings.Fixed.Index
+             (To_String (Doc), "}", Ada.Strings.Backward);
+      begin
+         Insert
+           (Doc, Close_Brace,
+            "," & """attestation"": {""status"": ""reviewed""," &
+              """implementationAuthor"": ""auto""," &
+              """independentReviewer"": ""Jane Doe <jane@example.com>""}");
+         Fusa.Files.Write_File (Sas_Root & "/sas.json", To_String (Doc));
+      end;
+      Check (Fusa.Cli.Run (Args ("sas", "--dir", Sas_Root)) = Exit_Ok,
+             "sas re-run exits 0 after a prior sas.json was hand-attested");
+      declare
+         Content : constant String :=
+           Fusa.Files.Read_File (Sas_Root & "/sas.json");
+      begin
+         Check (Ada.Strings.Fixed.Index (Content, """attestation"":") > 0
+                and then Ada.Strings.Fixed.Index
+                           (Content, """status"": ""reviewed""") > 0,
+                "sas carries a prior run's attestation forward onto the "
+                & "freshly-regenerated document rather than discarding it");
       end;
       Ada.Directories.Delete_Tree (Sas_Root);
    end;

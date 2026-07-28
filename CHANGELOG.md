@@ -5,6 +5,47 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+### Added (issue #69 part 6/6 + issue #80 -- FUSA-STUB detection, attestation, spec v1.15.0)
+
+Implements section 1.6's evidence content-quality baseline in full, closing the last part of
+issue #69's remaining scope, plus adopts the two correctness MUSTs spec v1.15.0 added the same
+day (issue #80):
+
+- **New `Fusa.Stub_Detect` package**: Rule A (`FUSA-STUB001`, section 1.6.1, always an ERROR,
+  disposition-suppressible only) flags placeholder/instructional text (bracket-wrapped, or a
+  case-insensitive `"replace with"`/`"example hazard"`/`"TBD"`/`"lorem ipsum"`/`"fill in"`) in a
+  qualitative field. Rule B (`FUSA-STUB002`, a WARNING by default) flags a field whose
+  distinct-value ratio drops below 0.1 across 10+ entries -- the boilerplate-copy-paste pattern
+  the section exists to catch.
+- **New `Fusa.Attestation` package**: parses/writes a document-level `attestation` object,
+  computes its RFC 8785 JCS canonical content hash (excluding `attestation`/`generatedAt`,
+  matching `qualify`'s own hash convention), and determines whether a non-stale,
+  independently-reviewed attestation suppresses a Rule B finding (a same-identity
+  `implementationAuthor`/`independentReviewer` or a hash mismatch fails safe to "heuristic").
+- **`hara`/`fmea`/`tara`/`safety-case` now run Rule A/B** over the content each command itself
+  just loaded (hazard `description`; fmea `failureMode`/`effect`/`cause`; tara `threat`; a GSN
+  node's `text`), gating that command's own exit code via the normal finding/disposition
+  mechanism -- and now apply `.fusa-dispositions.json` at all, which they never did before (a
+  prerequisite for Rule A's disposition-suppressibility to mean anything).
+- **New `--require-attestation` flag** (and `--strict`, which implies it) on `hara`/`fmea`/`tara`/
+  `safety-case`/`sas`: escalates an unsuppressed Rule B finding to exit `1`.
+- **Attestation carry-forward (section 1.6.2 MUST, added in spec v1.15.0)**: `hara`/`fmea`/`tara`/
+  `safety-case` carry an input file's own attestation through to output naturally (they re-read
+  the same file every run); `sas`, which has no input file, now explicitly loads any existing
+  `sas.json`'s attestation before regenerating and carries it forward onto the fresh document,
+  rather than silently discarding a prior human review.
+- **`coveragePct` clamped to 100 (section 9.2 MUST, added in spec v1.15.0)**: `fmea` and `tara`
+  now compute `Natural'Min(100, analyzed * 100 / inProject)` -- an understated
+  `componentsInProject`/`assetsInProject` override could previously produce an impossible value
+  like 200%. (Section 1.6 rule 4's guidance to reuse `trace --func-coverage`'s test-tree exclusion
+  was already satisfied -- `Fusa.Func_Scan` already excludes `tests/`/`test/` paths.)
+- **`Fusa.Schema_Version`/`Spec_Version` bumped `"1.11"`/`"1.11.0"` -> `"1.15"`/`"1.15.0"`**, now
+  that hara/fmea/tara/safety-case/sas/sci schema conformance, the content-quality baseline, and
+  the two v1.15.0 MUSTs are all implemented.
+
+43 new/updated regression tests (29 unit-level in `test_stub_detect.adb`, 14 CLI-level in
+`test_cli.adb`); 733/733 checks passing (was 690).
+
 ### Fixed (issue #69, part 5/6 -- sci hash/version field conformance)
 
 `sci.json` brought into conformance with section 2.7's hash-field convention and the section 9.3
