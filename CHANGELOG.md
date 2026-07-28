@@ -5,6 +5,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+### Fixed (deep-audit PR6/11 -- report-extension fields, init's required standard)
+
+Continuing the multi-agent audit fix series.
+
+- **`trace`/`qualify --format json` omitted the §3.2 report-extension fields entirely**: `check`
+  and `report` already wrote `projectRoot` (MUST) and `project`/`standard`/`asil`/`sil`/`dal`
+  (SHOULD/MAY), but `trace` and `qualify` never called `Write_Report_Extension` at all. Fixed by
+  adding the call to both. `qualify` doesn't require a `.fusa.json` to run at all (it tests the
+  tool's own rule engine, not a project's compliance), so its `project`/`standard`/`asil`/`sil`/
+  `dal` fields are filled in on a best-effort basis and simply omitted when no config is present.
+- **`init` silently defaulted a missing `--standard` to `"generic"` non-interactively**: the spec
+  is explicit that `standard` is just as required a value as `project.name`, and "if a required
+  value is missing and stdin is not a TTY (CI), `init` MUST exit 2 rather than prompt or write a
+  placeholder config" -- but only the `name` path actually did this; the `standard` path silently
+  wrote a `.fusa.json` with a standard the caller never chose. Fixed to mirror `name`'s existing
+  error handling exactly.
+
+6 new/updated regression tests, plus updates to 5 existing tests that called `init` non-interactively
+without `--standard` and expected the old silent-default behaviour; 604/604 checks passing (was 599).
+
 ### Fixed (deep-audit PR5/11 -- release --full and audit-pack evidence completeness)
 
 Continuing the multi-agent audit fix series.

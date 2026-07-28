@@ -87,8 +87,19 @@ begin
           "check with an unsupported --format exits 2 (usage)");
 
    --  fusa:test REQ-009
-   Check (Fusa.Cli.Run (Args ("init", "--dir", Root, "--name", "t")) = Exit_Ok,
-          "init exits 0 and creates config files");
+   --  Regression: standard is just as required as name (section 9.1
+   --  MUST) -- non-interactively omitting it must exit 2, not silently
+   --  default to "generic".
+   Check (Fusa.Cli.Run (Args ("init", "--dir", Root, "--name", "t")) = Exit_Usage,
+          "init requires --standard, not just --name, when not run "
+          & "interactively");
+   Check (not Fusa.Files.Exists (Root & "/.fusa.json"),
+          "init does not write a placeholder .fusa.json when --standard "
+          & "is missing non-interactively");
+   Check (Fusa.Cli.Run
+            (Args ("init", "--dir", Root, "--name", "t", "--standard", "generic")) = Exit_Ok,
+          "init exits 0 and creates config files once both --name and "
+          & "--standard are given");
    Check (Fusa.Files.Exists (Root & "/.fusa.json"), "init created .fusa.json");
    Check (Fusa.Files.Exists (Root & "/.fusa-reqs.json"), "init created .fusa-reqs.json");
 
@@ -210,6 +221,16 @@ begin
           "qualify writes qualify-report.json by default");
    Check (Fusa.Cli.Run (Args ("qualify", "--dir", Root, "--format", "json")) = Exit_Ok,
           "qualify --format json also exits 0");
+   --  Regression: qualify --format json used to omit the section 3.2
+   --  report-extension fields entirely -- projectRoot is MUST.
+   declare
+      Exit_Code : Integer;
+      Out_Text  : constant String :=
+        Run_Capturing_Stdout (Args ("qualify", "--dir", Root, "--format", "json"), Exit_Code);
+   begin
+      Check (Ada.Strings.Fixed.Index (Out_Text, """projectRoot"": """) > 0,
+             "qualify --format json now includes the MUST projectRoot field");
+   end;
    Check (Fusa.Cli.Run (Args ("qualify", "--dir", Root, "--format", "bogus")) = Exit_Usage,
           "qualify rejects an unsupported --format with a usage error");
 
@@ -1327,6 +1348,19 @@ begin
           "trace with no requirements file exits 0");
    Check (Fusa.Cli.Run (Args ("trace", "--dir", Root, "--format", "json")) = Exit_Ok,
           "trace --format json exits 0");
+   --  Regression: trace --format json used to omit the section 3.2
+   --  report-extension fields (projectRoot MUST, standard SHOULD, ...)
+   --  entirely.
+   declare
+      Exit_Code : Integer;
+      Out_Text  : constant String :=
+        Run_Capturing_Stdout (Args ("trace", "--dir", Root, "--format", "json"), Exit_Code);
+   begin
+      Check (Ada.Strings.Fixed.Index (Out_Text, """projectRoot"": """) > 0,
+             "trace --format json now includes the MUST projectRoot field");
+      Check (Ada.Strings.Fixed.Index (Out_Text, """standard"": """) > 0,
+             "trace --format json now includes the SHOULD standard field");
+   end;
    --  fusa:test REQ-011
    Check (Fusa.Cli.Run (Args ("trace", "--dir", Root, "--format", "html")) = Exit_Ok,
           "trace --format html exits 0");
@@ -1393,7 +1427,8 @@ begin
       end if;
       Ada.Directories.Create_Path (Func_Strict_Root & "/src");
       Check (Fusa.Cli.Run
-               (Args ("init", "--dir", Func_Strict_Root, "--name", "t")) = Exit_Ok,
+               (Args ("init", "--dir", Func_Strict_Root, "--name", "t",
+                      "--standard", "generic")) = Exit_Ok,
              "func-strict fixture: init exits 0");
       declare
          Reqs : Fusa.Config.Requirement_List;
@@ -1576,11 +1611,15 @@ begin
       end if;
       Ada.Directories.Create_Path (Root2);
 
-      Check (Fusa.Cli.Run (Args ("init", "--dir", Root2, "positional-name")) = Exit_Ok,
+      Check (Fusa.Cli.Run
+               (Args ("init", "--dir", Root2, "positional-name",
+                      "--standard", "generic")) = Exit_Ok,
              "init accepts a positional project name");
-      Check (Fusa.Cli.Run (Args ("init", "--dir", Root2, "--name", "ignored")) = Exit_Ok,
-             "a second init without --force still exits 0 (name is still required, "
-             & "but the existing config file is left alone)");
+      Check (Fusa.Cli.Run
+               (Args ("init", "--dir", Root2, "--name", "ignored",
+                      "--standard", "generic")) = Exit_Ok,
+             "a second init without --force still exits 0 (name/standard "
+             & "are still required, but the existing config file is left alone)");
 
       declare
          Unchanged : constant Fusa.Config.Project_Config := Fusa.Config.Load (Root2);

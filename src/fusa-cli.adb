@@ -393,7 +393,16 @@ package body Fusa.Cli is
                Standard := To_Unbounded_String (if S'Length = 0 then "generic" else S);
             end;
          else
-            Standard := To_Unbounded_String ("generic");
+            --  section 9.1 MUST: "standard" is a required value exactly
+            --  like "project.name" -- if it's missing and stdin is not a
+            --  TTY (CI), init MUST exit 2 rather than prompt or write a
+            --  placeholder config. Regression: this used to silently
+            --  default to "generic" instead, writing a .fusa.json whose
+            --  standard the caller never actually chose.
+            Ada.Text_IO.Put_Line
+              (Ada.Text_IO.Standard_Error,
+               "ada-FuSa: init requires --standard when not run interactively");
+            return Exit_Usage;
          end if;
       end if;
 
@@ -721,6 +730,13 @@ package body Fusa.Cli is
                   begin
                      W.Object_Start;
                      Fusa.Report.Write_Header (W, "trace-matrix");
+                     --  §3.2: trace is a report document and MUST carry
+                     --  projectRoot (+ SHOULD/MAY project/standard/asil/
+                     --  sil/dal) -- this was missing entirely.
+                     Fusa.Report.Write_Report_Extension
+                       (W, Absolute_Path (Dir), To_String (Cfg.Name),
+                        To_String (Cfg.Standard), To_String (Cfg.Asil),
+                        To_String (Cfg.Sil), To_String (Cfg.Dal));
 
                      W.Key ("requirements");
                      W.Array_Start;
@@ -1144,6 +1160,37 @@ package body Fusa.Cli is
             begin
                W.Object_Start;
                Fusa.Report.Write_Header (W, "qualification");
+               --  §3.2: qualify is a report document and MUST carry
+               --  projectRoot -- this was missing entirely. qualify itself
+               --  never requires a .fusa.json (it tests the tool's own
+               --  rule engine, not the qualified project's compliance), so
+               --  the SHOULD/MAY project/standard/asil/sil/dal fields are
+               --  filled in on a best-effort basis and simply omitted
+               --  (Write_Report_Extension already does this for blanks)
+               --  when no config is present or it fails to load.
+               declare
+                  Proj_Name, Proj_Standard, Proj_Asil, Proj_Sil, Proj_Dal :
+                    Unbounded_String := Null_Unbounded_String;
+               begin
+                  begin
+                     declare
+                        Qcfg : constant Fusa.Config.Project_Config := Fusa.Config.Load (Dir);
+                     begin
+                        Proj_Name     := Qcfg.Name;
+                        Proj_Standard := Qcfg.Standard;
+                        Proj_Asil     := Qcfg.Asil;
+                        Proj_Sil      := Qcfg.Sil;
+                        Proj_Dal      := Qcfg.Dal;
+                     end;
+                  exception
+                     when Fusa.Config.No_Config_Error | Fusa.Config.Invalid_Config_Error =>
+                        null;
+                  end;
+                  Fusa.Report.Write_Report_Extension
+                    (W, Absolute_Path (Dir), To_String (Proj_Name),
+                     To_String (Proj_Standard), To_String (Proj_Asil),
+                     To_String (Proj_Sil), To_String (Proj_Dal));
+               end;
                W.Field ("total", Total);
                W.Field ("passed", Passed);
                W.Field ("failed", Failed);
