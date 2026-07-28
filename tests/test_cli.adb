@@ -155,6 +155,29 @@ begin
    Check (Fusa.Cli.Run (Args ("qualify", "--dir", Root, "--format", "bogus")) = Exit_Usage,
           "qualify rejects an unsupported --format with a usage error");
 
+   --  fusa:test REQ-077
+   --  section 6 MAY: hash is present, "sha256:"-prefixed, and -- since it's
+   --  computed with generatedAt blanked before hashing -- byte-identical
+   --  across two independent runs.
+   declare
+      Exit_Code1, Exit_Code2 : Integer;
+      Out1 : constant String :=
+        Run_Capturing_Stdout
+          (Args ("qualify", "--dir", Root, "--format", "json"), Exit_Code1);
+      Out2 : constant String :=
+        Run_Capturing_Stdout
+          (Args ("qualify", "--dir", Root, "--format", "json"), Exit_Code2);
+      Idx1 : constant Natural := Ada.Strings.Fixed.Index (Out1, """hash"": ""sha256:");
+      Idx2 : constant Natural := Ada.Strings.Fixed.Index (Out2, """hash"": ""sha256:");
+   begin
+      Check (Idx1 > 0, "qualify --format json includes a sha256:-prefixed hash field");
+      Check (Idx1 > 0 and then Idx2 > 0
+             and then Out1 (Idx1 .. Idx1 + 79) = Out2 (Idx2 .. Idx2 + 79),
+             "qualify's hash is byte-identical across two independent runs "
+             & "(reproducible per spec section 6, since generatedAt is "
+             & "blanked before hashing)");
+   end;
+
    --  fusa:test REQ-013
    Check (Fusa.Cli.Run (Args ("release", "--dir", Root)) = Exit_Ok, "release exits 0");
    Check (Fusa.Files.Exists (Root & "/sbom.json"), "release writes sbom.json");
@@ -166,6 +189,21 @@ begin
           "release --full writes artifact-manifest.json");
    Check (Fusa.Files.Exists (Root & "/audit-pack.zip"),
           "release --full also produces audit-pack.zip as its final step");
+
+   --  fusa:test REQ-076
+   Check (not Fusa.Files.Exists (Root & "/t-0.1.0.spdx.json"),
+          "release without --spdx-version does not write an SPDX document");
+   Check (Fusa.Cli.Run (Args ("release", "--dir", Root, "--spdx-version", "2.3")) = Exit_Ok,
+          "release --spdx-version 2.3 exits 0");
+   Check (Fusa.Files.Exists (Root & "/t-0.1.0.spdx.json"),
+          "release --spdx-version 2.3 writes <name>-<version>.spdx.json");
+   Check (Fusa.Cli.Run
+            (Args ("release", "--dir", Root, "--spdx-version", "9.9")) = Exit_Usage,
+          "release rejects an unsupported --spdx-version value with a usage error");
+   Check (Fusa.Cli.Run
+            (Args ("release", "--dir", Root, "--spdx-version", "3.0.1")) = Exit_Usage,
+          "release --spdx-version 3.0.1 is rejected as not yet implemented "
+          & "(rather than silently emitting a mislabeled 2.x-shaped document)");
 
    --  fusa:test REQ-014
    Check (Fusa.Cli.Run (Args ("audit-pack", "--dir", Root)) = Exit_Ok, "audit-pack exits 0");
@@ -428,5 +466,44 @@ begin
       Check (Fusa.Cli.Run (Args ("init", "--dir", Root3)) = Exit_Usage,
              "init with no name available and no TTY exits 2 (usage)");
       Ada.Directories.Delete_Tree (Root3);
+   end;
+
+   --  fusa:test REQ-075
+   declare
+      Root4 : constant String := "tmp_test_cli_migrate";
+   begin
+      if Ada.Directories.Exists (Root4) then
+         Ada.Directories.Delete_Tree (Root4);
+      end if;
+      Ada.Directories.Create_Path (Root4);
+      Fusa.Files.Write_File
+        (Root4 & "/.adafusa.json",
+         "{""configVersion"":""1.0"",""project"":{""name"":""legacyproj""}," &
+         """standard"":""generic""}");
+      Fusa.Files.Write_File
+        (Root4 & "/.adafusa-reqs.json",
+         "{""requirements"":[{""id"":""REQ-X"",""title"":""t"",""text"":""x""," &
+         """level"":""SW""}]}");
+
+      Check (Fusa.Cli.Run (Args ("init", "--dir", Root4, "--migrate")) = Exit_Ok,
+             "init --migrate exits 0");
+      Check (Fusa.Files.Exists (Root4 & "/.fusa.json")
+             and then not Fusa.Files.Exists (Root4 & "/.adafusa.json"),
+             "init --migrate renames .adafusa.json to the canonical name");
+      Check (Fusa.Files.Exists (Root4 & "/.fusa-reqs.json")
+             and then not Fusa.Files.Exists (Root4 & "/.adafusa-reqs.json"),
+             "init --migrate renames .adafusa-reqs.json to the canonical name");
+
+      declare
+         Cfg : constant Fusa.Config.Project_Config := Fusa.Config.Load (Root4);
+      begin
+         Check (To_String (Cfg.Name) = "legacyproj",
+                "init --migrate preserves the legacy config's content, not just its name");
+      end;
+
+      Check (Fusa.Cli.Run (Args ("init", "--dir", Root4, "--migrate")) = Exit_Ok,
+             "init --migrate is a harmless no-op (still exits 0) once nothing legacy remains");
+
+      Ada.Directories.Delete_Tree (Root4);
    end;
 end Test_Cli;

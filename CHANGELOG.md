@@ -118,6 +118,20 @@ repro steps and rationale on each.
   `md` (GitHub-Flavored Markdown) for `report`; `trace` gains both `html` and `md` rendering a
   requirements/coverage table. `capabilities` updated to accurately report the new per-command
   formats. 2 new requirements (REQ-073/REQ-074) (#31).
+- Three MAY-level spec provisions (#38):
+  - `qualify` emits a `hash` field: `sha256:` + hex(SHA-256(canonical)), where canonical is the
+    document (results sorted by name, `hash` field absent, `generatedAt` blanked) serialised per
+    RFC 8785 JCS — verified reproducible: byte-identical across independent runs, and cross-checked
+    against an independent Python re-implementation of the same canonicalization.
+  - `release --spdx-version [2.2|2.3]` emits `<name>-<version>.spdx.json` alongside `sbom.json`;
+    defaults to `2.3` when the flag's mere presence opts in. `--spdx-version 3.0.1` is explicitly
+    rejected as not yet implemented (its JSON-LD graph model is a different document shape) rather
+    than silently mislabeling a 2.x-shaped document.
+  - `init --migrate` performs a one-shot rename of legacy `.adafusa.json`/`.adafusa-reqs.json` to
+    their canonical names, distinct from the automatic legacy-fallback-with-warning `Load`/
+    `Load_Requirements` already perform transparently on every command.
+  - 3 new requirements (REQ-075/REQ-076/REQ-077). The fourth MAY item in #38 (`init` `.github`/
+    git-hook scaffolding) remains deferred per the issue's own low-priority guidance.
 
 ## v0.1.0 — 2026-07-27
 

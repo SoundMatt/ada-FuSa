@@ -443,6 +443,24 @@
       "title": "Markdown findings rendering",
       "text": "Render_Md renders a findings list as a GitHub-Flavored Markdown table, escaping a literal pipe character in message content, for report --format md and (in a requirements-table shape) trace --format md.",
       "level": "SW"
+    },
+    {
+      "id": "REQ-075",
+      "title": "init --migrate legacy file rename",
+      "text": "init --migrate performs a one-shot explicit rename of legacy .adafusa.json/.adafusa-reqs.json to their canonical names, distinct from the automatic legacy-fallback-with-warning Load/Load_Requirements already perform transparently.",
+      "level": "SW"
+    },
+    {
+      "id": "REQ-076",
+      "title": "release SPDX document emission",
+      "text": "release --spdx-version emits a <name>-<version>.spdx.json document (SPDX 2.2/2.3 JSON shape) alongside sbom.json when the flag is present; --spdx-version defaults to 2.3 and 3.0.1 (JSON-LD graph model) is explicitly rejected as not yet implemented.",
+      "level": "SW"
+    },
+    {
+      "id": "REQ-077",
+      "title": "qualify hash field (RFC 8785 JCS)",
+      "text": "qualify emits a hash field computed as sha256: + hex(SHA-256(canonical)), where canonical is the document (results sorted by name, hash field itself absent, generatedAt blanked) serialised per RFC 8785 JSON Canonicalization Scheme, making the hash reproducible across independent runs of the same known-answer results.",
+      "level": "SW"
     }
   ]
 }

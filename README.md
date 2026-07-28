@@ -23,7 +23,8 @@ spec-conformant CLI contract for that to build on.
   are all hand-rolled, since none of them are part of the Ada standard library. GNAT is a build/dev
   dependency only.
 - **Self-qualifying** — `adafusa qualify` runs a known-answer test against every registered rule
-  and writes a signed `qualify-report.json`.
+  and writes `qualify-report.json` with a reproducible `sha256:` integrity `hash` (RFC 8785 JCS
+  canonicalization).
 - **8 starter rules** (`ADA001`–`ADA008`), drawn from the Ada Quality and Style Guide rather than a
   ported MISRA-style list (see [SoundMatt/FuSaOps#78](https://github.com/SoundMatt/FuSaOps/issues/78)).
 - **Evidence artifacts**: `sbom.json` (x-FuSa SBOM v1), `qualify-report.json`, SARIF 2.1.0,
@@ -76,11 +77,11 @@ the simplest route, since GNAT is not distributed via Homebrew.
 |---------|-------------|---------|
 | `adafusa version [--format text\|json]` | Print tool + spec version | text, json |
 | `adafusa capabilities [--format json]` | Machine-readable command/format inventory | json |
-| `adafusa init [name] [--name] [--standard] [--asil\|--sil\|--dal] [--force]` | Create `.fusa.json` + `.fusa-reqs.json` | text |
+| `adafusa init [name] [--name] [--standard] [--asil\|--sil\|--dal] [--force] [--migrate]` | Create `.fusa.json` + `.fusa-reqs.json` (or rename legacy files to canonical names) | text |
 | `adafusa check [--dir] [--strict]` | Run all rules and report findings | text, json, sarif, html |
 | `adafusa trace [--dir] [--gaps] [--req-coverage N] [--sec-tested N] [--func-coverage N]` | Requirement ↔ code traceability matrix | text, json, html, md |
 | `adafusa qualify [--dir]` | Run the tool-qualification known-answer suite | text, json |
-| `adafusa release [--dir] [--output-dir] [--full]` | Generate `sbom.json` (+ full evidence pipeline) | json |
+| `adafusa release [--dir] [--output-dir] [--spdx-version 2.2\|2.3] [--full]` | Generate `sbom.json` (+ optional SPDX, + full evidence pipeline) | json |
 | `adafusa audit-pack [--dir] [--output]` | Bundle all evidence artifacts into a ZIP | json |
 | `adafusa report [--dir]` | Re-run analysis; always exits 0 | text, json, sarif, html, md |
 
