@@ -516,6 +516,7 @@ package Fusa.Config is
       Id             : Unbounded_String;
       Kind           : Unbounded_String; --  goal|strategy|context|solution|assumption|justification
       Text           : Unbounded_String;
+      Evidence       : Unbounded_String; --  solution nodes SHOULD set (§9.2)
       Supported_By   : String_List;
       In_Context_Of  : String_List;
    end record;
@@ -523,6 +524,12 @@ package Fusa.Config is
    package Gsn_Node_Vectors is new
      Ada.Containers.Indefinite_Vectors (Positive, Gsn_Node);
    subtype Gsn_Node_List is Gsn_Node_Vectors.Vector;
+
+   type Gsn_Completeness is record
+      Total_Goals        : Natural := 0;
+      Goals_With_Evidence : Natural := 0;
+      Undeveloped         : Natural := 0;
+   end record;
 
    --  fusa:req REQ-107
    function Safety_Case_Exists (Project_Root : String) return Boolean;
@@ -534,14 +541,27 @@ package Fusa.Config is
    --  broken argument reference, not just an incomplete field) but does
    --  not remove the referencing node itself; an unrecognised/missing
    --  "kind" is a WARNING (the node is still returned, rendered
-   --  generically). Root_Goal is the file's "rootGoal" field verbatim,
-   --  even if it names an id that doesn't (yet) resolve -- callers that
-   --  render a tree from it are expected to handle that gracefully.
+   --  generically); a solution node whose "evidence" names a file that
+   --  does not exist in the project is a WARNING (GSN004) -- a claim of
+   --  evidence the project doesn't actually contain is worse than an
+   --  honestly missing solution (§9.2). Root_Goal is the file's
+   --  "rootGoal" field verbatim, even if it names an id that doesn't
+   --  (yet) resolve -- callers that render a tree from it are expected
+   --  to handle that gracefully.
    --  fusa:req REQ-107
    function Load_Safety_Case
      (Project_Root : String;
       Findings     : in out Finding_List;
       Root_Goal    : out Unbounded_String) return Gsn_Node_List;
+
+   --  Computes the §9.2 "completeness" block: totalGoals is the count of
+   --  "goal"-typed nodes; goalsWithEvidence is how many of those have a
+   --  supportedBy chain (transitively) reaching a solution node with a
+   --  non-blank evidence field; undeveloped is how many goals have no
+   --  supportedBy chain at all.
+   --  fusa:req REQ-107
+   function Safety_Case_Completeness
+     (Nodes : Gsn_Node_List) return Gsn_Completeness;
 
    --  fusa:req REQ-107
    procedure Scaffold_Safety_Case (Project_Root : String);

@@ -489,5 +489,44 @@ begin
              & "and S1 is still returned rather than excluded");
    end;
 
+   --  fusa:test REQ-107
+   Fusa.Files.Write_File (Root & "/real-evidence.txt", "evidence" & ASCII.LF);
+   Fusa.Files.Write_File
+     (Root & "/" & Fusa.Config.Safety_Case_File,
+      "{""rootGoal"":""G1"",""nodes"":[" &
+      "{""id"":""G1"",""type"":""goal"",""text"":""top"",""supportedBy"":[""St1""]}," &
+      "{""id"":""St1"",""type"":""strategy"",""text"":""strat"",""supportedBy"":[""Sn1""]}," &
+      "{""id"":""Sn1"",""type"":""solution"",""text"":""sol"",""evidence"":" &
+      """real-evidence.txt""}," &
+      "{""id"":""G2"",""type"":""goal"",""text"":""undeveloped""}," &
+      "{""id"":""G3"",""type"":""goal"",""text"":""bad evidence"",""supportedBy"":[""Sn2""]}," &
+      "{""id"":""Sn2"",""type"":""solution"",""text"":""sol2"",""evidence"":" &
+      """missing-evidence.txt""}" &
+      "]}");
+   declare
+      Findings     : Finding_List;
+      Root_Goal    : Unbounded_String;
+      Nodes        : constant Fusa.Config.Gsn_Node_List :=
+        Fusa.Config.Load_Safety_Case (Root, Findings, Root_Goal);
+      Completeness : constant Fusa.Config.Gsn_Completeness :=
+        Fusa.Config.Safety_Case_Completeness (Nodes);
+      Gsn004_Hits  : Natural := 0;
+   begin
+      for F of Findings loop
+         if F.Rule_Id = "GSN004" then
+            Gsn004_Hits := Gsn004_Hits + 1;
+         end if;
+      end loop;
+      Check (Gsn004_Hits = 1,
+             "GSN004 fires once, for Sn2's evidence naming a file that doesn't exist "
+             & "(Sn1's real-evidence.txt is not flagged)");
+      Check (Completeness.Total_Goals = 3, "three goal-typed nodes");
+      Check (Completeness.Goals_With_Evidence = 2,
+             "G1 (via St1->Sn1) and G3 (via Sn2) each reach a solution node with a "
+             & "non-blank evidence field");
+      Check (Completeness.Undeveloped = 1,
+             "G2 has no supportedBy chain at all");
+   end;
+
    Ada.Directories.Delete_Tree (Root);
 end Test_Config;

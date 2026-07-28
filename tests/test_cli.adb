@@ -981,11 +981,13 @@ begin
           "safety-case with no file scaffolds a template and exits 0");
    Check (Fusa.Files.Exists (Root & "/.fusa-safety-case.json"),
           "safety-case created .fusa-safety-case.json");
+   Fusa.Files.Write_File (Root & "/qualify-report.json", "{}" & ASCII.LF);
    Fusa.Files.Write_File
      (Root & "/.fusa-safety-case.json",
       "{""rootGoal"":""G1"",""nodes"":[" &
         "{""id"":""G1"",""type"":""goal"",""text"":""top"",""supportedBy"":[""Sn1""]}," &
-        "{""id"":""Sn1"",""type"":""solution"",""text"":""evidence""}]}");
+        "{""id"":""Sn1"",""type"":""solution"",""text"":""evidence""," &
+        """evidence"":""qualify-report.json""}]}");
    declare
       Exit_Code : Integer;
       Out_Text  : constant String :=
@@ -995,6 +997,8 @@ begin
       Check (Ada.Strings.Fixed.Index (Out_Text, "[goal] G1") > 0
              and then Ada.Strings.Fixed.Index (Out_Text, "[solution] Sn1") > 0,
              "safety-case's text outline shows both the root goal and its supporting solution");
+      Check (Ada.Strings.Fixed.Index (Out_Text, "(evidence: qualify-report.json)") > 0,
+             "safety-case's text outline shows Sn1's evidence file");
    end;
    declare
       Exit_Code : Integer;
@@ -1020,6 +1024,14 @@ begin
              & "(from/to/type), per the spec canonical shape, not embedded per-node");
       Check (Ada.Strings.Fixed.Index (Out_Json, """supportedBy"":") = 0,
              "safety-case --format json no longer embeds supportedBy directly on each node");
+      Check (Ada.Strings.Fixed.Index (Out_Json, """evidence"": ""qualify-report.json""") > 0,
+             "safety-case --format json includes Sn1's evidence field");
+      Check (Ada.Strings.Fixed.Index (Out_Json, """completeness"":") > 0
+             and then Ada.Strings.Fixed.Index (Out_Json, """totalGoals"": 1") > 0
+             and then Ada.Strings.Fixed.Index (Out_Json, """goalsWithEvidence"": 1") > 0
+             and then Ada.Strings.Fixed.Index (Out_Json, """undeveloped"": 0") > 0,
+             "safety-case --format json includes the completeness block "
+             & "(G1 is supported by a solution with evidence)");
    end;
    Fusa.Files.Write_File
      (Root & "/.fusa-safety-case.json",

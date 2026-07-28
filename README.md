@@ -398,12 +398,17 @@ anything else this tool does, so its scope is deliberately narrow:
   explicit `rpn` that disagrees. `safety-case` loads/validates `.fusa-safety-case.json` (GSN
   goal/strategy/context/solution/assumption/justification nodes, with `supportedBy`/`inContextOf`
   relationships given per-node in the *input* file), checking only *structural* well-formedness —
-  every id unique, every reference resolving to a real node — and renders the argument as a
-  text/Markdown outline, a Mermaid diagram, or (in `--format json`) the spec's canonical `{ nodes:
-  [{id,type,text}], edges: [{from,to,type}] }` shape, with `supportedBy`/`inContextOf` promoted to a
-  top-level `edges[]` array rather than embedded per-node. It never claims the argument itself is
-  valid or complete. Both scaffold an empty template on first run and gate only on structural
-  errors (missing id; for `safety-case`, also a dangling reference).
+  every id unique, every reference resolving to a real node, and (WARNING, `GSN004`) a solution
+  node's `evidence` naming a file that actually exists in the project — and renders the argument
+  as a text/Markdown outline, a Mermaid diagram, or (in `--format json`) the spec's canonical
+  `{ nodes: [{id,type,text,evidence?}], edges: [{from,to,type}], completeness:
+  {totalGoals,goalsWithEvidence,undeveloped} }` shape, with `supportedBy`/`inContextOf` promoted to
+  a top-level `edges[]` array rather than embedded per-node. `completeness` is computed by tracing
+  each goal's `supportedBy` chain for a solution node with non-blank evidence; a goal with no
+  `supportedBy` chain at all counts toward `undeveloped` rather than being silently omitted. It
+  never claims the argument itself is valid or complete. Both scaffold an empty template on first
+  run and gate only on structural errors (missing id; for `safety-case`, also a dangling
+  reference — a false evidence claim is a WARNING, not a gate failure).
 
 ## Evidence Artifacts
 

@@ -1750,8 +1750,11 @@ package body Fusa.Config is
                            Category    => Fusa.Safety,
                            Remediation => "give this node a non-empty string ""id"""));
                   else
-                     N.Id   := To_Unbounded_String (Id);
-                     N.Text := To_Unbounded_String (Fusa.Json.Get_String (Item, "text"));
+                     N.Id       := To_Unbounded_String (Id);
+                     N.Text     := To_Unbounded_String
+                       (Fusa.Json.Get_String (Item, "text"));
+                     N.Evidence := To_Unbounded_String
+                       (Fusa.Json.Get_String (Item, "evidence"));
                      if Kind = "goal" or else Kind = "strategy" or else Kind = "context"
                        or else Kind = "solution" or else Kind = "assumption"
                        or else Kind = "justification"
@@ -1837,8 +1840,97 @@ package body Fusa.Config is
          end loop;
       end;
 
+      --  Third pass: a solution node's evidence is a claim about the
+      --  project's actual artifacts -- a claim naming a file the project
+      --  doesn't contain is worse than an honestly missing solution (§9.2).
+      for N of Result loop
+         if To_String (N.Kind) = "solution"
+           and then Length (N.Evidence) > 0
+         then
+            if not Fusa.Files.Exists
+              (Fusa.Files.Join (Project_Root, To_String (N.Evidence)))
+            then
+               Findings.Append
+                 (Make_Finding
+                    (Rule_Id     => "GSN004",
+                     Severity    => Warning,
+                     Message     =>
+                       "solution node """ & To_String (N.Id) &
+                       """ claims evidence """ & To_String (N.Evidence) &
+                       """, which does not exist in the project",
+                     Loc         => Make_Location (Safety_Case_File),
+                     Category    => Fusa.Safety,
+                     Remediation =>
+                       "point evidence at a real artifact this tool " &
+                       "produced, or remove the claim"));
+            end if;
+         end if;
+      end loop;
+
       return Result;
    end Load_Safety_Case;
+
+   function Safety_Case_Completeness
+     (Nodes : Gsn_Node_List) return Gsn_Completeness
+   is
+      Result : Gsn_Completeness;
+
+      function Find (Id : String) return Gsn_Node is
+         Empty : Gsn_Node;
+      begin
+         for N of Nodes loop
+            if To_String (N.Id) = Id then
+               return N;
+            end if;
+         end loop;
+         return Empty;
+      end Find;
+
+      function Reaches_Evidence
+        (Id : String; Visited : String_List) return Boolean
+      is
+      begin
+         for V of Visited loop
+            if V = Id then
+               return False;
+            end if;
+         end loop;
+         declare
+            N        : constant Gsn_Node := Find (Id);
+            Visited2 : String_List := Visited;
+         begin
+            if Length (N.Id) = 0 then
+               return False;
+            end if;
+            if To_String (N.Kind) = "solution"
+              and then Length (N.Evidence) > 0
+            then
+               return True;
+            end if;
+            Visited2.Append (Id);
+            for Child of N.Supported_By loop
+               if Reaches_Evidence (Child, Visited2) then
+                  return True;
+               end if;
+            end loop;
+            return False;
+         end;
+      end Reaches_Evidence;
+
+      Empty_Visited : String_List;
+   begin
+      for N of Nodes loop
+         if To_String (N.Kind) = "goal" then
+            Result.Total_Goals := Result.Total_Goals + 1;
+            if N.Supported_By.Is_Empty then
+               Result.Undeveloped := Result.Undeveloped + 1;
+            elsif Reaches_Evidence (To_String (N.Id), Empty_Visited) then
+               Result.Goals_With_Evidence := Result.Goals_With_Evidence + 1;
+            end if;
+         end if;
+      end loop;
+      return Result;
+   end Safety_Case_Completeness;
 
    procedure Scaffold_Safety_Case (Project_Root : String) is
    begin
