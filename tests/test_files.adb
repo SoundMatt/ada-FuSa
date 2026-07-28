@@ -68,6 +68,39 @@ begin
    Check (Fusa.Files.Join ("proj/", "src") = "proj/src",
           "a trailing slash on Dir does not produce a double separator");
 
+   --  Regression (security): Join never resolved ".." segments, so
+   --  Join("/proj", "../outside") produced the literal string
+   --  "/proj/../outside" -- which Relative_To's purely-lexical prefix
+   --  check then WRONGLY treated as "inside" /proj (the string does
+   --  start with "/proj/"), silently letting a sourceDirs entry escape
+   --  the project root for both reads and, downstream via `fix --apply`,
+   --  writes.
+   --  fusa:test REQ-060
+   Check (Fusa.Files.Join ("/proj", "../outside") = "/outside",
+          "'..' actually climbs out of the preceding real segment, not "
+          & "left as a literal (still-escaping) path component");
+   Check (Fusa.Files.Join ("/proj", "src/../../../etc") = "/etc",
+          "multiple '..' segments climb correctly, stopping at '/' "
+          & "rather than underflowing");
+   Check (Fusa.Files.Join ("/proj", "a/b/../c") = "/proj/a/c",
+          "an interior '..' pops exactly the one preceding real segment");
+   Check (Fusa.Files.Join ("/proj", "..") = "/",
+          "a bare '..' climbs to the parent of an absolute Dir");
+   Check (Fusa.Files.Relative_To ("/proj", Fusa.Files.Join ("/proj", "../outside")) =
+            "/outside",
+          "once '..' is resolved, Relative_To correctly reports the escaped "
+          & "path as NOT inside /proj (returned unchanged, still absolute) "
+          & "instead of silently stripping a prefix that was never really there");
+
+   --  fusa:test REQ-117
+   Check (Fusa.Files.Is_Within ("/proj", "/proj"), "Root is within itself");
+   Check (Fusa.Files.Is_Within ("/proj", "/proj/src/x.adb"),
+          "a genuine subdirectory/file is within Root");
+   Check (not Fusa.Files.Is_Within ("/proj", "/projbackup/x.adb"),
+          "a sibling that is merely a string-prefix of Root is NOT within it");
+   Check (not Fusa.Files.Is_Within ("/proj", "/outside/x.adb"),
+          "a completely unrelated path is not within Root");
+
    declare
       Full : constant String := Fusa.Files.Join ("/proj", "./src");
    begin

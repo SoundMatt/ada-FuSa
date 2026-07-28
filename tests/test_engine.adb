@@ -122,6 +122,38 @@ begin
       Check (Hits_Y = 0, "ADA001 is suppressed by a trailing -- fusa:unsafe comment");
    end;
 
+   --  Regression (critical security): a sourceDirs entry of "../..." used
+   --  to escape the project root entirely -- Find_Source_Files would
+   --  scan (and, downstream via `fix --apply`, could overwrite) files
+   --  well outside Root. It must now be silently skipped, the same way a
+   --  non-existent directory already is.
+   --  fusa:test REQ-056
+   declare
+      Outside_Root : constant String := "tmp_test_engine_outside_secret";
+   begin
+      if Ada.Directories.Exists (Outside_Root) then
+         Ada.Directories.Delete_Tree (Outside_Root);
+      end if;
+      Ada.Directories.Create_Path (Outside_Root);
+      Fusa.Files.Write_File
+        (Outside_Root & "/leak.ads", "package Leak is end Leak;" & ASCII.LF);
+
+      declare
+         Cfg : Fusa.Config.Project_Config := Fusa.Config.Default_Config ("t");
+      begin
+         Cfg.Source_Dirs.Append ("../" & Outside_Root);
+         declare
+            Files : constant String_List := Fusa.Source_Scan.Find_Source_Files (Root, Cfg);
+         begin
+            Check (Files.Is_Empty,
+                   "a sourceDirs entry resolving outside the project root is "
+                   & "silently skipped, not walked -- Find_Source_Files must never "
+                   & "read (or let `fix --apply` later write) anything outside Root");
+         end;
+      end;
+      Ada.Directories.Delete_Tree (Outside_Root);
+   end;
+
    --  Regressions from the deep audit: case-sensitive / same-line-only /
    --  whitespace-brittle matching in the lint rules.
    Fusa.Files.Write_File

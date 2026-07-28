@@ -145,6 +145,54 @@ begin
           & "(a denied waiver, not a dismissal)");
    Ada.Directories.Delete_File (Root & "/.fusa-dispositions.json");
 
+   --  Regression: a file-scoped disposition (a "file" given, "line"
+   --  omitted) used to match EVERY finding for that rule project-wide,
+   --  not just findings in the named file, because Matches's
+   --  "E.Line = 0 or else (...)" short-circuited to True without ever
+   --  consulting E.File.
+   --  fusa:test REQ-072
+   declare
+      Disp_Root : constant String := "tmp_test_cli_disposition_scope";
+   begin
+      if Ada.Directories.Exists (Disp_Root) then
+         Ada.Directories.Delete_Tree (Disp_Root);
+      end if;
+      Ada.Directories.Create_Path (Disp_Root & "/src");
+      Fusa.Files.Write_File
+        (Disp_Root & "/.fusa.json", "{""project"":{""name"":""t""},""standard"":""generic""}");
+      Fusa.Files.Write_File (Disp_Root & "/.fusa-reqs.json", "{""requirements"":[]}");
+      Fusa.Files.Write_File
+        (Disp_Root & "/src/a.adb",
+         "procedure A is" & ASCII.LF & "   -- TODO fix this" & ASCII.LF &
+         "begin" & ASCII.LF & "   null;" & ASCII.LF & "end A;" & ASCII.LF);
+      Fusa.Files.Write_File
+        (Disp_Root & "/src/b.adb",
+         "procedure B is" & ASCII.LF & "   -- TODO fix this too" & ASCII.LF &
+         "begin" & ASCII.LF & "   null;" & ASCII.LF & "end B;" & ASCII.LF);
+      Fusa.Files.Write_File
+        (Disp_Root & "/.fusa-dispositions.json",
+         "{""dispositions"":[{""ruleId"":""ADA007"",""file"":""src/a.adb""," &
+         """status"":""accepted""}]}");
+      declare
+         Exit_Code : Integer;
+         Out_Json  : constant String :=
+           Run_Capturing_Stdout
+             (Args ("check", "--dir", Disp_Root, "--format", "json"), Exit_Code);
+      begin
+         Check (Ada.Strings.Fixed.Index (Out_Json, """file"": ""src/a.adb""") > 0
+                and then Ada.Strings.Fixed.Index (Out_Json, """disposition"": ""accepted""") > 0,
+                "a file-scoped disposition (no line) accepts the ADA007 finding "
+                & "in src/a.adb, the file it actually names");
+         Check (Ada.Strings.Fixed.Index (Out_Json, """file"": ""src/b.adb""") > 0,
+                "src/b.adb's ADA007 finding is still present in the output");
+      end;
+      Check (Fusa.Cli.Run (Args ("check", "--dir", Disp_Root, "--strict")) = Exit_Gate_Fail,
+             "check --strict still gate-fails on src/b.adb's ADA007 WARNING -- a "
+             & "file-scoped disposition naming only src/a.adb must NOT also waive "
+             & "the same rule in every other file project-wide");
+      Ada.Directories.Delete_Tree (Disp_Root);
+   end;
+
    --  fusa:test REQ-015
    Check (Fusa.Cli.Run (Args ("report", "--dir", Root)) = Exit_Ok,
           "report always exits 0, even with findings present");
