@@ -1045,8 +1045,15 @@ package body Fusa.Config is
                        To_Unbounded_String (Fusa.Json.Get_String (Item, "failureMode"));
                      E.Effect       := To_Unbounded_String (Fusa.Json.Get_String (Item, "effect"));
                      E.Cause        := To_Unbounded_String (Fusa.Json.Get_String (Item, "cause"));
-                     E.Mitigation   :=
-                       To_Unbounded_String (Fusa.Json.Get_String (Item, "mitigation"));
+                     declare
+                        Mits : constant Fusa.Json.Value_Access :=
+                          Fusa.Json.Get_Array (Item, "mitigations");
+                     begin
+                        for J in 1 .. Fusa.Json.Array_Length (Mits) loop
+                           E.Mitigations.Append
+                             (Fusa.Json.As_String (Fusa.Json.Array_Item (Mits, J)));
+                        end loop;
+                     end;
                      E.Severity     := Get_Rating (Item, "severity");
                      E.Occurrence   := Get_Rating (Item, "occurrence");
                      E.Detection    := Get_Rating (Item, "detection");
@@ -1271,5 +1278,139 @@ package body Fusa.Config is
               "  ""nodes"": []" & ASCII.LF & "}" & ASCII.LF);
       end if;
    end Scaffold_Safety_Case;
+
+   ----------------------------------------------------------------------
+   --  .fusa-verify.json
+   ----------------------------------------------------------------------
+
+   function Verify_Exists (Project_Root : String) return Boolean is
+     (Fusa.Files.Exists (Fusa.Files.Join (Project_Root, Verify_File)));
+
+   function Load_Verify
+     (Project_Root : String;
+      Findings     : in out Finding_List;
+      Passed, Failed : out Natural) return Verify_Suite_List
+   is
+      Result : Verify_Suite_List;
+      Path   : constant String := Fusa.Files.Join (Project_Root, Verify_File);
+   begin
+      Passed := 0;
+      Failed := 0;
+      if not Fusa.Files.Exists (Path) then
+         return Result;
+      end if;
+
+      declare
+         Content : constant String := Fusa.Files.Read_File (Path);
+         Root    : Fusa.Json.Value_Access;
+      begin
+         begin
+            Root := Fusa.Json.Parse (Content);
+         exception
+            when Fusa.Json.Json_Error =>
+               raise Invalid_Config_Error with "parse error in " & Path;
+         end;
+
+         declare
+            Suite_Items : constant Fusa.Json.Value_Access := Fusa.Json.Get_Array (Root, "suites");
+         begin
+            for I in 1 .. Fusa.Json.Array_Length (Suite_Items) loop
+               declare
+                  Suite_Item : constant Fusa.Json.Value_Access :=
+                    Fusa.Json.Array_Item (Suite_Items, I);
+                  Suite_Name : constant String := Fusa.Json.Get_String (Suite_Item, "name");
+               begin
+                  if Suite_Name'Length = 0 then
+                     Findings.Append
+                       (Make_Finding
+                          (Rule_Id     => "VERIFY001",
+                           Severity    => Error,
+                           Message     =>
+                             "suite at index" & Integer'Image (I) &
+                             " has a missing, empty, or non-string name in " & Verify_File,
+                           Loc         => Make_Location (Verify_File),
+                           Category    => Fusa.Requirement,
+                           Remediation => "give this suite a non-empty string ""name"""));
+                  else
+                     declare
+                        Suite      : Verify_Suite;
+                        Test_Items : constant Fusa.Json.Value_Access :=
+                          Fusa.Json.Get_Array (Suite_Item, "tests");
+                     begin
+                        Suite.Name := To_Unbounded_String (Suite_Name);
+                        for J in 1 .. Fusa.Json.Array_Length (Test_Items) loop
+                           declare
+                              Test_Item : constant Fusa.Json.Value_Access :=
+                                Fusa.Json.Array_Item (Test_Items, J);
+                              Test_Name : constant String :=
+                                Fusa.Json.Get_String (Test_Item, "name");
+                              Test_Res  : constant String :=
+                                Fusa.Json.Get_String (Test_Item, "result");
+                           begin
+                              if Test_Name'Length = 0 then
+                                 Findings.Append
+                                   (Make_Finding
+                                      (Rule_Id     => "VERIFY002",
+                                       Severity    => Error,
+                                       Message     =>
+                                         "test at index" & Integer'Image (J) & " in suite """ &
+                                         Suite_Name & """ has a missing, empty, or non-string " &
+                                         "name in " & Verify_File,
+                                       Loc         => Make_Location (Verify_File),
+                                       Category    => Fusa.Requirement,
+                                       Remediation =>
+                                         "give this test a non-empty string ""name"""));
+                              else
+                                 declare
+                                    T : Verify_Test;
+                                 begin
+                                    T.Name := To_Unbounded_String (Test_Name);
+                                    if Test_Res = "PASS" or else Test_Res = "FAIL"
+                                      or else Test_Res = "SKIP" or else Test_Res = "ERROR"
+                                    then
+                                       T.Result := To_Unbounded_String (Test_Res);
+                                       if Test_Res = "PASS" then
+                                          Passed := Passed + 1;
+                                       elsif Test_Res = "FAIL" then
+                                          Failed := Failed + 1;
+                                       end if;
+                                    else
+                                       Findings.Append
+                                         (Make_Finding
+                                            (Rule_Id     => "VERIFY003",
+                                             Severity    => Warning,
+                                             Message     =>
+                                               "test """ & Test_Name & """ in suite """ &
+                                               Suite_Name & """ has a missing or unrecognised " &
+                                               """result"" (expected PASS/FAIL/SKIP/ERROR) in " &
+                                               Verify_File,
+                                             Loc         => Make_Location (Verify_File),
+                                             Category    => Fusa.Requirement,
+                                             Remediation =>
+                                               "set result to one of PASS, FAIL, SKIP, ERROR"));
+                                    end if;
+                                    Suite.Tests.Append (T);
+                                 end;
+                              end if;
+                           end;
+                        end loop;
+                        Result.Append (Suite);
+                     end;
+                  end if;
+               end;
+            end loop;
+         end;
+      end;
+      return Result;
+   end Load_Verify;
+
+   procedure Scaffold_Verify (Project_Root : String) is
+   begin
+      if not Verify_Exists (Project_Root) then
+         Fusa.Files.Write_File
+           (Fusa.Files.Join (Project_Root, Verify_File), "{" & ASCII.LF &
+              "  ""suites"": []" & ASCII.LF & "}" & ASCII.LF);
+      end if;
+   end Scaffold_Verify;
 
 end Fusa.Config;

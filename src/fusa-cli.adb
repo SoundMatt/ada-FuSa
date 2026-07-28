@@ -2946,7 +2946,6 @@ package body Fusa.Cli is
    function Cmd_Verify (Args : String_List) return Integer is
       Dir    : constant String := Dir_Of (Args);
       Format : constant String := Flag_Value (Args, "--format", "text");
-      Names  : String_List;
    begin
       if Format /= "text" and then Format /= "json" then
          Ada.Text_IO.Put_Line
@@ -2956,59 +2955,62 @@ package body Fusa.Cli is
          return Exit_Usage;
       end if;
 
-      Names.Append (".fusa.json");
-      Names.Append (".fusa-reqs.json");
-      Names.Append (".fusa-dispositions.json");
-      Names.Append (".fusa-hara.json");
-      Names.Append (".fusa-tara.json");
-      Names.Append (".fusa-pr.json");
-      Names.Append (".fusa-metrics.json");
-      Names.Append ("qualify-report.json");
-      Names.Append ("sbom.json");
-      Names.Append ("provenance.json");
-      Names.Append ("artifact-manifest.json");
-      Names.Append ("vuln.json");
-      Names.Append ("comp-report.json");
-      Names.Append ("audit-pack.zip");
+      if not Fusa.Config.Verify_Exists (Dir) then
+         Fusa.Config.Scaffold_Verify (Dir);
+         Ada.Text_IO.Put_Line
+           ("created " & Fusa.Files.Join (Dir, Fusa.Config.Verify_File) &
+              " (template) -- record your verification suite results and re-run");
+         return Exit_Ok;
+      end if;
 
       declare
-         Present_Count : Natural := 0;
+         Findings     : Finding_List;
+         Passed, Failed : Natural;
+         Suites       : constant Fusa.Config.Verify_Suite_List :=
+           Fusa.Config.Load_Verify (Dir, Findings, Passed, Failed);
       begin
          if Format = "json" then
             declare
                W : Fusa.Json.Writer.Instance;
             begin
                W.Object_Start;
-               Fusa.Report.Write_Header (W, "evidence-manifest");
-               W.Key ("artifacts");
+               --  §13 canonical direction: {passed, failed, suites:[{name,
+               --  passed, failed, tests:[{name,result}]}]}.
+               Fusa.Report.Write_Header (W, "verify-report");
+               W.Field ("passed", Passed);
+               W.Field ("failed", Failed);
+               W.Key ("suites");
                W.Array_Start;
-               for N of Names loop
+               for S of Suites loop
                   declare
-                     Path    : constant String := Fusa.Files.Join (Dir, N);
-                     Present : constant Boolean := Fusa.Files.Exists (Path);
+                     Suite_Passed, Suite_Failed : Natural := 0;
                   begin
+                     for T of S.Tests loop
+                        if To_String (T.Result) = "PASS" then
+                           Suite_Passed := Suite_Passed + 1;
+                        elsif To_String (T.Result) = "FAIL" then
+                           Suite_Failed := Suite_Failed + 1;
+                        end if;
+                     end loop;
                      W.Object_Start;
-                     W.Field ("name", N);
-                     W.Field ("present", Present);
-                     if Present then
-                        Present_Count := Present_Count + 1;
-                        declare
-                           Content : constant String := Fusa.Files.Read_File (Path);
-                        begin
-                           W.Field ("sha256", Fusa.Sha256.Hex_Digest (Content));
-                           W.Field ("sizeBytes", Content'Length);
-                        end;
-                     end if;
+                     W.Field ("name", To_String (S.Name));
+                     W.Field ("passed", Suite_Passed);
+                     W.Field ("failed", Suite_Failed);
+                     W.Key ("tests");
+                     W.Array_Start;
+                     for T of S.Tests loop
+                        W.Object_Start;
+                        W.Field ("name", To_String (T.Name));
+                        W.Field_If_Non_Blank ("result", To_String (T.Result));
+                        W.Object_End;
+                     end loop;
+                     W.Array_End;
                      W.Object_End;
                   end;
                end loop;
                W.Array_End;
-               W.Key ("summary");
-               W.Object_Start;
-               W.Field ("total", Natural (Names.Length));
-               W.Field ("present", Present_Count);
-               W.Field ("missing", Natural (Names.Length) - Present_Count);
-               W.Object_End;
+               Fusa.Report.Write_Findings_Array (W, Findings);
+               Fusa.Report.Write_Summary (W, Findings);
                W.Object_End;
                Emit (Args, Fusa.Json.Writer.To_String (W));
             end;
@@ -3016,18 +3018,21 @@ package body Fusa.Cli is
             declare
                Buf : Unbounded_String := Null_Unbounded_String;
             begin
-               for N of Names loop
-                  if Fusa.Files.Exists (Fusa.Files.Join (Dir, N)) then
-                     Present_Count := Present_Count + 1;
-                     Append (Buf, "present  " & N & ASCII.LF);
-                  else
-                     Append (Buf, "missing  " & N & ASCII.LF);
-                  end if;
+               for S of Suites loop
+                  Append (Buf, To_String (S.Name) & ":" & ASCII.LF);
+                  for T of S.Tests loop
+                     Append (Buf, "  " & To_String (T.Name) & " [" & To_String (T.Result) &
+                               "]" & ASCII.LF);
+                  end loop;
                end loop;
-               Append (Buf, Trim_Img (Present_Count) & "/" & Trim_Img (Natural (Names.Length)) &
-                         " evidence artifacts present");
+               Append (Buf, Trim_Img (Passed) & " passed, " & Trim_Img (Failed) & " failed, " &
+                         Trim_Img (Natural (Findings.Length)) & " validation findings");
                Emit (Args, To_String (Buf));
             end;
+         end if;
+
+         if Fusa.Report.Has_Gate_Failure (Findings, False) or else Failed > 0 then
+            return Exit_Gate_Fail;
          end if;
          return Exit_Ok;
       end;
@@ -3082,25 +3087,41 @@ package body Fusa.Cli is
       return Result;
    end Parse_Report_Findings;
 
-   procedure Write_Diff_Items (W : in out Fusa.Json.Writer.Instance; Items : Diff_Item_List) is
+   --  §13 canonical direction: added/removed are bare fingerprint strings,
+   --  not full finding objects -- severity is still used internally (see
+   --  Cmd_Diff) to decide the exit code, just not repeated in the output.
+   procedure Write_Fingerprints (W : in out Fusa.Json.Writer.Instance; Items : Diff_Item_List) is
    begin
       W.Array_Start;
       for Item of Items loop
-         W.Object_Start;
-         W.Field ("ruleId", To_String (Item.Rule_Id));
-         W.Field ("severity", To_String (Item.Severity));
-         W.Field ("message", To_String (Item.Message));
-         W.Field ("fingerprint", To_String (Item.Fingerprint));
-         W.Object_End;
+         W.Value (To_String (Item.Fingerprint));
       end loop;
       W.Array_End;
-   end Write_Diff_Items;
+   end Write_Fingerprints;
+
+   function From_Findings (Findings : Finding_List) return Diff_Item_List is
+      Result : Diff_Item_List;
+   begin
+      for F of Findings loop
+         declare
+            D : Diff_Item;
+         begin
+            D.Fingerprint := F.Fingerprint;
+            D.Rule_Id     := F.Rule_Id;
+            D.Severity    := To_Unbounded_String (Image (F.Severity));
+            D.Message     := F.Message;
+            Result.Append (D);
+         end;
+      end loop;
+      return Result;
+   end From_Findings;
 
    --  fusa:req REQ-100
    function Cmd_Diff (Args : String_List) return Integer is
-      Format         : constant String := Flag_Value (Args, "--format", "text");
-      Strict         : constant Boolean := Has_Flag (Args, "--strict");
-      File_A, File_B : Unbounded_String := Null_Unbounded_String;
+      Dir           : constant String := Dir_Of (Args);
+      Format        : constant String := Flag_Value (Args, "--format", "text");
+      Strict        : constant Boolean := Has_Flag (Args, "--strict");
+      Baseline_Path : constant String := Flag_Value (Args, "--baseline", "");
    begin
       if Format /= "text" and then Format /= "json" then
          Ada.Text_IO.Put_Line
@@ -3110,127 +3131,126 @@ package body Fusa.Cli is
          return Exit_Usage;
       end if;
 
-      declare
-         I : Positive := 1;
-      begin
-         while I <= Natural (Args.Length) loop
-            declare
-               A : constant String := Args.Element (I);
-            begin
-               if A = "--format" or else A = "--output" then
-                  I := I + 2;
-               elsif A = "--strict" or else A = "--no-color" then
-                  I := I + 1;
-               elsif A'Length > 0 and then A (A'First) /= '-' then
-                  if Length (File_A) = 0 then
-                     File_A := To_Unbounded_String (A);
-                  elsif Length (File_B) = 0 then
-                     File_B := To_Unbounded_String (A);
-                  end if;
-                  I := I + 1;
-               else
-                  I := I + 1;
-               end if;
-            end;
-         end loop;
-      end;
-
-      if Length (File_A) = 0 or else Length (File_B) = 0 then
+      if Baseline_Path'Length = 0 then
          Ada.Text_IO.Put_Line
-           (Ada.Text_IO.Standard_Error, "ada-FuSa: diff: requires <report-a> <report-b>");
+           (Ada.Text_IO.Standard_Error, "ada-FuSa: diff: requires --baseline <file>");
          return Exit_Usage;
       end if;
 
-      if not Fusa.Files.Exists (To_String (File_A)) then
+      if not Fusa.Files.Exists (Baseline_Path) then
          return Emit_Runtime_Error
-           (Args, "diff", "not-found", "report not found: " & To_String (File_A));
-      end if;
-      if not Fusa.Files.Exists (To_String (File_B)) then
-         return Emit_Runtime_Error
-           (Args, "diff", "not-found", "report not found: " & To_String (File_B));
+           (Args, "diff", "not-found", "baseline report not found: " & Baseline_Path);
       end if;
 
       declare
-         List_A, List_B : Diff_Item_List;
+         List_A : Diff_Item_List;
       begin
          begin
-            List_A := Parse_Report_Findings (To_String (File_A));
+            List_A := Parse_Report_Findings (Baseline_Path);
          exception
             when Fusa.Json.Json_Error =>
                return Emit_Runtime_Error
-                 (Args, "diff", "invalid-report", "malformed JSON in " & To_String (File_A));
-         end;
-         begin
-            List_B := Parse_Report_Findings (To_String (File_B));
-         exception
-            when Fusa.Json.Json_Error =>
-               return Emit_Runtime_Error
-                 (Args, "diff", "invalid-report", "malformed JSON in " & To_String (File_B));
+                 (Args, "diff", "invalid-report", "malformed JSON in " & Baseline_Path);
          end;
 
+         --  The "current" side is always a live `check` run, mirroring how
+         --  `report` re-runs analysis rather than reading a cached file --
+         --  a baseline is the only thing diff ever reads from disk.
          declare
-            Added, Removed : Diff_Item_List;
-            Has_Error_Add  : Boolean := False;
+            Cfg : Fusa.Config.Project_Config;
          begin
-            for Item of List_B loop
-               if not Contains_Fingerprint (List_A, To_String (Item.Fingerprint)) then
-                  Added.Append (Item);
-                  if To_String (Item.Severity) = "ERROR" then
-                     Has_Error_Add := True;
+            begin
+               Cfg := Fusa.Config.Load (Dir);
+            exception
+               when Fusa.Config.No_Config_Error =>
+                  return Emit_Runtime_Error
+                    (Args, "diff", "no-config", "no .fusa.json found in " & Dir);
+               when Fusa.Config.Invalid_Config_Error =>
+                  return Emit_Runtime_Error
+                    (Args, "diff", "invalid-config", "invalid .fusa.json in " & Dir);
+            end;
+
+            declare
+               Files          : constant String_List :=
+                 Fusa.Source_Scan.Find_Source_Files (Dir, Cfg);
+               Live_Findings  : Finding_List := Fusa.Engine.Run_All (Dir, Files);
+            begin
+               if Fusa.Config.Dispositions_Exist (Dir) then
+                  declare
+                     Disps           : constant Fusa.Config.Disposition_List :=
+                       Fusa.Config.Load_Dispositions (Dir);
+                     Orphan_Findings : Finding_List;
+                  begin
+                     Fusa.Config.Apply_Dispositions (Live_Findings, Disps, Orphan_Findings);
+                     for F of Orphan_Findings loop
+                        Live_Findings.Append (F);
+                     end loop;
+                  end;
+               end if;
+
+               declare
+                  List_B : constant Diff_Item_List := From_Findings (Live_Findings);
+                  Added, Removed : Diff_Item_List;
+                  Has_Error_Add  : Boolean := False;
+               begin
+                  for Item of List_B loop
+                     if not Contains_Fingerprint (List_A, To_String (Item.Fingerprint)) then
+                        Added.Append (Item);
+                        if To_String (Item.Severity) = "ERROR" then
+                           Has_Error_Add := True;
+                        end if;
+                     end if;
+                  end loop;
+                  for Item of List_A loop
+                     if not Contains_Fingerprint (List_B, To_String (Item.Fingerprint)) then
+                        Removed.Append (Item);
+                     end if;
+                  end loop;
+
+                  if Format = "json" then
+                     declare
+                        W : Fusa.Json.Writer.Instance;
+                     begin
+                        W.Object_Start;
+                        --  §13 canonical direction: {added:[fingerprint],
+                        --  removed:[fingerprint], unchanged:N}.
+                        Fusa.Report.Write_Header (W, "diff-report");
+                        W.Key ("added");
+                        Write_Fingerprints (W, Added);
+                        W.Key ("removed");
+                        Write_Fingerprints (W, Removed);
+                        W.Field ("unchanged", Natural (List_B.Length) - Natural (Added.Length));
+                        W.Object_End;
+                        Emit (Args, Fusa.Json.Writer.To_String (W));
+                     end;
+                  else
+                     declare
+                        Buf : Unbounded_String := Null_Unbounded_String;
+                     begin
+                        for Item of Added loop
+                           Append (Buf, "+ [" & To_String (Item.Severity) & "] " &
+                                     To_String (Item.Rule_Id) & " " & To_String (Item.Message) &
+                                     ASCII.LF);
+                        end loop;
+                        for Item of Removed loop
+                           Append (Buf, "- [" & To_String (Item.Severity) & "] " &
+                                     To_String (Item.Rule_Id) & " " & To_String (Item.Message) &
+                                     ASCII.LF);
+                        end loop;
+                        Append (Buf, Trim_Img (Natural (Added.Length)) & " added, " &
+                                  Trim_Img (Natural (Removed.Length)) & " removed, " &
+                                  Trim_Img (Natural (List_B.Length) - Natural (Added.Length)) &
+                                  " unchanged");
+                        Emit (Args, To_String (Buf));
+                     end;
                   end if;
-               end if;
-            end loop;
-            for Item of List_A loop
-               if not Contains_Fingerprint (List_B, To_String (Item.Fingerprint)) then
-                  Removed.Append (Item);
-               end if;
-            end loop;
 
-            if Format = "json" then
-               declare
-                  W : Fusa.Json.Writer.Instance;
-               begin
-                  W.Object_Start;
-                  Fusa.Report.Write_Header (W, "diff-report");
-                  W.Key ("added");
-                  Write_Diff_Items (W, Added);
-                  W.Key ("removed");
-                  Write_Diff_Items (W, Removed);
-                  W.Key ("summary");
-                  W.Object_Start;
-                  W.Field ("added", Natural (Added.Length));
-                  W.Field ("removed", Natural (Removed.Length));
-                  W.Field ("unchanged", Natural (List_B.Length) - Natural (Added.Length));
-                  W.Object_End;
-                  W.Object_End;
-                  Emit (Args, Fusa.Json.Writer.To_String (W));
+                  if Has_Error_Add or else (Strict and then Natural (Added.Length) > 0) then
+                     return Exit_Gate_Fail;
+                  end if;
+                  return Exit_Ok;
                end;
-            else
-               declare
-                  Buf : Unbounded_String := Null_Unbounded_String;
-               begin
-                  for Item of Added loop
-                     Append (Buf, "+ [" & To_String (Item.Severity) & "] " &
-                               To_String (Item.Rule_Id) & " " & To_String (Item.Message) &
-                               ASCII.LF);
-                  end loop;
-                  for Item of Removed loop
-                     Append (Buf, "- [" & To_String (Item.Severity) & "] " &
-                               To_String (Item.Rule_Id) & " " & To_String (Item.Message) &
-                               ASCII.LF);
-                  end loop;
-                  Append (Buf, Trim_Img (Natural (Added.Length)) & " added, " &
-                            Trim_Img (Natural (Removed.Length)) & " removed, " &
-                            Trim_Img (Natural (List_B.Length) - Natural (Added.Length)) &
-                            " unchanged");
-                  Emit (Args, To_String (Buf));
-               end;
-            end if;
-
-            if Has_Error_Add or else (Strict and then Natural (Added.Length) > 0) then
-               return Exit_Gate_Fail;
-            end if;
-            return Exit_Ok;
+            end;
          end;
       end;
    end Cmd_Diff;
@@ -3620,11 +3640,21 @@ package body Fusa.Cli is
 
             if Format = "json" then
                declare
-                  W : Fusa.Json.Writer.Instance;
+                  W          : Fusa.Json.Writer.Instance;
+                  Edge_Count : Natural := 0;
                begin
+                  for N of Nodes loop
+                     Edge_Count := Edge_Count + Natural (N.Deps.Length);
+                  end loop;
+
                   W.Object_Start;
+                  --  §13 canonical direction: graph {modules, edges, metrics}
+                  --  -- deliberately NOT the flat finding-list-shaped
+                  --  "units[]" array an earlier revision of this command
+                  --  used (the spec explicitly warns against deepening
+                  --  investment in that shape).
                   Fusa.Report.Write_Header (W, "coupling-report");
-                  W.Key ("units");
+                  W.Key ("modules");
                   W.Array_Start;
                   for Idx of Order loop
                      declare
@@ -3636,11 +3666,27 @@ package body Fusa.Cli is
                         W.Field ("name", To_String (N.Name));
                         W.Field ("fanIn", In_C);
                         W.Field ("fanOut", Out_C);
-                        W.Field ("total", In_C + Out_C);
                         W.Object_End;
                      end;
                   end loop;
                   W.Array_End;
+                  W.Key ("edges");
+                  W.Array_Start;
+                  for N of Nodes loop
+                     for D of N.Deps loop
+                        W.Object_Start;
+                        W.Field ("from", To_String (N.Name));
+                        W.Field ("to", D);
+                        W.Field ("weight", 1);
+                        W.Object_End;
+                     end loop;
+                  end loop;
+                  W.Array_End;
+                  W.Key ("metrics");
+                  W.Object_Start;
+                  W.Field ("totalModules", Natural (Nodes.Length));
+                  W.Field ("totalEdges", Edge_Count);
+                  W.Object_End;
                   W.Object_End;
                   Emit (Args, Fusa.Json.Writer.To_String (W));
                end;
@@ -3745,7 +3791,12 @@ package body Fusa.Cli is
                   W.Field ("occurrence", E.Occurrence);
                   W.Field ("detection", E.Detection);
                   W.Field ("rpn", E.Rpn);
-                  W.Field_If_Non_Blank ("mitigation", To_String (E.Mitigation));
+                  W.Key ("mitigations");
+                  W.Array_Start;
+                  for M of E.Mitigations loop
+                     W.Value (M);
+                  end loop;
+                  W.Array_End;
                   W.Object_End;
                end loop;
                W.Array_End;
@@ -3759,17 +3810,27 @@ package body Fusa.Cli is
                Buf : Unbounded_String := Null_Unbounded_String;
             begin
                Append (Buf, "id,item,function,failureMode,effect,cause,severity,occurrence," &
-                         "detection,rpn,mitigation" & ASCII.LF);
+                         "detection,rpn,mitigations" & ASCII.LF);
                for E of Entries loop
-                  Append (Buf, Csv_Field (To_String (E.Id)) & "," &
-                            Csv_Field (To_String (E.Item)) & "," &
-                            Csv_Field (To_String (E.Func)) & "," &
-                            Csv_Field (To_String (E.Failure_Mode)) & "," &
-                            Csv_Field (To_String (E.Effect)) & "," &
-                            Csv_Field (To_String (E.Cause)) & "," &
-                            Trim_Img (E.Severity) & "," & Trim_Img (E.Occurrence) & "," &
-                            Trim_Img (E.Detection) & "," & Trim_Img (E.Rpn) & "," &
-                            Csv_Field (To_String (E.Mitigation)) & ASCII.LF);
+                  declare
+                     Mits_Joined : Unbounded_String := Null_Unbounded_String;
+                  begin
+                     for M of E.Mitigations loop
+                        if Length (Mits_Joined) > 0 then
+                           Append (Mits_Joined, "; ");
+                        end if;
+                        Append (Mits_Joined, M);
+                     end loop;
+                     Append (Buf, Csv_Field (To_String (E.Id)) & "," &
+                               Csv_Field (To_String (E.Item)) & "," &
+                               Csv_Field (To_String (E.Func)) & "," &
+                               Csv_Field (To_String (E.Failure_Mode)) & "," &
+                               Csv_Field (To_String (E.Effect)) & "," &
+                               Csv_Field (To_String (E.Cause)) & "," &
+                               Trim_Img (E.Severity) & "," & Trim_Img (E.Occurrence) & "," &
+                               Trim_Img (E.Detection) & "," & Trim_Img (E.Rpn) & "," &
+                               Csv_Field (To_String (Mits_Joined)) & ASCII.LF);
+                  end;
                end loop;
                Emit (Args, To_String (Buf));
             end;
@@ -3843,6 +3904,11 @@ package body Fusa.Cli is
                W : Fusa.Json.Writer.Instance;
             begin
                W.Object_Start;
+               --  §13 canonical direction: {nodes:[{id,type,text}],
+               --  edges:[{from,to,type}]} -- supportedBy/inContextOf move
+               --  out of each node into a separate top-level edges array,
+               --  rather than being embedded per-node as an earlier
+               --  revision of this command did.
                Fusa.Report.Write_Header (W, "safety-case");
                W.Field_If_Non_Blank ("rootGoal", To_String (Root_Goal));
                W.Key ("nodes");
@@ -3852,19 +3918,26 @@ package body Fusa.Cli is
                   W.Field ("id", To_String (N.Id));
                   W.Field_If_Non_Blank ("type", To_String (N.Kind));
                   W.Field_If_Non_Blank ("text", To_String (N.Text));
-                  W.Key ("supportedBy");
-                  W.Array_Start;
-                  for R of N.Supported_By loop
-                     W.Value (R);
-                  end loop;
-                  W.Array_End;
-                  W.Key ("inContextOf");
-                  W.Array_Start;
-                  for R of N.In_Context_Of loop
-                     W.Value (R);
-                  end loop;
-                  W.Array_End;
                   W.Object_End;
+               end loop;
+               W.Array_End;
+               W.Key ("edges");
+               W.Array_Start;
+               for N of Nodes loop
+                  for R of N.Supported_By loop
+                     W.Object_Start;
+                     W.Field ("from", To_String (N.Id));
+                     W.Field ("to", R);
+                     W.Field ("type", "supportedBy");
+                     W.Object_End;
+                  end loop;
+                  for R of N.In_Context_Of loop
+                     W.Object_Start;
+                     W.Field ("from", To_String (N.Id));
+                     W.Field ("to", R);
+                     W.Field ("type", "inContextOf");
+                     W.Object_End;
+                  end loop;
                end loop;
                W.Array_End;
                Fusa.Report.Write_Findings_Array (W, Findings);

@@ -327,7 +327,8 @@ begin
    Fusa.Files.Write_File
      (Root & "/" & Fusa.Config.Fmea_File,
       "{""entries"":[" &
-      "{""id"":""FMEA-001"",""severity"":8,""occurrence"":3,""detection"":4}," &
+      "{""id"":""FMEA-001"",""severity"":8,""occurrence"":3,""detection"":4," &
+      """mitigations"":[""add overflow check"",""add unit test""]}," &
       "{""id"":""FMEA-002"",""severity"":11,""occurrence"":2,""detection"":2}," &
       "{""id"":""FMEA-003"",""severity"":5,""occurrence"":5,""detection"":5,""rpn"":999}," &
       "{""title"":""no id at all""}" &
@@ -341,6 +342,8 @@ begin
              "only the three entries with a non-empty id are returned");
       Check (Entries.Element (1).Rpn = 96,
              "RPN is computed as severity*occurrence*detection when not given (8*3*4=96)");
+      Check (Natural (Entries.Element (1).Mitigations.Length) = 2,
+             "the mitigations array round-trips with both entries");
       Check (Entries.Element (2).Severity = 0,
              "a severity outside 1..10 is treated as invalid (0), not clamped or accepted");
       Check (Entries.Element (2).Rpn = 0,
