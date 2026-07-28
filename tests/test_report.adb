@@ -2,6 +2,7 @@ with Ada.Strings.Unbounded; use Ada.Strings.Unbounded;
 with Fusa; use Fusa;
 with Fusa.Report;
 with Fusa.Json;
+use type Fusa.Json.Value_Access;
 with Fusa.Json.Writer;
 with Test_Framework; use Test_Framework;
 
@@ -66,6 +67,19 @@ begin
          Check (Fusa.Json.Get_String (V, "version") = "2.1.0", "SARIF version is 2.1.0");
          Check (Fusa.Json.Is_Array (Fusa.Json.Get_Array (V, "runs")),
                 "SARIF has a runs array");
+
+         --  fusa:test REQ-022
+         declare
+            Run     : constant Fusa.Json.Value_Access :=
+              Fusa.Json.Array_Item (Fusa.Json.Get_Array (V, "runs"), 1);
+            Result  : constant Fusa.Json.Value_Access :=
+              Fusa.Json.Array_Item (Fusa.Json.Get_Array (Run, "results"), 1);
+            Props   : constant Fusa.Json.Value_Access :=
+              Fusa.Json.Get_Member (Result, "properties");
+         begin
+            Check (Props /= null and then Fusa.Json.Has_Key (Props, "category"),
+                   "SARIF result carries a properties.category (spec section 2.9)");
+         end;
       end;
    end;
 

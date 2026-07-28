@@ -126,6 +126,7 @@ package body Fusa.Report is
       return To_String (Buf);
    end Render_Text;
 
+   --  fusa:req REQ-022
    function Render_Sarif (Findings : Finding_List) return String is
       W          : Fusa.Json.Writer.Instance;
       Seen_Rules : String_List;
@@ -213,6 +214,12 @@ package body Fusa.Report is
          W.Object_End;
          W.Object_End;
          W.Array_End;
+         W.Key ("properties");
+         W.Object_Start;
+         W.Field ("category", Image (F.Category));
+         W.Field_If_Non_Blank ("standard", To_String (F.Standard));
+         W.Field_If_Non_Blank ("clause", To_String (F.Clause));
+         W.Object_End;
          W.Object_End;
       end loop;
       W.Array_End;
