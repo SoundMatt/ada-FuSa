@@ -15,6 +15,8 @@ with Fusa.Func_Scan;
 with Fusa.Comp;
 with Fusa.Badge;
 with Fusa.Deps;
+with Fusa.Analyze;
+with Fusa.Rules_Lint;
 with Fusa.Report;
 with Fusa.Json.Writer;
 with Fusa.Sha256;
@@ -195,6 +197,10 @@ package body Fusa.Cli is
       W.Value ("coupling");
       W.Value ("fmea");
       W.Value ("safety-case");
+      W.Value ("cyber");
+      W.Value ("sci");
+      W.Value ("analyze");
+      W.Value ("lint");
       W.Array_End;
 
       W.Key ("formats");
@@ -233,6 +239,10 @@ package body Fusa.Cli is
       W.Key ("coupling");     W.Array_Start; W.Value ("text"); W.Value ("json"); W.Array_End;
       W.Key ("fmea");         W.Array_Start; W.Value ("text"); W.Value ("json"); W.Value ("csv"); W.Array_End;
       W.Key ("safety-case");  W.Array_Start; W.Value ("text"); W.Value ("json"); W.Value ("md"); W.Value ("mermaid"); W.Array_End;
+      W.Key ("cyber");        W.Array_Start; W.Value ("text"); W.Value ("json"); W.Array_End;
+      W.Key ("sci");          W.Array_Start; W.Value ("text"); W.Value ("json"); W.Array_End;
+      W.Key ("analyze");      W.Array_Start; W.Value ("text"); W.Value ("json"); W.Array_End;
+      W.Key ("lint");         W.Array_Start; W.Value ("text"); W.Value ("json"); W.Array_End;
       W.Object_End;
 
       W.Key ("standards");
@@ -4049,6 +4059,305 @@ package body Fusa.Cli is
    end Cmd_Safety_Case;
 
    ----------------------------------------------------------------------
+   --  cyber -- cybersecurity finding-list (spec section 9.2 SHOULD)
+   ----------------------------------------------------------------------
+
+   --  Runs the same rule + disposition pipeline as `check`, then narrows
+   --  the result to Category = Security -- ada-FuSa's SEC001-004 rules are
+   --  already CWE-mapped cybersecurity findings; `cyber` is a dedicated
+   --  view onto that subset (its own report kind/gate), not a second,
+   --  independent detection pass.
+   --  fusa:req REQ-108
+   function Cmd_Cyber (Args : String_List) return Integer is
+      Dir    : constant String := Dir_Of (Args);
+      Format : constant String := Flag_Value (Args, "--format", "text");
+      Strict : constant Boolean := Has_Flag (Args, "--strict");
+   begin
+      if Format /= "text" and then Format /= "json" then
+         Ada.Text_IO.Put_Line
+           (Ada.Text_IO.Standard_Error,
+            "ada-FuSa: cyber: unsupported --format '" & Format &
+            "' (supported: text, json)");
+         return Exit_Usage;
+      end if;
+
+      declare
+         Cfg : Fusa.Config.Project_Config;
+      begin
+         begin
+            Cfg := Fusa.Config.Load (Dir);
+         exception
+            when Fusa.Config.No_Config_Error =>
+               return Emit_Runtime_Error
+                 (Args, "cyber-report", "no-config", "no .fusa.json found in " & Dir);
+            when Fusa.Config.Invalid_Config_Error =>
+               return Emit_Runtime_Error
+                 (Args, "cyber-report", "invalid-config", "invalid .fusa.json in " & Dir);
+         end;
+
+         declare
+            Effective_Strict : constant Boolean := Strict or else Cfg.Strict;
+            Files    : constant String_List := Fusa.Source_Scan.Find_Source_Files (Dir, Cfg);
+            All_Findings : Finding_List := Fusa.Engine.Run_All (Dir, Files);
+            Findings     : Finding_List;
+         begin
+            if Fusa.Config.Dispositions_Exist (Dir) then
+               declare
+                  Disps           : constant Fusa.Config.Disposition_List :=
+                    Fusa.Config.Load_Dispositions (Dir);
+                  Orphan_Findings : Finding_List;
+               begin
+                  Fusa.Config.Apply_Dispositions (All_Findings, Disps, Orphan_Findings);
+                  for F of Orphan_Findings loop
+                     All_Findings.Append (F);
+                  end loop;
+               end;
+            end if;
+
+            for F of All_Findings loop
+               if F.Category = Security then
+                  Findings.Append (F);
+               end if;
+            end loop;
+
+            if Format = "json" then
+               declare
+                  W : Fusa.Json.Writer.Instance;
+               begin
+                  W.Object_Start;
+                  Fusa.Report.Write_Header (W, "cyber-report");
+                  Fusa.Report.Write_Findings_Array (W, Findings);
+                  Fusa.Report.Write_Summary (W, Findings);
+                  W.Object_End;
+                  Emit (Args, Fusa.Json.Writer.To_String (W));
+               end;
+            else
+               Emit (Args, Fusa.Report.Render_Text (Findings));
+            end if;
+
+            if Fusa.Report.Has_Gate_Failure (Findings, Effective_Strict) then
+               return Exit_Gate_Fail;
+            end if;
+            return Exit_Ok;
+         end;
+      end;
+   end Cmd_Cyber;
+
+   ----------------------------------------------------------------------
+   --  sci -- Software Configuration Index (spec section 9.3 MAY)
+   ----------------------------------------------------------------------
+
+   --  Every source file plus the known evidence-artifact filenames,
+   --  each with a SHA-256 digest and byte size -- a configuration-item
+   --  manifest (DO-178C section 7.5-ish "what exactly constitutes this
+   --  build"), purely mechanical/derivable, unlike sas below which
+   --  additionally requires a human's context. Always exits 0.
+   --  fusa:req REQ-109
+   function Cmd_Sci (Args : String_List) return Integer is
+      Dir    : constant String := Dir_Of (Args);
+      Format : constant String := Flag_Value (Args, "--format", "text");
+   begin
+      if Format /= "text" and then Format /= "json" then
+         Ada.Text_IO.Put_Line
+           (Ada.Text_IO.Standard_Error,
+            "ada-FuSa: sci: unsupported --format '" & Format &
+            "' (supported: text, json)");
+         return Exit_Usage;
+      end if;
+
+      declare
+         Cfg : Fusa.Config.Project_Config;
+      begin
+         begin
+            Cfg := Fusa.Config.Load (Dir);
+         exception
+            when Fusa.Config.No_Config_Error =>
+               return Emit_Runtime_Error (Args, "sci", "no-config", "no .fusa.json found in " & Dir);
+            when Fusa.Config.Invalid_Config_Error =>
+               return Emit_Runtime_Error (Args, "sci", "invalid-config", "invalid .fusa.json in " & Dir);
+         end;
+
+         declare
+            Items : String_List := Fusa.Source_Scan.Find_Source_Files (Dir, Cfg);
+
+            Evidence_Names : constant array (1 .. 7) of Unbounded_String :=
+              (To_Unbounded_String (".fusa.json"),
+               To_Unbounded_String (".fusa-reqs.json"),
+               To_Unbounded_String (".fusa-dispositions.json"),
+               To_Unbounded_String ("qualify-report.json"),
+               To_Unbounded_String ("sbom.json"),
+               To_Unbounded_String ("comp-report.json"),
+               To_Unbounded_String ("vuln.json"));
+         begin
+            for N of Evidence_Names loop
+               if Fusa.Files.Exists (Fusa.Files.Join (Dir, To_String (N))) then
+                  Items.Append (To_String (N));
+               end if;
+            end loop;
+
+            if Format = "json" then
+               declare
+                  W : Fusa.Json.Writer.Instance;
+               begin
+                  W.Object_Start;
+                  Fusa.Report.Write_Header (W, "sci");
+                  W.Key ("items");
+                  W.Array_Start;
+                  for Item of Items loop
+                     declare
+                        Content : constant String :=
+                          Fusa.Files.Read_File (Fusa.Files.Join (Dir, Item));
+                     begin
+                        W.Object_Start;
+                        W.Field ("file", Item);
+                        W.Field ("sha256", Fusa.Sha256.Hex_Digest (Content));
+                        W.Field ("sizeBytes", Content'Length);
+                        W.Object_End;
+                     end;
+                  end loop;
+                  W.Array_End;
+                  W.Key ("summary");
+                  W.Object_Start;
+                  W.Field ("total", Natural (Items.Length));
+                  W.Object_End;
+                  W.Object_End;
+                  Emit (Args, Fusa.Json.Writer.To_String (W));
+               end;
+            else
+               declare
+                  Buf : Unbounded_String := Null_Unbounded_String;
+               begin
+                  for Item of Items loop
+                     Append (Buf, Item & ASCII.LF);
+                  end loop;
+                  Append (Buf, Trim_Img (Natural (Items.Length)) & " configuration items");
+                  Emit (Args, To_String (Buf));
+               end;
+            end if;
+            return Exit_Ok;
+         end;
+      end;
+   end Cmd_Sci;
+
+   ----------------------------------------------------------------------
+   --  analyze -- deeper own-pass static analysis (spec section 9.3 MAY)
+   ----------------------------------------------------------------------
+
+   --  fusa:req REQ-112
+   function Cmd_Analyze (Args : String_List) return Integer is
+      Dir    : constant String := Dir_Of (Args);
+      Format : constant String := Flag_Value (Args, "--format", "text");
+      Strict : constant Boolean := Has_Flag (Args, "--strict");
+   begin
+      if Format /= "text" and then Format /= "json" then
+         Ada.Text_IO.Put_Line
+           (Ada.Text_IO.Standard_Error,
+            "ada-FuSa: analyze: unsupported --format '" & Format &
+            "' (supported: text, json)");
+         return Exit_Usage;
+      end if;
+
+      declare
+         Cfg : Fusa.Config.Project_Config;
+      begin
+         begin
+            Cfg := Fusa.Config.Load (Dir);
+         exception
+            when Fusa.Config.No_Config_Error =>
+               return Emit_Runtime_Error
+                 (Args, "analyze-report", "no-config", "no .fusa.json found in " & Dir);
+            when Fusa.Config.Invalid_Config_Error =>
+               return Emit_Runtime_Error
+                 (Args, "analyze-report", "invalid-config", "invalid .fusa.json in " & Dir);
+         end;
+
+         declare
+            Files    : constant String_List := Fusa.Source_Scan.Find_Source_Files (Dir, Cfg);
+            Findings : constant Finding_List := Fusa.Analyze.Analyze (Dir, Files);
+         begin
+            if Format = "json" then
+               declare
+                  W : Fusa.Json.Writer.Instance;
+               begin
+                  W.Object_Start;
+                  Fusa.Report.Write_Header (W, "analyze-report");
+                  Fusa.Report.Write_Findings_Array (W, Findings);
+                  Fusa.Report.Write_Summary (W, Findings);
+                  W.Object_End;
+                  Emit (Args, Fusa.Json.Writer.To_String (W));
+               end;
+            else
+               Emit (Args, Fusa.Report.Render_Text (Findings));
+            end if;
+
+            if Fusa.Report.Has_Gate_Failure (Findings, Strict) then
+               return Exit_Gate_Fail;
+            end if;
+            return Exit_Ok;
+         end;
+      end;
+   end Cmd_Analyze;
+
+   ----------------------------------------------------------------------
+   --  lint -- general-correctness/formatting hygiene (spec section 9.3 MAY)
+   ----------------------------------------------------------------------
+
+   --  fusa:req REQ-113
+   function Cmd_Lint (Args : String_List) return Integer is
+      Dir    : constant String := Dir_Of (Args);
+      Format : constant String := Flag_Value (Args, "--format", "text");
+      Strict : constant Boolean := Has_Flag (Args, "--strict");
+   begin
+      if Format /= "text" and then Format /= "json" then
+         Ada.Text_IO.Put_Line
+           (Ada.Text_IO.Standard_Error,
+            "ada-FuSa: lint: unsupported --format '" & Format &
+            "' (supported: text, json)");
+         return Exit_Usage;
+      end if;
+
+      declare
+         Cfg : Fusa.Config.Project_Config;
+      begin
+         begin
+            Cfg := Fusa.Config.Load (Dir);
+         exception
+            when Fusa.Config.No_Config_Error =>
+               return Emit_Runtime_Error
+                 (Args, "lint-report", "no-config", "no .fusa.json found in " & Dir);
+            when Fusa.Config.Invalid_Config_Error =>
+               return Emit_Runtime_Error
+                 (Args, "lint-report", "invalid-config", "invalid .fusa.json in " & Dir);
+         end;
+
+         declare
+            Files    : constant String_List := Fusa.Source_Scan.Find_Source_Files (Dir, Cfg);
+            Findings : constant Finding_List := Fusa.Rules_Lint.Scan (Dir, Files);
+         begin
+            if Format = "json" then
+               declare
+                  W : Fusa.Json.Writer.Instance;
+               begin
+                  W.Object_Start;
+                  Fusa.Report.Write_Header (W, "lint-report");
+                  Fusa.Report.Write_Findings_Array (W, Findings);
+                  Fusa.Report.Write_Summary (W, Findings);
+                  W.Object_End;
+                  Emit (Args, Fusa.Json.Writer.To_String (W));
+               end;
+            else
+               Emit (Args, Fusa.Report.Render_Text (Findings));
+            end if;
+
+            if Fusa.Report.Has_Gate_Failure (Findings, Strict) then
+               return Exit_Gate_Fail;
+            end if;
+            return Exit_Ok;
+         end;
+      end;
+   end Cmd_Lint;
+
+   ----------------------------------------------------------------------
    --  Usage / dispatch
    ----------------------------------------------------------------------
 
@@ -4059,7 +4368,8 @@ package body Fusa.Cli is
         "commands: version capabilities init check trace qualify release audit-pack " &
         "report comp hara tara vuln req disposition pr metrics sign hooks " &
         "do178 iso26262 iso21434 iec61508 iec62443 unece slsa " &
-        "verify diff badge boundary impact coupling fmea safety-case");
+        "verify diff badge boundary impact coupling fmea safety-case " &
+        "cyber sci analyze lint");
    end Print_Usage;
 
    function Run (Args : String_List) return Integer is
@@ -4144,6 +4454,14 @@ package body Fusa.Cli is
             return Cmd_Fmea (Rest);
          elsif Cmd = "safety-case" then
             return Cmd_Safety_Case (Rest);
+         elsif Cmd = "cyber" then
+            return Cmd_Cyber (Rest);
+         elsif Cmd = "sci" then
+            return Cmd_Sci (Rest);
+         elsif Cmd = "analyze" then
+            return Cmd_Analyze (Rest);
+         elsif Cmd = "lint" then
+            return Cmd_Lint (Rest);
          elsif Cmd = "--help" or else Cmd = "-h" or else Cmd = "help" then
             Print_Usage;
             return Exit_Ok;

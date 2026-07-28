@@ -2,67 +2,67 @@
   "requirements": [
     {
       "id": "REQ-001",
-      "title": "x-FuSa spec \u00a72.3 exit codes",
+      "title": "x-FuSa spec §2.3 exit codes",
       "text": "Every command returns exactly one of: 0 (ok), 1 (gate failure), 2 (usage error), 3 (runtime error).",
       "level": "SW"
     },
     {
       "id": "REQ-002",
-      "title": "x-FuSa spec \u00a72.4 severity enum",
+      "title": "x-FuSa spec §2.4 severity enum",
       "text": "Finding severity is exactly one of ERROR, WARNING, INFO (uppercase).",
       "level": "SW"
     },
     {
       "id": "REQ-003",
-      "title": "x-FuSa spec \u00a72.8 distinct version keys",
+      "title": "x-FuSa spec §2.8 distinct version keys",
       "text": "schemaVersion (report envelopes, MAJOR.MINOR) and specVersion (version/capabilities, full spec release) are never conflated into a single constant.",
       "level": "SW"
     },
     {
       "id": "REQ-004",
-      "title": "x-FuSa spec \u00a74.2 fingerprint algorithm",
+      "title": "x-FuSa spec §4.2 fingerprint algorithm",
       "text": "Finding.fingerprint = sha256:hex(ruleId US location.file US normalizedMessage), with digit runs folded to '#' and whitespace collapsed.",
       "level": "SW"
     },
     {
       "id": "REQ-005",
-      "title": "x-FuSa spec \u00a71.2 .fusa.json load",
+      "title": "x-FuSa spec §1.2 .fusa.json load",
       "text": "project.name and standard are read (MUST); at most one of asil/sil/dal is read; the legacy flat project string form is accepted and normalised.",
       "level": "SW"
     },
     {
       "id": "REQ-006",
-      "title": "x-FuSa spec \u00a71.2 .fusa-reqs.json integrity",
+      "title": "x-FuSa spec §1.2 .fusa-reqs.json integrity",
       "text": "A duplicate or missing/empty/non-string requirement id surfaces as an ERROR finding rather than being silently merged or dropped.",
       "level": "SW"
     },
     {
       "id": "REQ-007",
-      "title": "x-FuSa spec \u00a79.1 version command",
+      "title": "x-FuSa spec §9.1 version command",
       "text": "adafusa version prints '<tool> <version>' and, under --format json, {tool, version, specVersion} with no envelope.",
       "level": "SW"
     },
     {
       "id": "REQ-008",
-      "title": "x-FuSa spec \u00a79.1 capabilities command",
+      "title": "x-FuSa spec §9.1 capabilities command",
       "text": "adafusa capabilities reports the commands, per-command formats, and standards this build actually supports.",
       "level": "SW"
     },
     {
       "id": "REQ-009",
-      "title": "x-FuSa spec \u00a79.1 init command",
+      "title": "x-FuSa spec §9.1 init command",
       "text": "adafusa init creates .fusa.json and .fusa-reqs.json; --force overwrites; a missing required value with no TTY exits 2, never a placeholder.",
       "level": "SW"
     },
     {
       "id": "REQ-010",
-      "title": "x-FuSa spec \u00a74 check command",
+      "title": "x-FuSa spec §4 check command",
       "text": "adafusa check runs every registered rule, emits a findings[] + summary, and gates (exit 1) on any open ERROR (or WARNING under --strict).",
       "level": "SW"
     },
     {
       "id": "REQ-011",
-      "title": "x-FuSa spec \u00a75 trace command",
+      "title": "x-FuSa spec §5 trace command",
       "text": "adafusa trace computes tracedRequirements/testedRequirements/secTestedRequirements and gates on --req-coverage/--sec-tested/--strict thresholds.",
       "level": "SW"
     },
@@ -86,13 +86,13 @@
     },
     {
       "id": "REQ-015",
-      "title": "x-FuSa spec \u00a79.1 report command",
+      "title": "x-FuSa spec §9.1 report command",
       "text": "adafusa report re-runs analysis fresh and always exits 0 regardless of findings (only usage/runtime errors apply).",
       "level": "SW"
     },
     {
       "id": "REQ-016",
-      "title": "x-FuSa spec \u00a71.4 annotation scanning",
+      "title": "x-FuSa spec §1.4 annotation scanning",
       "text": "-- fusa:req / -- fusa:test / -- fusa:sec-test comments are scanned for exactly one requirement id per line, without false-positiving on prose or string-literal content that merely mentions the marker.",
       "level": "SW"
     },
@@ -591,13 +591,13 @@
     {
       "id": "REQ-099",
       "title": "verify command (test-suite results validator)",
-      "text": "verify loads/validates .fusa-verify.json, the spec's canonical \u00a713 shape {suites:[{name,tests:[{name,result}]}]} (result one of PASS/FAIL/SKIP/ERROR) -- ada-FuSa cannot itself determine whether a project's verification activities passed, so a human or CI pipeline records each test's outcome and this command only aggregates (passed/failed always computed from the individual tests, never trusted from redundant input) and validates structure. Gates on a missing suite/test name or any FAIL result.",
+      "text": "verify loads/validates .fusa-verify.json, the spec's canonical §13 shape {suites:[{name,tests:[{name,result}]}]} (result one of PASS/FAIL/SKIP/ERROR) -- ada-FuSa cannot itself determine whether a project's verification activities passed, so a human or CI pipeline records each test's outcome and this command only aggregates (passed/failed always computed from the individual tests, never trusted from redundant input) and validates structure. Gates on a missing suite/test name or any FAIL result.",
       "level": "SW"
     },
     {
       "id": "REQ-100",
       "title": "diff command (baseline comparison by fingerprint)",
-      "text": "diff --baseline <file> compares a live check run (never a second saved file) against a prior check --format json snapshot, by finding fingerprint, emitting the spec's canonical \u00a713 shape {added:[fingerprint], removed:[fingerprint], unchanged:N} -- bare fingerprint strings, not full finding objects. Gates when any added finding is ERROR severity, or (with --strict) when any finding was added at all; a removed finding never gates.",
+      "text": "diff --baseline <file> compares a live check run (never a second saved file) against a prior check --format json snapshot, by finding fingerprint, emitting the spec's canonical §13 shape {added:[fingerprint], removed:[fingerprint], unchanged:N} -- bare fingerprint strings, not full finding objects. Gates when any added finding is ERROR severity, or (with --strict) when any finding was added at all; a removed finding never gates.",
       "level": "SW"
     },
     {
@@ -627,19 +627,55 @@
     {
       "id": "REQ-105",
       "title": "coupling command (structural graph metric)",
-      "text": "coupling reuses Fusa.Deps.Analyze's dependency graph, emitted as --format json's canonical \u00a713 shape {modules:[{name,fanIn,fanOut}], edges:[{from,to,weight}], metrics:{...}} -- a graph, not a flat finding-list-shaped array (the spec explicitly warns against deepening investment in that shape). --format text lists units sorted by total coupling, most-coupled first. A STRUCTURAL proxy via the with-clause graph, not a full DO-178C section 6.4.4.3 data/control coupling analysis (which needs source-level parameter/global-data flow analysis this tool does not perform). Always exits 0.",
+      "text": "coupling reuses Fusa.Deps.Analyze's dependency graph, emitted as --format json's canonical §13 shape {modules:[{name,fanIn,fanOut}], edges:[{from,to,weight}], metrics:{...}} -- a graph, not a flat finding-list-shaped array (the spec explicitly warns against deepening investment in that shape). --format text lists units sorted by total coupling, most-coupled first. A STRUCTURAL proxy via the with-clause graph, not a full DO-178C section 6.4.4.3 data/control coupling analysis (which needs source-level parameter/global-data flow analysis this tool does not perform). Always exits 0.",
       "level": "SW"
     },
     {
       "id": "REQ-106",
       "title": "fmea command (design FMEA)",
-      "text": "fmea loads/validates .fusa-fmea.json (failure mode, effect, cause, severity/occurrence/detection ratings 1-10, mitigation) following the hara/tara input-file pattern, since failure-mode identification and ratings are a human safety engineer's judgement this tool cannot generate. It computes RPN = severity*occurrence*detection when not explicitly given, and flags (but does not overwrite) an explicit rpn that disagrees with the computed value. Supports text/json/csv output. Gates only on a missing id. Entries carry mitigations[] (an array, per the spec's canonical \u00a713 shape), not a single mitigation string.",
+      "text": "fmea loads/validates .fusa-fmea.json (failure mode, effect, cause, severity/occurrence/detection ratings 1-10, mitigation) following the hara/tara input-file pattern, since failure-mode identification and ratings are a human safety engineer's judgement this tool cannot generate. It computes RPN = severity*occurrence*detection when not explicitly given, and flags (but does not overwrite) an explicit rpn that disagrees with the computed value. Supports text/json/csv output. Gates only on a missing id. Entries carry mitigations[] (an array, per the spec's canonical §13 shape), not a single mitigation string.",
       "level": "SW"
     },
     {
       "id": "REQ-107",
       "title": "safety-case command (GSN safety case)",
-      "text": "safety-case loads/validates .fusa-safety-case.json (a GSN goal/strategy/context/solution/assumption/justification node graph with supportedBy/inContextOf edges) following the same input-file pattern -- argument soundness is a certification engineer's judgement this tool cannot make, so it validates only structural well-formedness (unique non-empty ids; every reference resolves to a real node) and renders the graph as a text/md outline or a Mermaid diagram, never claiming the argument itself is valid or complete. Gates on a missing id or a dangling reference. --format json emits the spec's canonical \u00a713 shape {nodes:[{id,type,text}], edges:[{from,to,type}]} -- supportedBy/inContextOf are promoted to a top-level edges[] array rather than embedded per-node, even though the input file still records them per-node for authoring convenience.",
+      "text": "safety-case loads/validates .fusa-safety-case.json (a GSN goal/strategy/context/solution/assumption/justification node graph with supportedBy/inContextOf edges) following the same input-file pattern -- argument soundness is a certification engineer's judgement this tool cannot make, so it validates only structural well-formedness (unique non-empty ids; every reference resolves to a real node) and renders the graph as a text/md outline or a Mermaid diagram, never claiming the argument itself is valid or complete. Gates on a missing id or a dangling reference. --format json emits the spec's canonical §13 shape {nodes:[{id,type,text}], edges:[{from,to,type}]} -- supportedBy/inContextOf are promoted to a top-level edges[] array rather than embedded per-node, even though the input file still records them per-node for authoring convenience.",
+      "level": "SW"
+    },
+    {
+      "id": "REQ-108",
+      "title": "cyber command (cybersecurity finding-list)",
+      "text": "cyber runs the same rule+disposition pipeline as check, then narrows the result to Category=Security -- SEC001-004 are already CWE-mapped cybersecurity findings; cyber is a dedicated view onto that subset (its own report kind/gate), not a second detection pass. Same gate semantics as check.",
+      "level": "SW"
+    },
+    {
+      "id": "REQ-109",
+      "title": "sci command (Software Configuration Index)",
+      "text": "sci enumerates every project source file plus the known evidence-artifact filenames, each with a SHA-256 digest and byte size -- a configuration-item manifest, purely mechanical/derivable. Always exits 0.",
+      "level": "SW"
+    },
+    {
+      "id": "REQ-110",
+      "title": "analyze command and Fusa.Analyze module (deeper own-pass static analysis)",
+      "text": "Fusa.Analyze.Analyze is a standalone (not Fusa.Engine-registered) text-based scan producing ANAL-prefixed findings, separate from check's finding set. ANAL001 flags a with-clause whose last dotted component never appears again in the file (Info severity, since a package used only via a bare name brought into scope by 'use' is a documented false positive). ANAL002 flags a subprogram with more than 6 formal parameters, correctly handling a parameter list whose opening paren is on a line after the procedure/function keyword.",
+      "level": "SW"
+    },
+    {
+      "id": "REQ-111",
+      "title": "lint command and Fusa.Rules_Lint module (general-correctness/formatting hygiene)",
+      "text": "Fusa.Rules_Lint.Scan is a standalone (not Fusa.Engine-registered) text-based scan producing LINT-prefixed findings. LINT001 flags trailing whitespace at end of line. LINT002 flags a second (or later) consecutive blank line, once per run. LINT003 flags a file that doesn't end with exactly one trailing newline (missing, or more than one). All WARNING severity.",
+      "level": "SW"
+    },
+    {
+      "id": "REQ-112",
+      "title": "analyze CLI command",
+      "text": "analyze runs Fusa.Analyze.Analyze over the project's source files and emits an analyze-report finding-list (text/json), gating on ERROR (none currently emitted) or, under --strict, WARNING (ANAL002).",
+      "level": "SW"
+    },
+    {
+      "id": "REQ-113",
+      "title": "lint CLI command",
+      "text": "lint runs Fusa.Rules_Lint.Scan over the project's source files and emits a lint-report finding-list (text/json), gating under --strict since all LINT findings are WARNING severity.",
       "level": "SW"
     }
   ]
