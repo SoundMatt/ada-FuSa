@@ -36,6 +36,7 @@ package Fusa.Config is
    --  Loads .fusa.json (falling back to legacy .adafusa.json with a stderr
    --  deprecation warning when only the legacy name exists -- canonical
    --  wins when both are present). Raises No_Config_Error / Invalid_Config_Error.
+   --  fusa:req REQ-005
    function Load (Project_Root : String) return Project_Config;
 
    --  Writes the canonical §1.2.1 shape (always the nested `project` form).
@@ -66,6 +67,7 @@ package Fusa.Config is
    --  A duplicate `id` within the file MUST surface as an ERROR finding
    --  (category requirement) per spec §1.2 rather than being silently
    --  merged or dropped -- such findings are appended to Findings.
+   --  fusa:req REQ-006
    function Load_Requirements
      (Project_Root : String;
       Findings     : in out Finding_List) return Requirement_List;

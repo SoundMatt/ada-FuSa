@@ -6,6 +6,7 @@
 package Fusa.Sha256 is
 
    --  Returns the 64-character lowercase hex digest of Data.
+   --  fusa:req REQ-019
    function Hex_Digest (Data : String) return String;
 
 end Fusa.Sha256;

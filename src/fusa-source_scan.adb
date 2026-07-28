@@ -6,7 +6,8 @@ package body Fusa.Source_Scan is
 
    function Is_Skipped_Dir (Name : String) return Boolean is
      (Name = ".git" or else Name = "obj" or else Name = "bin"
-      or else Name = "alire" or else Name = ".alire");
+      or else Name = "alire" or else Name = ".alire"
+      or else Name = ".fusa-qualify-tmp");
 
    function Has_Suffix (Name, Suffix : String) return Boolean is
      (Name'Length >= Suffix'Length

@@ -5,6 +5,7 @@ with Test_Json;
 with Test_Fusa_Core;
 with Test_Report;
 with Test_Config;
+with Test_Files;
 with Test_Glob;
 with Test_Engine;
 with Test_Annotations;
@@ -18,6 +19,7 @@ begin
    Test_Fusa_Core;
    Test_Report;
    Test_Config;
+   Test_Files;
    Test_Glob;
    Test_Engine;
    Test_Annotations;

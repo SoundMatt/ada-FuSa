@@ -45,12 +45,21 @@ package body Fusa.Json.Writer is
 
    --  Called immediately before writing any member/element/value. Handles
    --  comma placement between siblings and suppresses itself for the value
-   --  half of a Key/Value pair (see Key below).
-   procedure Before_Item (W : in out Instance) is
+   --  half of a Key/Value pair (see Key below). Is_Key distinguishes a
+   --  call from Key() itself (starting a new member -- always legal
+   --  inside an object) from every other caller (writing an actual value
+   --  -- illegal directly inside an object without a preceding Key()).
+   procedure Before_Item (W : in out Instance; Is_Key : Boolean := False) is
    begin
       if W.Awaiting_Value then
          W.Awaiting_Value := False;
          return;
+      end if;
+      if not Is_Key
+        and then W.Depth > 0 and then W.Stack (W.Depth).Kind = In_Object
+      then
+         raise Writer_Error with
+           "value written directly inside an object with no preceding Key() call";
       end if;
       if W.Depth = 0 then
          return;
@@ -64,6 +73,9 @@ package body Fusa.Json.Writer is
 
    procedure Object_Start (W : in out Instance) is
    begin
+      if W.Depth >= Max_Depth then
+         raise Writer_Error with "maximum nesting depth exceeded";
+      end if;
       Before_Item (W);
       Append (W.Buf, "{");
       W.Depth := W.Depth + 1;
@@ -71,17 +83,30 @@ package body Fusa.Json.Writer is
    end Object_Start;
 
    procedure Object_End (W : in out Instance) is
-      Was_Empty : constant Boolean := W.Stack (W.Depth).First;
    begin
-      W.Depth := W.Depth - 1;
-      if not Was_Empty then
-         New_Line_Indent (W);
+      if W.Depth = 0 then
+         raise Writer_Error with "Object_End called with no matching Object_Start";
       end if;
-      Append (W.Buf, "}");
+      if W.Stack (W.Depth).Kind /= In_Object then
+         raise Writer_Error with
+           "Object_End called but the innermost open container is an array";
+      end if;
+      declare
+         Was_Empty : constant Boolean := W.Stack (W.Depth).First;
+      begin
+         W.Depth := W.Depth - 1;
+         if not Was_Empty then
+            New_Line_Indent (W);
+         end if;
+         Append (W.Buf, "}");
+      end;
    end Object_End;
 
    procedure Array_Start (W : in out Instance) is
    begin
+      if W.Depth >= Max_Depth then
+         raise Writer_Error with "maximum nesting depth exceeded";
+      end if;
       Before_Item (W);
       Append (W.Buf, "[");
       W.Depth := W.Depth + 1;
@@ -89,18 +114,35 @@ package body Fusa.Json.Writer is
    end Array_Start;
 
    procedure Array_End (W : in out Instance) is
-      Was_Empty : constant Boolean := W.Stack (W.Depth).First;
    begin
-      W.Depth := W.Depth - 1;
-      if not Was_Empty then
-         New_Line_Indent (W);
+      if W.Depth = 0 then
+         raise Writer_Error with "Array_End called with no matching Array_Start";
       end if;
-      Append (W.Buf, "]");
+      if W.Stack (W.Depth).Kind /= In_Array then
+         raise Writer_Error with
+           "Array_End called but the innermost open container is an object";
+      end if;
+      declare
+         Was_Empty : constant Boolean := W.Stack (W.Depth).First;
+      begin
+         W.Depth := W.Depth - 1;
+         if not Was_Empty then
+            New_Line_Indent (W);
+         end if;
+         Append (W.Buf, "]");
+      end;
    end Array_End;
 
    procedure Key (W : in out Instance; K : String) is
    begin
-      Before_Item (W);
+      if W.Awaiting_Value then
+         raise Writer_Error with
+           "Key() called while a value was still expected for the previous Key()";
+      end if;
+      if W.Depth = 0 or else W.Stack (W.Depth).Kind /= In_Object then
+         raise Writer_Error with "Key() called outside an object context";
+      end if;
+      Before_Item (W, Is_Key => True);
       Append (W.Buf, Quote (K));
       Append (W.Buf, ": ");
       W.Awaiting_Value := True;

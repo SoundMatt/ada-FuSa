@@ -13,6 +13,7 @@ with Test_Framework; use Test_Framework;
 procedure Test_Engine is
    Root : constant String := "tmp_test_engine";
 begin
+   --  fusa:test REQ-017
    Check (Fusa.Engine.Rule_Count >= 8, "at least the 8 starter rules are registered");
 
    declare
@@ -96,6 +97,61 @@ begin
       end loop;
       Check (Hits_X = 1, "ADA001 fires on an unjustified pragma Suppress");
       Check (Hits_Y = 0, "ADA001 is suppressed by a trailing -- fusa:unsafe comment");
+   end;
+
+   --  Regressions from the deep audit: case-sensitive / same-line-only /
+   --  whitespace-brittle matching in the lint rules.
+   Fusa.Files.Write_File
+     (Root & "/src/z.adb",
+      "procedure Z is" & ASCII.LF &
+      "   PRAGMA SUPPRESS (All_Checks);" & ASCII.LF &
+      "begin" & ASCII.LF & "   null;" & ASCII.LF & "end Z;" & ASCII.LF);
+   Fusa.Files.Write_File
+     (Root & "/src/w.adb",
+      "procedure W is" & ASCII.LF &
+      "   pragma Suppress (All_Checks);" & ASCII.LF &
+      "   -- fusa:unsafe justified two lines down" & ASCII.LF &
+      "begin" & ASCII.LF & "   null;" & ASCII.LF & "end W;" & ASCII.LF);
+   Fusa.Files.Write_File
+     (Root & "/src/v.adb",
+      "procedure V is" & ASCII.LF & "begin" & ASCII.LF & "   null;" & ASCII.LF &
+      "exception" & ASCII.LF & "   when   others   =>" & ASCII.LF &
+      "      null;" & ASCII.LF & "end V;" & ASCII.LF);
+
+   declare
+      Cfg      : constant Fusa.Config.Project_Config := Fusa.Config.Default_Config ("t");
+      Files    : String_List;
+   begin
+      Files.Append ("src/z.adb");
+      Files.Append ("src/w.adb");
+      Files.Append ("src/v.adb");
+      declare
+         Findings : constant Finding_List := Fusa.Engine.Run_All (Root, Files);
+         Hits_Z, Hits_W, Hits_V : Natural := 0;
+      begin
+         for Fnd of Findings loop
+            if To_String (Fnd.Rule_Id) = "ADA001"
+              and then To_String (Fnd.Loc.File) = "src/z.adb"
+            then
+               Hits_Z := Hits_Z + 1;
+            elsif To_String (Fnd.Rule_Id) = "ADA001"
+              and then To_String (Fnd.Loc.File) = "src/w.adb"
+            then
+               Hits_W := Hits_W + 1;
+            elsif To_String (Fnd.Rule_Id) = "ADA002"
+              and then To_String (Fnd.Loc.File) = "src/v.adb"
+            then
+               Hits_V := Hits_V + 1;
+            end if;
+         end loop;
+         Check (Hits_Z = 1,
+                "ADA001 fires on 'PRAGMA SUPPRESS' (uppercase -- Ada is "
+                & "case-insensitive)");
+         Check (Hits_W = 0,
+                "ADA001 is suppressed by a -- fusa:unsafe comment two lines below");
+         Check (Hits_V = 1,
+                "ADA002 fires on 'when   others   =>' with extra alignment whitespace");
+      end;
    end;
 
    Ada.Directories.Delete_Tree (Root);

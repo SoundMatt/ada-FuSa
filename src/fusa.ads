@@ -22,16 +22,19 @@ package Fusa is
    --  version in their SpecVersion/SPEC_VERSION constants (e.g.
    --  go-FuSa/c-FuSa/cpp-FuSa/rust-FuSa/py-FuSa all correct theirs to
    --  strings like "1.10.4", not truncated to "1.10").
+   --  fusa:req REQ-003
    Schema_Version : constant String := "1.11";
    Spec_Version   : constant String := "1.11.0";
 
    --  §2.3 exit codes
+   --  fusa:req REQ-001
    Exit_Ok        : constant := 0; --  success, no gate failure
    Exit_Gate_Fail : constant := 1; --  ran fine, found ERROR findings (or WARNING under --strict)
    Exit_Usage     : constant := 2; --  bad flag/argument
    Exit_Runtime   : constant := 3; --  could not complete analysis
 
    --  §2.4 severity enum
+   --  fusa:req REQ-002
    type Severity_Kind is (Info, Warning, Error);
    function Image (S : Severity_Kind) return String;
 
@@ -99,6 +102,7 @@ package Fusa is
    --  §4.2 canonical fingerprint: "sha256:" & lowercase_hex(SHA-256(
    --  Rule_Id & US & Loc.File & US & Normalize_Message(Message))),
    --  where US is ASCII Unit Separator (0x1F).
+   --  fusa:req REQ-004
    function Compute_Fingerprint (F : Finding) return String;
 
 end Fusa;

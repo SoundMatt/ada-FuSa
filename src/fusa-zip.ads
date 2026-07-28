@@ -15,6 +15,7 @@ package Fusa.Zip is
    package Entry_Vectors is new Ada.Containers.Indefinite_Vectors (Positive, Zip_Entry);
    subtype Entry_List is Entry_Vectors.Vector;
 
+   --  fusa:req REQ-020
    procedure Write_Zip (Path : String; Entries : Entry_List);
 
 end Fusa.Zip;
