@@ -126,6 +126,131 @@ package body Fusa.Report is
       return To_String (Buf);
    end Render_Text;
 
+   function Html_Escape (S : String) return String is
+      Buf : Unbounded_String := Null_Unbounded_String;
+   begin
+      for C of S loop
+         case C is
+            when '&' => Append (Buf, "&amp;");
+            when '<' => Append (Buf, "&lt;");
+            when '>' => Append (Buf, "&gt;");
+            when '"' => Append (Buf, "&quot;");
+            when others => Append (Buf, C);
+         end case;
+      end loop;
+      return To_String (Buf);
+   end Html_Escape;
+
+   --  A literal '|' would otherwise be misread as a GFM table column
+   --  separator, splitting a message/location across cells.
+   function Md_Escape (S : String) return String is
+      Buf : Unbounded_String := Null_Unbounded_String;
+   begin
+      for C of S loop
+         if C = '|' then
+            Append (Buf, "\|");
+         else
+            Append (Buf, C);
+         end if;
+      end loop;
+      return To_String (Buf);
+   end Md_Escape;
+
+   function Loc_Text (Loc : Location) return String is
+     (To_String (Loc.File) &
+        (if Loc.Line > 0 then ":" & Trim_Img (Loc.Line) else ""));
+
+   --  fusa:req REQ-073
+   function Render_Html (Findings : Finding_List) return String is
+      Buf : Unbounded_String := Null_Unbounded_String;
+      Errors, Warnings, Infos : Natural := 0;
+   begin
+      for F of Findings loop
+         case F.Severity is
+            when Error   => Errors   := Errors + 1;
+            when Warning => Warnings := Warnings + 1;
+            when Info    => Infos    := Infos + 1;
+         end case;
+      end loop;
+
+      Append (Buf, "<!doctype html>" & ASCII.LF);
+      Append (Buf, "<html><head><meta charset=""utf-8"">" & ASCII.LF);
+      Append (Buf, "<title>" & Tool_Name & " findings</title>" & ASCII.LF);
+      Append (Buf, "<style>" & ASCII.LF);
+      Append (Buf, "body{font-family:sans-serif;margin:2em}" & ASCII.LF);
+      Append (Buf, "table{border-collapse:collapse;width:100%}" & ASCII.LF);
+      Append (Buf, "th,td{border:1px solid #ccc;padding:4px 8px;text-align:left;" &
+                "vertical-align:top}" & ASCII.LF);
+      Append (Buf, "th{background:#eee}" & ASCII.LF);
+      Append (Buf, ".sev-ERROR{color:#b00020;font-weight:bold}" & ASCII.LF);
+      Append (Buf, ".sev-WARNING{color:#a06000}" & ASCII.LF);
+      Append (Buf, ".sev-INFO{color:#555}" & ASCII.LF);
+      Append (Buf, "</style></head><body>" & ASCII.LF);
+      Append (Buf, "<h1>" & Tool_Name & " findings</h1>" & ASCII.LF);
+      Append (Buf, "<p>" & Trim_Img (Natural (Findings.Length)) & " findings (" &
+                Trim_Img (Errors) & " errors, " & Trim_Img (Warnings) &
+                " warnings, " & Trim_Img (Infos) & " infos)</p>" & ASCII.LF);
+
+      if Findings.Is_Empty then
+         Append (Buf, "<p>No findings.</p>" & ASCII.LF);
+      else
+         Append (Buf, "<table><tr><th>Severity</th><th>Rule</th><th>Location</th>" &
+                   "<th>Message</th><th>Category</th><th>Disposition</th></tr>" & ASCII.LF);
+         for F of Findings loop
+            Append (Buf, "<tr class=""sev-" & Image (F.Severity) & """>");
+            Append (Buf, "<td>" & Image (F.Severity) & "</td>");
+            Append (Buf, "<td>" & Html_Escape (To_String (F.Rule_Id)) & "</td>");
+            Append (Buf, "<td>" & Html_Escape (Loc_Text (F.Loc)) & "</td>");
+            Append (Buf, "<td>" & Html_Escape (To_String (F.Message)) & "</td>");
+            Append (Buf, "<td>" & Image (F.Category) & "</td>");
+            Append (Buf, "<td>" &
+                      (if F.Disposition /= Open then Image (F.Disposition) else "") &
+                      "</td>");
+            Append (Buf, "</tr>" & ASCII.LF);
+         end loop;
+         Append (Buf, "</table>" & ASCII.LF);
+      end if;
+      Append (Buf, "</body></html>");
+      return To_String (Buf);
+   end Render_Html;
+
+   --  fusa:req REQ-074
+   function Render_Md (Findings : Finding_List) return String is
+      Buf : Unbounded_String := Null_Unbounded_String;
+      Errors, Warnings, Infos : Natural := 0;
+   begin
+      for F of Findings loop
+         case F.Severity is
+            when Error   => Errors   := Errors + 1;
+            when Warning => Warnings := Warnings + 1;
+            when Info    => Infos    := Infos + 1;
+         end case;
+      end loop;
+
+      Append (Buf, "# " & Tool_Name & " findings" & ASCII.LF & ASCII.LF);
+      Append (Buf, Trim_Img (Natural (Findings.Length)) & " findings (" &
+                Trim_Img (Errors) & " errors, " & Trim_Img (Warnings) &
+                " warnings, " & Trim_Img (Infos) & " infos)" & ASCII.LF & ASCII.LF);
+
+      if Findings.Is_Empty then
+         Append (Buf, "No findings." & ASCII.LF);
+      else
+         Append (Buf, "| Severity | Rule | Location | Message | Category | Disposition |" &
+                   ASCII.LF);
+         Append (Buf, "|---|---|---|---|---|---|" & ASCII.LF);
+         for F of Findings loop
+            Append (Buf, "| " & Image (F.Severity) &
+                      " | " & Md_Escape (To_String (F.Rule_Id)) &
+                      " | " & Md_Escape (Loc_Text (F.Loc)) &
+                      " | " & Md_Escape (To_String (F.Message)) &
+                      " | " & Image (F.Category) &
+                      " | " & (if F.Disposition /= Open then Image (F.Disposition) else "") &
+                      " |" & ASCII.LF);
+         end loop;
+      end if;
+      return To_String (Buf);
+   end Render_Md;
+
    --  fusa:req REQ-022
    function Render_Sarif (Findings : Finding_List) return String is
       W          : Fusa.Json.Writer.Instance;

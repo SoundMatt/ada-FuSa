@@ -172,12 +172,12 @@ package body Fusa.Cli is
       W.Key ("version");      W.Array_Start; W.Value ("text"); W.Value ("json"); W.Array_End;
       W.Key ("capabilities"); W.Array_Start; W.Value ("json"); W.Array_End;
       W.Key ("init");         W.Array_Start; W.Value ("text"); W.Array_End;
-      W.Key ("check");        W.Array_Start; W.Value ("text"); W.Value ("json"); W.Value ("sarif"); W.Array_End;
-      W.Key ("trace");        W.Array_Start; W.Value ("text"); W.Value ("json"); W.Array_End;
+      W.Key ("check");        W.Array_Start; W.Value ("text"); W.Value ("json"); W.Value ("sarif"); W.Value ("html"); W.Array_End;
+      W.Key ("trace");        W.Array_Start; W.Value ("text"); W.Value ("json"); W.Value ("html"); W.Value ("md"); W.Array_End;
       W.Key ("qualify");      W.Array_Start; W.Value ("text"); W.Value ("json"); W.Array_End;
       W.Key ("release");      W.Array_Start; W.Value ("json"); W.Array_End;
       W.Key ("audit-pack");   W.Array_Start; W.Value ("json"); W.Array_End;
-      W.Key ("report");       W.Array_Start; W.Value ("text"); W.Value ("json"); W.Value ("sarif"); W.Array_End;
+      W.Key ("report");       W.Array_Start; W.Value ("text"); W.Value ("json"); W.Value ("sarif"); W.Value ("html"); W.Value ("md"); W.Array_End;
       W.Object_End;
 
       W.Key ("standards");
@@ -306,11 +306,13 @@ package body Fusa.Cli is
       Format : constant String := Flag_Value (Args, "--format", "text");
       Strict : constant Boolean := Has_Flag (Args, "--strict");
    begin
-      if Format /= "text" and then Format /= "json" and then Format /= "sarif" then
+      if Format /= "text" and then Format /= "json" and then Format /= "sarif"
+        and then Format /= "html"
+      then
          Ada.Text_IO.Put_Line
            (Ada.Text_IO.Standard_Error,
             "ada-FuSa: check: unsupported --format '" & Format &
-            "' (supported: text, json, sarif)");
+            "' (supported: text, json, sarif, html)");
          return Exit_Usage;
       end if;
 
@@ -371,6 +373,8 @@ package body Fusa.Cli is
                end;
             elsif Format = "sarif" then
                Emit (Args, Fusa.Report.Render_Sarif (Findings));
+            elsif Format = "html" then
+               Emit (Args, Fusa.Report.Render_Html (Findings));
             else
                Emit (Args, Fusa.Report.Render_Text (Findings));
             end if;
@@ -397,11 +401,13 @@ package body Fusa.Cli is
       Sec_Tested_Str : constant String := Flag_Value (Args, "--sec-tested", "");
       Func_Cov_Str   : constant String := Flag_Value (Args, "--func-coverage", "");
    begin
-      if Format /= "text" and then Format /= "json" then
+      if Format /= "text" and then Format /= "json"
+        and then Format /= "html" and then Format /= "md"
+      then
          Ada.Text_IO.Put_Line
            (Ada.Text_IO.Standard_Error,
             "ada-FuSa: trace: unsupported --format '" & Format &
-            "' (supported: text, json)");
+            "' (supported: text, json, html, md)");
          return Exit_Usage;
       end if;
 
@@ -634,6 +640,76 @@ package body Fusa.Cli is
 
                      W.Object_End;
                      Emit (Args, Fusa.Json.Writer.To_String (W));
+                  end;
+               elsif Format = "html" or else Format = "md" then
+                  declare
+                     Is_Html : constant Boolean := Format = "html";
+                     Buf     : Unbounded_String := Null_Unbounded_String;
+
+                     function Status_Of (I : Positive) return String is
+                       (if Statuses (I).Tested then "tested"
+                        elsif Statuses (I).Traced then "traced"
+                        else "gap");
+                  begin
+                     if Is_Html then
+                        Append (Buf, "<!doctype html>" & ASCII.LF);
+                        Append (Buf, "<html><head><meta charset=""utf-8"">" & ASCII.LF);
+                        Append (Buf, "<title>" & Fusa.Tool_Name &
+                                  " requirement traceability</title>" & ASCII.LF);
+                        Append (Buf, "<style>" & ASCII.LF);
+                        Append (Buf, "body{font-family:sans-serif;margin:2em}" & ASCII.LF);
+                        Append (Buf, "table{border-collapse:collapse;width:100%}" & ASCII.LF);
+                        Append (Buf, "th,td{border:1px solid #ccc;padding:4px 8px;" &
+                                  "text-align:left}" & ASCII.LF);
+                        Append (Buf, "th{background:#eee}" & ASCII.LF);
+                        Append (Buf, "</style></head><body>" & ASCII.LF);
+                        Append (Buf, "<h1>" & Fusa.Tool_Name &
+                                  " requirement traceability</h1>" & ASCII.LF);
+                        Append (Buf, "<p>requirements:" & Trim_Img (Total) &
+                                  " traced:" & Trim_Img (Traced_Count) &
+                                  " tested:" & Trim_Img (Tested_Count) &
+                                  " sec-tested:" & Trim_Img (Sec_Tested_Count) & "<br>" &
+                                  "functions:" & Trim_Img (Func_Total) &
+                                  " tagged:" & Trim_Img (Func_Tagged_Count) & "</p>" & ASCII.LF);
+                        Append (Buf, "<table><tr><th>Id</th><th>Title</th>" &
+                                  "<th>Status</th></tr>" & ASCII.LF);
+                     else
+                        Append (Buf, "# " & Fusa.Tool_Name &
+                                  " requirement traceability" & ASCII.LF & ASCII.LF);
+                        Append (Buf, "requirements:" & Trim_Img (Total) &
+                                  " traced:" & Trim_Img (Traced_Count) &
+                                  " tested:" & Trim_Img (Tested_Count) &
+                                  " sec-tested:" & Trim_Img (Sec_Tested_Count) & ASCII.LF &
+                                  ASCII.LF);
+                        Append (Buf, "functions:" & Trim_Img (Func_Total) &
+                                  " tagged:" & Trim_Img (Func_Tagged_Count) & ASCII.LF &
+                                  ASCII.LF);
+                        Append (Buf, "| Id | Title | Status |" & ASCII.LF);
+                        Append (Buf, "|---|---|---|" & ASCII.LF);
+                     end if;
+
+                     for I in 1 .. Total loop
+                        if not Gaps or else not Statuses (I).Tested then
+                           declare
+                              R : constant Fusa.Config.Requirement := Reqs.Element (I);
+                           begin
+                              if Is_Html then
+                                 Append (Buf, "<tr><td>" & To_String (R.Id) & "</td><td>" &
+                                           To_String (R.Title) & "</td><td>" &
+                                           Status_Of (I) & "</td></tr>" & ASCII.LF);
+                              else
+                                 Append (Buf, "| " & To_String (R.Id) & " | " &
+                                           To_String (R.Title) & " | " & Status_Of (I) &
+                                           " |" & ASCII.LF);
+                              end if;
+                           end;
+                        end if;
+                     end loop;
+
+                     if Is_Html then
+                        Append (Buf, "</table></body></html>");
+                     end if;
+                     Emit (Args, To_String (Buf));
                   end;
                else
                   declare
@@ -976,11 +1052,13 @@ package body Fusa.Cli is
             "ada-FuSa: report: --strict is not a valid flag for report");
          return Exit_Usage;
       end if;
-      if Format /= "text" and then Format /= "json" and then Format /= "sarif" then
+      if Format /= "text" and then Format /= "json" and then Format /= "sarif"
+        and then Format /= "html" and then Format /= "md"
+      then
          Ada.Text_IO.Put_Line
            (Ada.Text_IO.Standard_Error,
             "ada-FuSa: report: unsupported --format '" & Format &
-            "' (supported: text, json, sarif)");
+            "' (supported: text, json, sarif, html, md)");
          return Exit_Usage;
       end if;
 
@@ -1033,6 +1111,10 @@ package body Fusa.Cli is
                end;
             elsif Format = "sarif" then
                Emit (Args, Fusa.Report.Render_Sarif (Findings));
+            elsif Format = "html" then
+               Emit (Args, Fusa.Report.Render_Html (Findings));
+            elsif Format = "md" then
+               Emit (Args, Fusa.Report.Render_Md (Findings));
             else
                Emit (Args, Fusa.Report.Render_Text (Findings));
             end if;

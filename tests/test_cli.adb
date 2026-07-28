@@ -111,6 +111,10 @@ begin
    Check (Fusa.Cli.Run (Args ("check", "--dir", Root, "--strict")) = Exit_Gate_Fail,
           "check --strict exits 1 (gate fail) once a WARNING is present");
 
+   --  fusa:test REQ-073
+   Check (Fusa.Cli.Run (Args ("check", "--dir", Root, "--format", "html")) = Exit_Ok,
+          "check --format html exits 0");
+
    --  fusa:test REQ-072
    --  End-to-end: check reads .fusa-dispositions.json (ruleId+file+line
    --  fallback match, since no fingerprint is computed by hand here) and
@@ -136,6 +140,10 @@ begin
           "report always exits 0, even with findings present");
    Check (Fusa.Cli.Run (Args ("report", "--dir", Root, "--strict")) = Exit_Usage,
           "report rejects --strict with a usage error");
+   Check (Fusa.Cli.Run (Args ("report", "--dir", Root, "--format", "html")) = Exit_Ok,
+          "report --format html exits 0");
+   Check (Fusa.Cli.Run (Args ("report", "--dir", Root, "--format", "md")) = Exit_Ok,
+          "report --format md exits 0");
 
    --  fusa:test REQ-012
    Check (Fusa.Cli.Run (Args ("qualify", "--dir", Root)) = Exit_Ok,
@@ -173,6 +181,11 @@ begin
           "trace with no requirements file exits 0");
    Check (Fusa.Cli.Run (Args ("trace", "--dir", Root, "--format", "json")) = Exit_Ok,
           "trace --format json exits 0");
+   --  fusa:test REQ-011
+   Check (Fusa.Cli.Run (Args ("trace", "--dir", Root, "--format", "html")) = Exit_Ok,
+          "trace --format html exits 0");
+   Check (Fusa.Cli.Run (Args ("trace", "--dir", Root, "--format", "md")) = Exit_Ok,
+          "trace --format md exits 0");
    Check (Fusa.Cli.Run (Args ("trace", "--dir", Root, "--format", "bogus")) = Exit_Usage,
           "trace rejects an unsupported --format with a usage error");
 

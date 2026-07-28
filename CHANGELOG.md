@@ -114,6 +114,10 @@ repro steps and rationale on each.
   from gating, which meant a `rejected` finding (a denied waiver — still fully open per spec §4.1)
   would have incorrectly stopped gating too, once dispositions became reachable. Only
   `accepted`/`deferred` now suppress the gate.
+- `html` output format for `check`/`report` (a self-contained HTML page with a findings table) and
+  `md` (GitHub-Flavored Markdown) for `report`; `trace` gains both `html` and `md` rendering a
+  requirements/coverage table. `capabilities` updated to accurately report the new per-command
+  formats. 2 new requirements (REQ-073/REQ-074) (#31).
 
 ## v0.1.0 — 2026-07-27
 
