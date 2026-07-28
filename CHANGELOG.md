@@ -156,6 +156,21 @@ repro steps and rationale on each.
   Ada parser. Verified against hand-computed expected V(G) values for several fixtures (including a
   nested-subprogram case and an unconditional-loop-with-exit-when case) before wiring into the CLI.
   2 new requirements (REQ-080/REQ-081).
+- **Risk analysis commands** (§9.2/§13, tool-defined schemas using the spec's own recorded
+  "canonical direction") (#28):
+  - `hara`/`tara`: input-file validators for `.fusa-hara.json` (ISO 26262-3 hazard analysis) and
+    `.fusa-tara.json` (ISO 21434 ch.9 threat analysis) — hazard/threat identification requires
+    human domain judgement a tool cannot generate, so both scaffold an empty template when absent
+    and otherwise validate/re-emit whatever a human has filled in (missing `id` is an ERROR and
+    excludes the entry; missing other required fields is a WARNING but the entry is still
+    returned). New `Fusa.Config` sections (`Load_Hara`/`Scaffold_Hara`, `Load_Tara`/`Scaffold_Tara`)
+    following the same pattern as `.fusa-reqs.json`'s `Load_Requirements`.
+  - `vuln`: emits a §4 finding-list `vuln.json` (the spec's own recorded canonical direction).
+    Honest about what it can't do: no vulnerability database is integrated, so it always reports a
+    clean scan — an informational finding when `alire.toml` is present (documenting the
+    limitation), nothing otherwise. Wired into `release --full`, replacing the prior
+    always-skipped stub.
+  - 5 new requirements (REQ-082–REQ-086).
 
 ## v0.1.0 — 2026-07-27
 

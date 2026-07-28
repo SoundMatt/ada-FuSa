@@ -485,6 +485,36 @@
       "title": "comp command (DO-178C 6.3.4)",
       "text": "comp gates on cyclomatic complexity: exits 1 when any function's V(G) exceeds the threshold, 0 otherwise. Threshold defaults to 10 (DAL-B); --dal derives A<=4/B<=10/C<=15/D<=20 and overrides an explicit --threshold; --format json writes the section 9.2 comp-report.json shape.",
       "level": "SW"
+    },
+    {
+      "id": "REQ-082",
+      "title": ".fusa-hara.json load/validate/scaffold",
+      "text": "Hara_Exists/Load_Hara/Scaffold_Hara handle the ISO 26262-3 hazard analysis input file: a hazard missing id is an ERROR finding and excluded from the returned list; a hazard with an id but missing any other required field is a WARNING finding but still returned; an absent file can be scaffolded with an empty hazards array.",
+      "level": "SW"
+    },
+    {
+      "id": "REQ-083",
+      "title": ".fusa-tara.json load/validate/scaffold",
+      "text": "Tara_Exists/Load_Tara/Scaffold_Tara handle the ISO 21434 ch.9 threat analysis input file, mirroring Load_Hara's validation rule (missing id is ERROR and excluded; missing other required fields is WARNING but still returned), including a mitigations string array per threat.",
+      "level": "SW"
+    },
+    {
+      "id": "REQ-084",
+      "title": "hara command",
+      "text": "hara scaffolds .fusa-hara.json (with a message to fill it in) when absent, else loads/validates it and emits the section 3.1 envelope plus hazards[]/findings[]/summary; gates (exit 1) on any ERROR-severity validation finding.",
+      "level": "SW"
+    },
+    {
+      "id": "REQ-085",
+      "title": "tara command",
+      "text": "tara scaffolds .fusa-tara.json (with a message to fill it in) when absent, else loads/validates it and emits the section 3.1 envelope plus threats[]/findings[]/summary; gates (exit 1) on any ERROR-severity validation finding.",
+      "level": "SW"
+    },
+    {
+      "id": "REQ-086",
+      "title": "vuln command",
+      "text": "vuln emits a section 4 finding-list (per the spec section 13 canonical direction for vuln.json). No vulnerability database is integrated: an alire.toml present in the project surfaces one INFO finding documenting that limitation; its absence produces an empty (clean) finding list. Wired into release --full, replacing the prior always-skipped stub.",
+      "level": "SW"
     }
   ]
 }

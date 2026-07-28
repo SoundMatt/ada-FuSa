@@ -167,6 +167,9 @@ package body Fusa.Cli is
       W.Value ("audit-pack");
       W.Value ("report");
       W.Value ("comp");
+      W.Value ("hara");
+      W.Value ("tara");
+      W.Value ("vuln");
       W.Array_End;
 
       W.Key ("formats");
@@ -181,6 +184,9 @@ package body Fusa.Cli is
       W.Key ("audit-pack");   W.Array_Start; W.Value ("json"); W.Array_End;
       W.Key ("report");       W.Array_Start; W.Value ("text"); W.Value ("json"); W.Value ("sarif"); W.Value ("html"); W.Value ("md"); W.Array_End;
       W.Key ("comp");         W.Array_Start; W.Value ("text"); W.Value ("json"); W.Array_End;
+      W.Key ("hara");         W.Array_Start; W.Value ("text"); W.Value ("json"); W.Array_End;
+      W.Key ("tara");         W.Array_Start; W.Value ("text"); W.Value ("json"); W.Array_End;
+      W.Key ("vuln");         W.Array_Start; W.Value ("text"); W.Value ("json"); W.Array_End;
       W.Object_End;
 
       W.Key ("standards");
@@ -1103,6 +1109,7 @@ package body Fusa.Cli is
    ----------------------------------------------------------------------
 
    function Cmd_Audit_Pack (Args : String_List) return Integer;
+   function Cmd_Vuln (Args : String_List) return Integer;
 
    --  fusa:req REQ-013
    function Cmd_Release (Args : String_List) return Integer is
@@ -1244,8 +1251,24 @@ package body Fusa.Cli is
            (Ada.Text_IO.Standard_Error, "ada-FuSa: skipping fmea (not yet implemented)");
          Ada.Text_IO.Put_Line
            (Ada.Text_IO.Standard_Error, "ada-FuSa: skipping boundary (not yet implemented)");
-         Ada.Text_IO.Put_Line
-           (Ada.Text_IO.Standard_Error, "ada-FuSa: skipping vuln (not yet implemented)");
+         declare
+            Vuln_Args : String_List;
+            Vuln_Rc   : Integer;
+            pragma Unreferenced (Vuln_Rc);
+         begin
+            Vuln_Args.Append ("--dir");
+            Vuln_Args.Append (Dir);
+            Vuln_Args.Append ("--format");
+            Vuln_Args.Append ("json");
+            Vuln_Args.Append ("--output");
+            Vuln_Args.Append (Fusa.Files.Join (Output_Dir, "vuln.json"));
+            --  vuln's own severity-based gate (currently always Exit_Ok,
+            --  since no vulnerability database is integrated -- see
+            --  Cmd_Vuln) does not abort the rest of --full's evidence
+            --  pipeline, matching fmea/boundary's already-skip-don't-abort
+            --  behaviour above.
+            Vuln_Rc := Cmd_Vuln (Vuln_Args);
+         end;
          declare
             Rc : constant Integer := Cmd_Audit_Pack (Args);
          begin
@@ -1541,6 +1564,224 @@ package body Fusa.Cli is
    end Cmd_Comp;
 
    ----------------------------------------------------------------------
+   --  hara
+   ----------------------------------------------------------------------
+
+   --  fusa:req REQ-084
+   function Cmd_Hara (Args : String_List) return Integer is
+      Dir    : constant String := Dir_Of (Args);
+      Format : constant String := Flag_Value (Args, "--format", "text");
+   begin
+      if Format /= "text" and then Format /= "json" then
+         Ada.Text_IO.Put_Line
+           (Ada.Text_IO.Standard_Error,
+            "ada-FuSa: hara: unsupported --format '" & Format &
+            "' (supported: text, json)");
+         return Exit_Usage;
+      end if;
+
+      if not Fusa.Config.Hara_Exists (Dir) then
+         Fusa.Config.Scaffold_Hara (Dir);
+         Ada.Text_IO.Put_Line
+           ("created " & Fusa.Files.Join (Dir, Fusa.Config.Hara_File) &
+              " (template) -- fill in your hazards and re-run");
+         return Exit_Ok;
+      end if;
+
+      declare
+         Findings : Finding_List;
+         Hazards  : constant Fusa.Config.Hazard_List := Fusa.Config.Load_Hara (Dir, Findings);
+      begin
+         if Format = "json" then
+            declare
+               W : Fusa.Json.Writer.Instance;
+            begin
+               W.Object_Start;
+               Fusa.Report.Write_Header (W, "hara");
+               W.Key ("hazards");
+               W.Array_Start;
+               for H of Hazards loop
+                  W.Object_Start;
+                  W.Field ("id", To_String (H.Id));
+                  W.Field ("hazard", To_String (H.Description));
+                  W.Field ("severity", To_String (H.Severity));
+                  W.Field ("exposure", To_String (H.Exposure));
+                  W.Field ("controllability", To_String (H.Controllability));
+                  W.Field ("asil", To_String (H.Asil));
+                  W.Field ("safetyGoal", To_String (H.Safety_Goal));
+                  W.Object_End;
+               end loop;
+               W.Array_End;
+               Fusa.Report.Write_Findings_Array (W, Findings);
+               Fusa.Report.Write_Summary (W, Findings);
+               W.Object_End;
+               Emit (Args, Fusa.Json.Writer.To_String (W));
+            end;
+         else
+            declare
+               Buf : Unbounded_String := Null_Unbounded_String;
+            begin
+               for H of Hazards loop
+                  Append (Buf, To_String (H.Id) & ": " & To_String (H.Description) &
+                            " (ASIL " & To_String (H.Asil) & ")" & ASCII.LF);
+               end loop;
+               Append (Buf, Trim_Img (Natural (Hazards.Length)) & " hazards, " &
+                         Trim_Img (Natural (Findings.Length)) & " validation findings");
+               Emit (Args, To_String (Buf));
+            end;
+         end if;
+
+         if Fusa.Report.Has_Gate_Failure (Findings, False) then
+            return Exit_Gate_Fail;
+         end if;
+         return Exit_Ok;
+      end;
+   end Cmd_Hara;
+
+   ----------------------------------------------------------------------
+   --  tara
+   ----------------------------------------------------------------------
+
+   --  fusa:req REQ-085
+   function Cmd_Tara (Args : String_List) return Integer is
+      Dir    : constant String := Dir_Of (Args);
+      Format : constant String := Flag_Value (Args, "--format", "text");
+   begin
+      if Format /= "text" and then Format /= "json" then
+         Ada.Text_IO.Put_Line
+           (Ada.Text_IO.Standard_Error,
+            "ada-FuSa: tara: unsupported --format '" & Format &
+            "' (supported: text, json)");
+         return Exit_Usage;
+      end if;
+
+      if not Fusa.Config.Tara_Exists (Dir) then
+         Fusa.Config.Scaffold_Tara (Dir);
+         Ada.Text_IO.Put_Line
+           ("created " & Fusa.Files.Join (Dir, Fusa.Config.Tara_File) &
+              " (template) -- fill in your threats and re-run");
+         return Exit_Ok;
+      end if;
+
+      declare
+         Findings : Finding_List;
+         Threats  : constant Fusa.Config.Threat_List := Fusa.Config.Load_Tara (Dir, Findings);
+      begin
+         if Format = "json" then
+            declare
+               W : Fusa.Json.Writer.Instance;
+            begin
+               W.Object_Start;
+               Fusa.Report.Write_Header (W, "tara");
+               W.Key ("threats");
+               W.Array_Start;
+               for T of Threats loop
+                  W.Object_Start;
+                  W.Field ("id", To_String (T.Id));
+                  W.Field ("asset", To_String (T.Asset));
+                  W.Field ("threat", To_String (T.Description));
+                  W.Field ("attackVector", To_String (T.Attack_Vector));
+                  W.Field ("impact", To_String (T.Impact));
+                  W.Field ("likelihood", To_String (T.Likelihood));
+                  W.Field ("risk", To_String (T.Risk));
+                  W.Field ("treatment", To_String (T.Treatment));
+                  W.Key ("mitigations");
+                  W.Array_Start;
+                  for M of T.Mitigations loop
+                     W.Value (M);
+                  end loop;
+                  W.Array_End;
+                  W.Object_End;
+               end loop;
+               W.Array_End;
+               Fusa.Report.Write_Findings_Array (W, Findings);
+               Fusa.Report.Write_Summary (W, Findings);
+               W.Object_End;
+               Emit (Args, Fusa.Json.Writer.To_String (W));
+            end;
+         else
+            declare
+               Buf : Unbounded_String := Null_Unbounded_String;
+            begin
+               for T of Threats loop
+                  Append (Buf, To_String (T.Id) & ": " & To_String (T.Description) &
+                            " (risk " & To_String (T.Risk) & ")" & ASCII.LF);
+               end loop;
+               Append (Buf, Trim_Img (Natural (Threats.Length)) & " threats, " &
+                         Trim_Img (Natural (Findings.Length)) & " validation findings");
+               Emit (Args, To_String (Buf));
+            end;
+         end if;
+
+         if Fusa.Report.Has_Gate_Failure (Findings, False) then
+            return Exit_Gate_Fail;
+         end if;
+         return Exit_Ok;
+      end;
+   end Cmd_Tara;
+
+   ----------------------------------------------------------------------
+   --  vuln
+   ----------------------------------------------------------------------
+
+   --  fusa:req REQ-086
+   function Cmd_Vuln (Args : String_List) return Integer is
+      Dir    : constant String := Dir_Of (Args);
+      Format : constant String := Flag_Value (Args, "--format", "text");
+   begin
+      if Format /= "text" and then Format /= "json" then
+         Ada.Text_IO.Put_Line
+           (Ada.Text_IO.Standard_Error,
+            "ada-FuSa: vuln: unsupported --format '" & Format &
+            "' (supported: text, json)");
+         return Exit_Usage;
+      end if;
+
+      declare
+         Findings : Finding_List;
+      begin
+         --  No vulnerability database is integrated (see README) -- this
+         --  always reports a clean scan. Only a project with an Alire
+         --  manifest even has third-party dependencies worth considering;
+         --  ada-FuSa's own zero-dependency build always reports 0 findings.
+         if Fusa.Files.Exists (Fusa.Files.Join (Dir, "alire.toml")) then
+            Findings.Append
+              (Make_Finding
+                 (Rule_Id     => "VULN001",
+                  Severity    => Info,
+                  Message     =>
+                    "alire.toml found, but no vulnerability database is " &
+                    "integrated -- this scan cannot detect real CVEs",
+                  Loc         => Make_Location ("alire.toml"),
+                  Category    => Fusa.Supply_Chain,
+                  Remediation =>
+                    "cross-check dependencies against a CVE database " &
+                    "manually until issue #28's follow-up lands"));
+         end if;
+
+         if Format = "json" then
+            declare
+               W : Fusa.Json.Writer.Instance;
+            begin
+               W.Object_Start;
+               Fusa.Report.Write_Header (W, "vuln");
+               Fusa.Report.Write_Findings_Array (W, Findings);
+               Fusa.Report.Write_Summary (W, Findings);
+               W.Object_End;
+               Emit (Args, Fusa.Json.Writer.To_String (W));
+            end;
+         else
+            Emit (Args, Fusa.Report.Render_Text (Findings));
+         end if;
+
+         if Fusa.Report.Has_Gate_Failure (Findings, False) then
+            return Exit_Gate_Fail;
+         end if;
+         return Exit_Ok;
+      end;
+   end Cmd_Vuln;
+
+   ----------------------------------------------------------------------
    --  Usage / dispatch
    ----------------------------------------------------------------------
 
@@ -1549,7 +1790,7 @@ package body Fusa.Cli is
       Ada.Text_IO.Put_Line (Ada.Text_IO.Standard_Error,
         "usage: adafusa <command> [options]" & ASCII.LF &
         "commands: version capabilities init check trace qualify release audit-pack " &
-        "report comp");
+        "report comp hara tara vuln");
    end Print_Usage;
 
    function Run (Args : String_List) return Integer is
@@ -1586,6 +1827,12 @@ package body Fusa.Cli is
             return Cmd_Report (Rest);
          elsif Cmd = "comp" then
             return Cmd_Comp (Rest);
+         elsif Cmd = "hara" then
+            return Cmd_Hara (Rest);
+         elsif Cmd = "tara" then
+            return Cmd_Tara (Rest);
+         elsif Cmd = "vuln" then
+            return Cmd_Vuln (Rest);
          elsif Cmd = "--help" or else Cmd = "-h" or else Cmd = "help" then
             Print_Usage;
             return Exit_Ok;

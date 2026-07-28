@@ -260,6 +260,51 @@ begin
              "comp --format json reports the DAL-derived threshold and the dal field");
    end;
 
+   --  fusa:test REQ-084
+   Check (not Fusa.Files.Exists (Root & "/.fusa-hara.json"), "no .fusa-hara.json initially");
+   Check (Fusa.Cli.Run (Args ("hara", "--dir", Root)) = Exit_Ok,
+          "hara with no .fusa-hara.json scaffolds a template and exits 0");
+   Check (Fusa.Files.Exists (Root & "/.fusa-hara.json"), "hara created .fusa-hara.json");
+   Check (Fusa.Cli.Run (Args ("hara", "--dir", Root)) = Exit_Ok,
+          "hara against the (still-empty) scaffolded template exits 0");
+   Fusa.Files.Write_File
+     (Root & "/.fusa-hara.json", "{""hazards"":[{""hazard"":""no id""}]}");
+   Check (Fusa.Cli.Run (Args ("hara", "--dir", Root)) = Exit_Gate_Fail,
+          "hara gate-fails once a hazard with no id is present (ERROR finding)");
+
+   --  fusa:test REQ-085
+   Check (not Fusa.Files.Exists (Root & "/.fusa-tara.json"), "no .fusa-tara.json initially");
+   Check (Fusa.Cli.Run (Args ("tara", "--dir", Root)) = Exit_Ok,
+          "tara with no .fusa-tara.json scaffolds a template and exits 0");
+   Check (Fusa.Files.Exists (Root & "/.fusa-tara.json"), "tara created .fusa-tara.json");
+   Fusa.Files.Write_File
+     (Root & "/.fusa-tara.json", "{""threats"":[{""threat"":""no id""}]}");
+   Check (Fusa.Cli.Run (Args ("tara", "--dir", Root)) = Exit_Gate_Fail,
+          "tara gate-fails once a threat with no id is present (ERROR finding)");
+
+   --  fusa:test REQ-086
+   Check (Fusa.Cli.Run (Args ("vuln", "--dir", Root)) = Exit_Ok,
+          "vuln exits 0 when no alire.toml is present (nothing to scan)");
+   declare
+      Exit_Code1 : Integer;
+      Out_No_Alr : constant String :=
+        Run_Capturing_Stdout (Args ("vuln", "--dir", Root, "--format", "json"), Exit_Code1);
+   begin
+      Check (Ada.Strings.Fixed.Index (Out_No_Alr, """findings"": []") > 0,
+             "vuln reports an empty findings array with no alire.toml present");
+   end;
+   Fusa.Files.Write_File (Root & "/alire.toml", "name = ""t""");
+   Check (Fusa.Cli.Run (Args ("vuln", "--dir", Root)) = Exit_Ok,
+          "vuln still exits 0 with alire.toml present (an INFO finding does not gate)");
+   declare
+      Exit_Code2 : Integer;
+      Out_Alr    : constant String :=
+        Run_Capturing_Stdout (Args ("vuln", "--dir", Root, "--format", "json"), Exit_Code2);
+   begin
+      Check (Ada.Strings.Fixed.Index (Out_Alr, """ruleId"": ""VULN001""") > 0,
+             "vuln surfaces an informational VULN001 finding once alire.toml exists");
+   end;
+
    --  trace: no requirements yet -> zero totals, still exits 0
    --  fusa:test REQ-011
    Check (Fusa.Cli.Run (Args ("trace", "--dir", Root)) = Exit_Ok,

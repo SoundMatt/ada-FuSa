@@ -125,4 +125,81 @@ package Fusa.Config is
       Disps           : Disposition_List;
       Orphan_Findings : in out Finding_List);
 
+   ------------------------------------------------------------------
+   --  .fusa-hara.json (spec section 13: hazard analysis & risk
+   --  assessment, ISO 26262-3 -- an input file the hara command
+   --  validates/normalises, scaffolding a template if absent)
+   ------------------------------------------------------------------
+
+   Hara_File : constant String := ".fusa-hara.json";
+
+   type Hazard is record
+      Id              : Unbounded_String;
+      Description     : Unbounded_String;
+      Severity        : Unbounded_String;
+      Exposure        : Unbounded_String;
+      Controllability : Unbounded_String;
+      Asil            : Unbounded_String;
+      Safety_Goal     : Unbounded_String;
+   end record;
+
+   package Hazard_Vectors is new
+     Ada.Containers.Indefinite_Vectors (Positive, Hazard);
+   subtype Hazard_List is Hazard_Vectors.Vector;
+
+   --  fusa:req REQ-082
+   function Hara_Exists (Project_Root : String) return Boolean;
+
+   --  Loads .fusa-hara.json. Returns an empty list if absent. A hazard
+   --  missing "id" is an ERROR finding (category safety) -- without an id
+   --  it cannot be referenced or tracked; a hazard missing any other
+   --  required field is a WARNING finding, so the hazard is still usable
+   --  but incompletely specified.
+   --  fusa:req REQ-082
+   function Load_Hara
+     (Project_Root : String;
+      Findings     : in out Finding_List) return Hazard_List;
+
+   --  Writes an empty-array template if .fusa-hara.json does not already
+   --  exist; a no-op (does not overwrite) if it does.
+   --  fusa:req REQ-082
+   procedure Scaffold_Hara (Project_Root : String);
+
+   ------------------------------------------------------------------
+   --  .fusa-tara.json (spec section 13 "canonical direction": threat
+   --  analysis & risk assessment, ISO 21434 ch.9 -- same input/
+   --  validate/scaffold pattern as .fusa-hara.json)
+   ------------------------------------------------------------------
+
+   Tara_File : constant String := ".fusa-tara.json";
+
+   type Threat is record
+      Id             : Unbounded_String;
+      Asset          : Unbounded_String;
+      Description    : Unbounded_String;
+      Attack_Vector  : Unbounded_String;
+      Impact         : Unbounded_String;
+      Likelihood     : Unbounded_String;
+      Risk           : Unbounded_String;
+      Treatment      : Unbounded_String;
+      Mitigations    : String_List;
+   end record;
+
+   package Threat_Vectors is new
+     Ada.Containers.Indefinite_Vectors (Positive, Threat);
+   subtype Threat_List is Threat_Vectors.Vector;
+
+   --  fusa:req REQ-083
+   function Tara_Exists (Project_Root : String) return Boolean;
+
+   --  Same validation rule as Load_Hara: missing "id" is an ERROR
+   --  (category security), any other missing required field is a WARNING.
+   --  fusa:req REQ-083
+   function Load_Tara
+     (Project_Root : String;
+      Findings     : in out Finding_List) return Threat_List;
+
+   --  fusa:req REQ-083
+   procedure Scaffold_Tara (Project_Root : String);
+
 end Fusa.Config;

@@ -86,6 +86,9 @@ the simplest route, since GNAT is not distributed via Homebrew.
 | `adafusa audit-pack [--dir] [--output]` | Bundle all evidence artifacts into a ZIP | json |
 | `adafusa report [--dir]` | Re-run analysis; always exits 0 | text, json, sarif, html, md |
 | `adafusa comp [--dir] [--threshold N] [--dal DAL-A\|B\|C\|D]` | McCabe cyclomatic complexity per function (DO-178C §6.3.4) | text, json |
+| `adafusa hara [--dir]` | Load/validate `.fusa-hara.json` hazard analysis (ISO 26262-3); scaffolds a template if absent | text, json |
+| `adafusa tara [--dir]` | Load/validate `.fusa-tara.json` threat analysis (ISO 21434 ch.9); scaffolds a template if absent | text, json |
+| `adafusa vuln [--dir]` | Dependency vulnerability scan (no CVE database integrated yet — see limitations) | text, json |
 
 **Shared flags:** `--dir <path>` (project root, default `.`), `--output <file>` (write instead of
 stdout), `--no-color` (accepted; ada-FuSa does not currently emit ANSI colour), `--format <fmt>`.
@@ -256,6 +259,7 @@ approximation, but it means a nested subprogram's own complexity is never shown 
 | `<name>-<version>.spdx.json` | `adafusa release --spdx-version` | SPDX 2.2/2.3 software bill of materials (opt-in) |
 | `audit-pack.zip` | `adafusa audit-pack` | All existing evidence artifacts, bundled |
 | `comp-report.json` | `adafusa comp --format json` | Per-function cyclomatic complexity (consumed by FuSaOps v1.70.0+) |
+| `vuln.json` | `adafusa vuln --format json` / `release --full` | Dependency vulnerability finding-list (always clean — see limitations) |
 
 ## Docker
 
@@ -282,6 +286,13 @@ with the other six x-FuSa tools:
   ([#32](https://github.com/SoundMatt/ada-FuSa/issues/32) tracks it as a follow-up to `comp`, which
   *is* implemented).
 - Only 16 starter rules ship, versus 40+ in the more mature sibling tools ([#25](https://github.com/SoundMatt/ada-FuSa/issues/25) tracks further expansion — Ada-specific static-analysis/concurrency rules remain unimplemented).
+- **`vuln` has no vulnerability database integrated** — it always reports a clean scan (an
+  informational finding when `alire.toml` is present, noting the limitation; nothing otherwise). It
+  does not parse `alire.toml`/`alire.lock` to enumerate actual dependencies or check them against a
+  real CVE feed yet ([#28](https://github.com/SoundMatt/ada-FuSa/issues/28) tracks this as a
+  follow-up). `hara`/`tara` are input-file validators, not automated analyses — hazard/threat
+  identification requires human domain judgement a tool cannot generate; they scaffold a template
+  and validate/re-emit whatever a human fills in.
 - `init`'s interactive TTY prompting only asks for name/standard; ASIL/SIL/DAL must be passed as
   flags even when run interactively.
 - CI runs a Linux + macOS matrix (macOS bootstraps GNAT via [Alire](https://alire.ada.dev), since
