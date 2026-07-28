@@ -193,33 +193,50 @@ begin
 
    --  fusa:test REQ-082
    Check (not Fusa.Config.Hara_Exists (Root), "no .fusa-hara.json initially");
-   Fusa.Config.Scaffold_Hara (Root);
+   Fusa.Config.Scaffold_Hara (Root, "iso26262");
    Check (Fusa.Config.Hara_Exists (Root), ".fusa-hara.json exists after Scaffold_Hara");
    declare
       Findings : Finding_List;
-      Empty    : constant Fusa.Config.Hazard_List := Fusa.Config.Load_Hara (Root, Findings);
+      Empty    : constant Fusa.Config.Hara_Document := Fusa.Config.Load_Hara (Root, Findings);
    begin
-      Check (Natural (Empty.Length) = 0, "a freshly scaffolded hara template has no hazards");
+      Check (Natural (Empty.Hazards.Length) = 0,
+             "a freshly scaffolded hara template has no hazards");
+      Check (Natural (Empty.Operational_Situations.Length) = 0
+             and then Natural (Empty.Safety_Goals.Length) = 0,
+             "nor any operational situations or safety goals");
       Check (Natural (Findings.Length) = 0, "no validation findings against an empty template");
    end;
 
+   --  fusa:test REQ-082
+   --  ASIL determination (S3 x E4 x C3 -> ASIL-D per ISO 26262-3 Table 4)
+   --  and referential integrity are exercised directly against
+   --  Determine_Asil and a hand-built document in test_engine.adb; this
+   --  is the CLI-adjacent Load_Hara test for id-required-ness and
+   --  completeness warnings.
    Fusa.Files.Write_File
      (Root & "/" & Fusa.Config.Hara_File,
       "{""hazards"":[" &
-      "{""id"":""HAZ-001"",""hazard"":""h"",""severity"":""S3""," &
-      """exposure"":""E4"",""controllability"":""C3"",""asil"":""ASIL-D""," &
-      """safetyGoal"":""g""}," &
-      "{""id"":""HAZ-002"",""hazard"":""incomplete""}," &
-      "{""hazard"":""no id at all""}" &
-      "]}");
+      "{""id"":""HAZ-001"",""description"":""h"",""situations"":[""OS-001""]," &
+      """risk"":{""severity"":""S3"",""exposure"":""E4"",""controllability"":""C3""}," &
+      """safetyGoals"":[""SG-001""]}," &
+      "{""id"":""HAZ-002"",""description"":""incomplete""," &
+      """risk"":{""severity"":""S1"",""exposure"":""E1"",""controllability"":""C1""}}," &
+      "{""description"":""no id at all""}" &
+      "]," &
+      """operationalSituations"":[{""id"":""OS-001"",""description"":""os""}]," &
+      """safetyGoals"":[{""id"":""SG-001"",""description"":""sg""," &
+      """hazards"":[""HAZ-001""],""asil"":""ASIL-D"",""fssrRefs"":[""REQ-999""]}]}");
    declare
       Findings : Finding_List;
-      Hazards  : constant Fusa.Config.Hazard_List := Fusa.Config.Load_Hara (Root, Findings);
+      Doc      : constant Fusa.Config.Hara_Document := Fusa.Config.Load_Hara (Root, Findings);
       Errors, Warnings : Natural := 0;
    begin
-      Check (Natural (Hazards.Length) = 2,
+      Check (Natural (Doc.Hazards.Length) = 2,
              "only the two hazards with a non-empty id are returned "
              & "(the one with no id at all is excluded, not just flagged)");
+      Check (To_String (Doc.Hazards.Element (1).Risk.Asil) = "ASIL-D",
+             "risk.asil is derived from severity x exposure x controllability "
+             & "(S3/E4/C3 -> ASIL-D per ISO 26262-3 Table 4), not accepted verbatim");
       for F of Findings loop
          case F.Severity is
             when Error   => Errors := Errors + 1;
@@ -227,10 +244,15 @@ begin
             when Info    => null;
          end case;
       end loop;
+      --  HAZ-001: fully valid, no findings. HAZ-002: valid risk but no
+      --  situations/safetyGoals -> 1 completeness WARNING. no-id entry
+      --  -> 1 ERROR. SG-001's fssrRefs REQ-999 doesn't resolve into
+      --  .fusa-reqs.json -> 1 more WARNING (referential integrity).
       Check (Errors = 1, "a hazard with no id produces exactly one ERROR finding");
-      Check (Warnings = 1,
-             "a hazard with an id but missing other required fields "
-             & "produces exactly one WARNING finding");
+      Check (Warnings = 2,
+             "a hazard missing situations/safetyGoals produces one WARNING, "
+             & "and a fssrRefs id that doesn't resolve into .fusa-reqs.json "
+             & "produces another");
    end;
 
    --  fusa:test REQ-083
@@ -242,20 +264,27 @@ begin
      (Root & "/" & Fusa.Config.Tara_File,
       "{""threats"":[" &
       "{""id"":""THR-001"",""asset"":""a"",""threat"":""t""," &
-      """attackVector"":""av"",""impact"":""i"",""likelihood"":""l""," &
-      """risk"":""r"",""treatment"":""tr"",""mitigations"":[""m1"",""m2""]}," &
-      "{""threat"":""no id at all""}" &
+      """attackVector"":""av"",""attackFeasibility"":""high""," &
+      """impact"":{""safety"":""medium"",""financial"":""low""," &
+      """operational"":""low"",""privacy"":""low""}," &
+      """treatment"":""tr"",""mitigations"":[""m1"",""m2""]}," &
+      "{""threat"":""no id or asset at all""}" &
       "]}");
    declare
       Findings : Finding_List;
-      Threats  : constant Fusa.Config.Threat_List := Fusa.Config.Load_Tara (Root, Findings);
+      Doc      : constant Fusa.Config.Tara_Document := Fusa.Config.Load_Tara (Root, Findings);
    begin
-      Check (Natural (Threats.Length) = 1, "only the threat with a non-empty id is returned");
-      Check (Natural (Threats.Element (1).Mitigations.Length) = 2,
+      Check (Natural (Doc.Threats.Length) = 1,
+             "only the threat with a non-empty id and asset is returned");
+      Check (Natural (Doc.Threats.Element (1).Mitigations.Length) = 2,
              "the mitigations array round-trips with both entries");
+      Check (To_String (Doc.Threats.Element (1).Risk) = "high",
+             "risk is derived from attackFeasibility x the highest SFOP impact "
+             & "level (high feasibility, medium-or-lower impact -> high), not "
+             & "accepted verbatim -- there is no ""risk"" field in the input at all");
       Check (Natural (Findings.Length) = 1
              and then Findings.Element (1).Severity = Error,
-             "a threat with no id produces exactly one ERROR finding");
+             "a threat with no id or asset produces exactly one ERROR finding");
    end;
 
    --  fusa:test REQ-096

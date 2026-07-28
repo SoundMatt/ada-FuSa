@@ -86,8 +86,8 @@ the simplest route, since GNAT is not distributed via Homebrew.
 | `adafusa audit-pack [--dir] [--output]` | Bundle all evidence artifacts into a ZIP | json |
 | `adafusa report [--dir]` | Re-run analysis; always exits 0 | text, json, sarif, html, md |
 | `adafusa comp [--dir] [--threshold N] [--dal DAL-A\|B\|C\|D]` | McCabe cyclomatic complexity per function (DO-178C §6.3.4) | text, json |
-| `adafusa hara [--dir]` | Load/validate `.fusa-hara.json` hazard analysis (ISO 26262-3); scaffolds a template if absent | text, json |
-| `adafusa tara [--dir]` | Load/validate `.fusa-tara.json` threat analysis (ISO 21434 ch.9); scaffolds a template if absent | text, json |
+| `adafusa hara [--dir] [--init]` | Load/validate `.fusa-hara.json` hazard analysis (ISO 26262-3, section 1.2.5 canonical shape); `--init` scaffolds an empty template if absent, otherwise a missing file is a runtime error | text, json |
+| `adafusa tara [--dir] [--init] [--min-coverage N]` | Load/validate `.fusa-tara.json` threat analysis (ISO 21434 ch.15, section 9.2 canonical shape); `--init` scaffolds an empty template if absent, otherwise a missing file is a runtime error | text, json |
 | `adafusa vuln [--dir]` | Dependency vulnerability scan (no CVE database integrated yet — see limitations) | text, json |
 | `adafusa req list\|add <id> <title>` | Manage `.fusa-reqs.json` from the CLI | text, json |
 | `adafusa disposition list\|add <fp-or-ruleId> <status> [rationale]` | Manage `.fusa-dispositions.json` waivers from the CLI | text, json |

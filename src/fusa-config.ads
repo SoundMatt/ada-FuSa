@@ -133,37 +133,103 @@ package Fusa.Config is
 
    Hara_File : constant String := ".fusa-hara.json";
 
-   type Hazard is record
-      Id              : Unbounded_String;
-      Description     : Unbounded_String;
-      Severity        : Unbounded_String;
-      Exposure        : Unbounded_String;
-      Controllability : Unbounded_String;
+   --  section 1.2.5 canonical shape: three cross-referenced top-level
+   --  collections, not a flat hazard list -- a hazard can manifest in
+   --  several operational situations and drive several safety goals, and
+   --  a safety goal can be derived from several hazards.
+
+   type Operational_Situation is record
+      Id          : Unbounded_String;
+      Description : Unbounded_String;
+   end record;
+
+   package Operational_Situation_Vectors is new
+     Ada.Containers.Indefinite_Vectors (Positive, Operational_Situation);
+   subtype Operational_Situation_List is Operational_Situation_Vectors.Vector;
+
+   type Hazard_Risk is record
+      Severity        : Unbounded_String; --  S0-S3
+      Exposure        : Unbounded_String; --  E0-E4
+      Controllability : Unbounded_String; --  C0-C3
+      --  MUST be derived from Severity x Exposure x Controllability per
+      --  ISO 26262-3:2018 Table 4 (see Fusa.Config.Determine_Asil), not
+      --  accepted verbatim from the input file.
       Asil            : Unbounded_String;
-      Safety_Goal     : Unbounded_String;
+   end record;
+
+   type Hazard is record
+      Id           : Unbounded_String;
+      Description  : Unbounded_String;
+      Source       : Unbounded_String;
+      Situations   : String_List; --  ids into Operational_Situations
+      Risk         : Hazard_Risk;
+      Safety_Goals : String_List; --  ids into Safety_Goals
    end record;
 
    package Hazard_Vectors is new
      Ada.Containers.Indefinite_Vectors (Positive, Hazard);
    subtype Hazard_List is Hazard_Vectors.Vector;
 
+   type Safety_Goal is record
+      Id          : Unbounded_String;
+      Description : Unbounded_String;
+      Hazards     : String_List; --  ids back into Hazard_List
+      Asil        : Unbounded_String;
+      Safe_State  : Unbounded_String;
+      --  MUST have >= 1 entry, each resolving into .fusa-reqs.json --
+      --  a safety goal with no decomposing requirement is exactly the
+      --  traceability gap ISO 26262-8 Clause 6 exists to prevent.
+      Fssr_Refs   : String_List;
+   end record;
+
+   package Safety_Goal_Vectors is new
+     Ada.Containers.Indefinite_Vectors (Positive, Safety_Goal);
+   subtype Safety_Goal_List is Safety_Goal_Vectors.Vector;
+
+   type Hara_Document is record
+      Project                : Unbounded_String;
+      Standard               : Unbounded_String;
+      Created_At             : Unbounded_String;
+      Operational_Situations : Operational_Situation_List;
+      Hazards                : Hazard_List;
+      Safety_Goals           : Safety_Goal_List;
+      --  Count of cross-reference ids (hazards[].situations/safetyGoals,
+      --  safetyGoals[].hazards/fssrRefs) that failed to resolve -- feeds
+      --  the JSON output's draft "completeness" block.
+      Dangling_References    : Natural := 0;
+   end record;
+
    --  fusa:req REQ-082
    function Hara_Exists (Project_Root : String) return Boolean;
 
-   --  Loads .fusa-hara.json. Returns an empty list if absent. A hazard
-   --  missing "id" is an ERROR finding (category safety) -- without an id
-   --  it cannot be referenced or tracked; a hazard missing any other
-   --  required field is a WARNING finding, so the hazard is still usable
-   --  but incompletely specified.
+   --  Derives an ASIL rating from Severity x Exposure x Controllability
+   --  per the published ISO 26262-3:2018 Table 4 determination -- see the
+   --  body for the full 3x4x3 lookup. Returns "" if any of the three
+   --  inputs is not a recognised S1-S3/E1-E4/C1-C3 code (S0/E0 and
+   --  anything else fail safe to "" rather than guessing).
+   --  fusa:req REQ-082
+   function Determine_Asil
+     (Severity, Exposure, Controllability : String) return String;
+
+   --  Loads and validates .fusa-hara.json (section 1.2.5). Returns an
+   --  empty document if absent -- callers that must distinguish "absent"
+   --  from "present but empty" should check Hara_Exists first (see the
+   --  hara command's --init handling). A hazard/situation/safety goal
+   --  missing "id" is an ERROR finding (category safety); missing any
+   --  other required field, a dangling cross-reference (situations/
+   --  safetyGoals/hazards ids that don't resolve within the file, or a
+   --  fssrRefs id that doesn't resolve into .fusa-reqs.json), or an
+   --  unrecognised severity/exposure/controllability code is a WARNING.
    --  fusa:req REQ-082
    function Load_Hara
      (Project_Root : String;
-      Findings     : in out Finding_List) return Hazard_List;
+      Findings     : in out Finding_List) return Hara_Document;
 
-   --  Writes an empty-array template if .fusa-hara.json does not already
-   --  exist; a no-op (does not overwrite) if it does.
+   --  Writes an empty-collections template (never dummy rows -- section
+   --  1.6) if .fusa-hara.json does not already exist; a no-op (does not
+   --  overwrite) if it does.
    --  fusa:req REQ-082
-   procedure Scaffold_Hara (Project_Root : String);
+   procedure Scaffold_Hara (Project_Root : String; Standard : String);
 
    ------------------------------------------------------------------
    --  .fusa-tara.json (spec section 13 "canonical direction": threat
@@ -173,31 +239,77 @@ package Fusa.Config is
 
    Tara_File : constant String := ".fusa-tara.json";
 
+   --  section 9.2 canonical tara.json shape: impact is a per-category SFOP
+   --  (Safety/Financial/Operational/Privacy) object, not a single generic
+   --  severity -- a threat can rate differently on each axis.
+   type Sfop_Impact is record
+      Safety      : Unbounded_String;
+      Financial   : Unbounded_String;
+      Operational : Unbounded_String;
+      Privacy     : Unbounded_String;
+   end record;
+
+   type Threat_Location is record
+      Present : Boolean := False;
+      File    : Unbounded_String;
+      Line    : Natural := 0;
+   end record;
+
    type Threat is record
-      Id             : Unbounded_String;
-      Asset          : Unbounded_String;
-      Description    : Unbounded_String;
-      Attack_Vector  : Unbounded_String;
-      Impact         : Unbounded_String;
-      Likelihood     : Unbounded_String;
-      Risk           : Unbounded_String;
-      Treatment      : Unbounded_String;
-      Mitigations    : String_List;
+      Id                 : Unbounded_String;
+      Asset              : Unbounded_String;
+      Description        : Unbounded_String;
+      Cwe                : Unbounded_String; --  SHOULD, e.g. "CWE-78"
+      Attack_Vector      : Unbounded_String;
+      Attack_Feasibility : Unbounded_String; --  high|medium|low|very-low
+      Impact             : Sfop_Impact;
+      --  MUST be derived from Attack_Feasibility x the highest SFOP
+      --  impact level (see Fusa.Config.Determine_Tara_Risk), not accepted
+      --  verbatim from the input file.
+      Risk               : Unbounded_String;
+      Treatment          : Unbounded_String; --  mitigate|accept|transfer|avoid
+      Mitigations        : String_List;
+      Location           : Threat_Location;
+      Cyber_Rule_Id      : Unbounded_String;
    end record;
 
    package Threat_Vectors is new
      Ada.Containers.Indefinite_Vectors (Positive, Threat);
    subtype Threat_List is Threat_Vectors.Vector;
 
+   type Tara_Document is record
+      Threats                 : Threat_List;
+      --  Optional override for the summary.assetsInProject coverage
+      --  denominator (no automated asset-discovery mechanism exists, so
+      --  this is sourced from the input file); defaults to the number of
+      --  distinct assets actually analysed (100% coverage) when absent.
+      Assets_In_Project       : Natural := 0;
+      Assets_In_Project_Given : Boolean := False;
+      Asset_Inventory_Method  : Unbounded_String;
+   end record;
+
    --  fusa:req REQ-083
    function Tara_Exists (Project_Root : String) return Boolean;
 
-   --  Same validation rule as Load_Hara: missing "id" is an ERROR
-   --  (category security), any other missing required field is a WARNING.
+   --  Derives a risk rating from Attack_Feasibility and the highest of
+   --  the four SFOP impact levels: both use an ordinal negligible/very-low
+   --  < low < medium < high scale (attackFeasibility has no "negligible"
+   --  level, so it is treated as equivalent to "low" for this comparison
+   --  -- ISO 21434 does not publish a single numeric formula the way
+   --  ISO 26262-3 Table 4 does for ASIL, so this is a documented,
+   --  deterministic heuristic: risk tracks the worse of the two inputs).
+   --  Returns "" if Attack_Feasibility is not a recognised level.
+   --  fusa:req REQ-083
+   function Determine_Tara_Risk
+     (Attack_Feasibility : String; Impact : Sfop_Impact) return String;
+
+   --  Same validation rule as Load_Hara: missing "id"/"asset"/"threat" is
+   --  an ERROR (category security); missing any other required field, or
+   --  an unrecognised attackFeasibility/impact level, is a WARNING.
    --  fusa:req REQ-083
    function Load_Tara
      (Project_Root : String;
-      Findings     : in out Finding_List) return Threat_List;
+      Findings     : in out Finding_List) return Tara_Document;
 
    --  fusa:req REQ-083
    procedure Scaffold_Tara (Project_Root : String);

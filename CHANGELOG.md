@@ -5,6 +5,43 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+### Changed (deep-audit PR7/11 + issue #69 -- hara/tara schema conformance)
+
+Continuing the multi-agent audit fix series, and starting on issue #69's broader schema-conformance
+work (x-FuSa spec v1.13.0/v1.14.0). This PR is a breaking rewrite of `.fusa-hara.json`/
+`.fusa-tara.json` and the `hara`/`tara` commands' JSON output, not a small fix like PR1-6 -- both
+findings it addresses require a genuinely different data model, not a field rename.
+
+- **Silent success on missing input**: `hara`/`tara` used to unconditionally scaffold a template
+  and exit 0 on a missing input file, including under `--format json` (where the response wasn't
+  even JSON -- just a stray "created ..." text line). Section 1.2.5 MUST: "A `hara` command run
+  with `--format json` on an absent file (with no `--init`/scaffold flag) MUST exit non-zero
+  rather than silently report zero hazards as if the analysis were complete." Fixed by adding a
+  documented `--init` flag to both commands; without it, a missing input file is now a runtime
+  error (exit 3) with a real JSON `error` object under `--format json`.
+- **Schema divergence**: `.fusa-hara.json` is now three cross-referenced collections
+  (`operationalSituations[]`/`hazards[]`/`safetyGoals[]`, per section 1.2.5) instead of a flat
+  hazard list; `risk.asil` is derived from severity x exposure x controllability via the published
+  ISO 26262-3:2018 Table 4 (`Fusa.Config.Determine_Asil`) rather than accepted verbatim, and
+  `safetyGoals[].fssrRefs` (MUST, >=1 entry) is checked for referential integrity into
+  `.fusa-reqs.json`. `.fusa-tara.json`'s `impact` is now an SFOP object
+  (safety/financial/operational/privacy, per section 9.2) instead of one generic string, and
+  `risk` is derived from `attackFeasibility` x the highest SFOP impact level
+  (`Fusa.Config.Determine_Tara_Risk`, a documented heuristic since ISO 21434 doesn't publish a
+  single numeric formula the way ISO 26262-3 does for ASIL). `tara`'s JSON output also gained the
+  canonical `summary` block (`assetsAnalyzed`/`assetsInProject`/`coveragePct`) and a new
+  `--min-coverage N` gate mirroring `trace --func-coverage`; `hara`'s gained a draft
+  `completeness` block. Both commands' generic errors/warnings/infos validation tally moved to
+  `findingsSummary` for `tara` (the canonical `summary` key is reserved for the coverage block --
+  same collision gap-report had, fixed the same way in PR3); `hara` has no such collision since its
+  canonical shape has no `summary` key at all.
+
+18 new/updated regression tests, including direct unit tests for `Determine_Asil` (covering every
+corner of the published Table 4, not just one cell) and `Determine_Tara_Risk`; 626/626 checks
+passing (was 604). This addresses hara/tara from issue #69's larger scope (fmea/safety-case/sas/sci
+schema conformance, the cross-cutting hash-field audit, and the FUSA-STUB content-quality baseline
+are tracked separately and not yet done -- `Schema_Version` stays at 1.11 until that's complete).
+
 ### Fixed (deep-audit PR6/11 -- report-extension fields, init's required standard)
 
 Continuing the multi-agent audit fix series.

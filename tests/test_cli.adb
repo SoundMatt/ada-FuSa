@@ -405,11 +405,32 @@ begin
 
    --  fusa:test REQ-084
    Check (not Fusa.Files.Exists (Root & "/.fusa-hara.json"), "no .fusa-hara.json initially");
+   --  Regression (section 1.2.5 MUST): a hara run against a missing
+   --  input file with no --init must exit non-zero, not silently
+   --  report zero hazards as if the analysis were complete -- under
+   --  --format json this must ALSO still be a real JSON document (an
+   --  "error" object), not a stray plain-text line.
+   declare
+      Exit_Code : Integer;
+      Out_Text  : constant String :=
+        Run_Capturing_Stdout (Args ("hara", "--dir", Root, "--format", "json"), Exit_Code);
+   begin
+      Check (Exit_Code = Exit_Runtime,
+             "hara --format json on a missing .fusa-hara.json with no --init "
+             & "exits 3 (runtime error), not 0");
+      Check (Ada.Strings.Fixed.Index (Out_Text, """kind"": ""hara-report""") > 0
+             and then Ada.Strings.Fixed.Index (Out_Text, """error"":") > 0,
+             "the missing-input error is still a real JSON document with an "
+             & """error"" object, not a stray plain-text line");
+      Check (not Fusa.Files.Exists (Root & "/.fusa-hara.json"),
+             "no file was scaffolded as a side effect of the error path");
+   end;
+   Check (Fusa.Cli.Run (Args ("hara", "--dir", Root, "--init")) = Exit_Ok,
+          "hara --init scaffolds a template and exits 0");
+   Check (Fusa.Files.Exists (Root & "/.fusa-hara.json"), "hara --init created .fusa-hara.json");
    Check (Fusa.Cli.Run (Args ("hara", "--dir", Root)) = Exit_Ok,
-          "hara with no .fusa-hara.json scaffolds a template and exits 0");
-   Check (Fusa.Files.Exists (Root & "/.fusa-hara.json"), "hara created .fusa-hara.json");
-   Check (Fusa.Cli.Run (Args ("hara", "--dir", Root)) = Exit_Ok,
-          "hara against the (still-empty) scaffolded template exits 0");
+          "hara against the (still-empty) scaffolded template exits 0 "
+          & "(no --init needed once the file exists)");
    --  Regression: kind used to be the bare command name "hara"; §1.2.5/
    --  §9.2 require the report-document form "hara-report".
    declare
@@ -420,17 +441,30 @@ begin
       Check (Ada.Strings.Fixed.Index (Out_Text, """kind"": ""hara-report""") > 0,
              "hara --format json reports kind ""hara-report"", not the bare "
              & "command name ""hara""");
+      Check (Ada.Strings.Fixed.Index (Out_Text, """completeness"":") > 0,
+             "hara --format json includes the section 1.2.5 completeness block");
    end;
    Fusa.Files.Write_File
-     (Root & "/.fusa-hara.json", "{""hazards"":[{""hazard"":""no id""}]}");
+     (Root & "/.fusa-hara.json", "{""hazards"":[{""description"":""no id""}]}");
    Check (Fusa.Cli.Run (Args ("hara", "--dir", Root)) = Exit_Gate_Fail,
           "hara gate-fails once a hazard with no id is present (ERROR finding)");
 
    --  fusa:test REQ-085
    Check (not Fusa.Files.Exists (Root & "/.fusa-tara.json"), "no .fusa-tara.json initially");
-   Check (Fusa.Cli.Run (Args ("tara", "--dir", Root)) = Exit_Ok,
-          "tara with no .fusa-tara.json scaffolds a template and exits 0");
-   Check (Fusa.Files.Exists (Root & "/.fusa-tara.json"), "tara created .fusa-tara.json");
+   declare
+      Exit_Code : Integer;
+      Out_Text  : constant String :=
+        Run_Capturing_Stdout (Args ("tara", "--dir", Root, "--format", "json"), Exit_Code);
+   begin
+      Check (Exit_Code = Exit_Runtime,
+             "tara --format json on a missing .fusa-tara.json with no --init "
+             & "exits 3 (runtime error), not 0");
+      Check (Ada.Strings.Fixed.Index (Out_Text, """error"":") > 0,
+             "the missing-input error is still a real JSON document");
+   end;
+   Check (Fusa.Cli.Run (Args ("tara", "--dir", Root, "--init")) = Exit_Ok,
+          "tara --init scaffolds a template and exits 0");
+   Check (Fusa.Files.Exists (Root & "/.fusa-tara.json"), "tara --init created .fusa-tara.json");
    --  Regression: kind used to be the bare command name "tara"; §1.2.5/
    --  §9.2 require the report-document form "tara-report".
    declare
@@ -441,11 +475,15 @@ begin
       Check (Ada.Strings.Fixed.Index (Out_Text, """kind"": ""tara-report""") > 0,
              "tara --format json reports kind ""tara-report"", not the bare "
              & "command name ""tara""");
+      Check (Ada.Strings.Fixed.Index (Out_Text, """summary"": {") > 0
+             and then Ada.Strings.Fixed.Index (Out_Text, """assetsAnalyzed""") > 0,
+             "tara --format json includes the section 9.2 canonical summary "
+             & "block (assetsAnalyzed/assetsInProject/coveragePct)");
    end;
    Fusa.Files.Write_File
-     (Root & "/.fusa-tara.json", "{""threats"":[{""threat"":""no id""}]}");
+     (Root & "/.fusa-tara.json", "{""threats"":[{""threat"":""no id or asset""}]}");
    Check (Fusa.Cli.Run (Args ("tara", "--dir", Root)) = Exit_Gate_Fail,
-          "tara gate-fails once a threat with no id is present (ERROR finding)");
+          "tara gate-fails once a threat with no id/asset is present (ERROR finding)");
 
    --  fusa:test REQ-097
    Check (not Fusa.Files.Exists (Root & "/.fusa-do178c-objectives.json"),
