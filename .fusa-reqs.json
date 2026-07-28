@@ -581,6 +581,30 @@
       "title": "standards gap-report commands",
       "text": "do178/iso26262/iso21434/iec61508/iec62443/unece/slsa each scaffold a starter .fusa-<standard>-objectives.json template on first run (do178 ships a small, explicitly non-authoritative reference starter; the rest start empty), then on subsequent runs load/validate/render the human-recorded assessment as a <standard>-gap-report document with an objective status summary. They gate only on structural validation ERRORs (e.g. a missing id), never on the mere presence of gap-status objectives.",
       "level": "SW"
+    },
+    {
+      "id": "REQ-098",
+      "title": "SVG status badge rendering",
+      "text": "Fusa.Badge.Render_Svg(Label, Message, Color) hand-renders a self-contained shields.io-flat-style SVG document (two colour blocks, centered text), estimating text width from character count since no real font metrics are available without an external library. XML special characters in the label/message are escaped.",
+      "level": "SW"
+    },
+    {
+      "id": "REQ-099",
+      "title": "verify command (evidence manifest)",
+      "text": "verify enumerates the project's known evidence-artifact filenames (.fusa.json, .fusa-reqs.json, qualify-report.json, sbom.json, comp-report.json, vuln.json, etc.), reporting presence, SHA-256 digest, and byte size for each. Always exits 0 -- it documents the current evidence state rather than gating on it.",
+      "level": "SW"
+    },
+    {
+      "id": "REQ-100",
+      "title": "diff command (report comparison by fingerprint)",
+      "text": "diff <report-a> <report-b> parses two JSON report documents' findings arrays and compares them by fingerprint, reporting added/removed/unchanged. Gates when any added finding is ERROR severity, or (with --strict) when any finding was added at all; removed findings never gate.",
+      "level": "SW"
+    },
+    {
+      "id": "REQ-101",
+      "title": "badge command (SVG status badge)",
+      "text": "badge runs the same check pipeline as check (rules + dispositions) and renders a red/yellow/green SVG status badge via Fusa.Badge based on error/warning counts; --label/--message/--color let it render an arbitrary custom badge without running check at all. Always exits 0.",
+      "level": "SW"
     }
   ]
 }

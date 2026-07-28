@@ -13,6 +13,7 @@ with Fusa.Engine;
 with Fusa.Annotations; use Fusa.Annotations;
 with Fusa.Func_Scan;
 with Fusa.Comp;
+with Fusa.Badge;
 with Fusa.Report;
 with Fusa.Json.Writer;
 with Fusa.Sha256;
@@ -185,6 +186,9 @@ package body Fusa.Cli is
       W.Value ("iec62443");
       W.Value ("unece");
       W.Value ("slsa");
+      W.Value ("verify");
+      W.Value ("diff");
+      W.Value ("badge");
       W.Array_End;
 
       W.Key ("formats");
@@ -215,6 +219,9 @@ package body Fusa.Cli is
       W.Key ("iec62443");     W.Array_Start; W.Value ("text"); W.Value ("json"); W.Array_End;
       W.Key ("unece");        W.Array_Start; W.Value ("text"); W.Value ("json"); W.Array_End;
       W.Key ("slsa");         W.Array_Start; W.Value ("text"); W.Value ("json"); W.Array_End;
+      W.Key ("verify");       W.Array_Start; W.Value ("text"); W.Value ("json"); W.Array_End;
+      W.Key ("diff");         W.Array_Start; W.Value ("text"); W.Value ("json"); W.Array_End;
+      W.Key ("badge");        W.Array_Start; W.Value ("svg"); W.Array_End;
       W.Object_End;
 
       W.Key ("standards");
@@ -2921,6 +2928,383 @@ package body Fusa.Cli is
      (Cmd_Gap_Report (Args, "slsa", "slsa", Empty_Objective_Starter));
 
    ----------------------------------------------------------------------
+   --  verify -- evidence manifest (#26)
+   ----------------------------------------------------------------------
+
+   --  fusa:req REQ-099
+   function Cmd_Verify (Args : String_List) return Integer is
+      Dir    : constant String := Dir_Of (Args);
+      Format : constant String := Flag_Value (Args, "--format", "text");
+      Names  : String_List;
+   begin
+      if Format /= "text" and then Format /= "json" then
+         Ada.Text_IO.Put_Line
+           (Ada.Text_IO.Standard_Error,
+            "ada-FuSa: verify: unsupported --format '" & Format &
+            "' (supported: text, json)");
+         return Exit_Usage;
+      end if;
+
+      Names.Append (".fusa.json");
+      Names.Append (".fusa-reqs.json");
+      Names.Append (".fusa-dispositions.json");
+      Names.Append (".fusa-hara.json");
+      Names.Append (".fusa-tara.json");
+      Names.Append (".fusa-pr.json");
+      Names.Append (".fusa-metrics.json");
+      Names.Append ("qualify-report.json");
+      Names.Append ("sbom.json");
+      Names.Append ("provenance.json");
+      Names.Append ("artifact-manifest.json");
+      Names.Append ("vuln.json");
+      Names.Append ("comp-report.json");
+      Names.Append ("audit-pack.zip");
+
+      declare
+         Present_Count : Natural := 0;
+      begin
+         if Format = "json" then
+            declare
+               W : Fusa.Json.Writer.Instance;
+            begin
+               W.Object_Start;
+               Fusa.Report.Write_Header (W, "evidence-manifest");
+               W.Key ("artifacts");
+               W.Array_Start;
+               for N of Names loop
+                  declare
+                     Path    : constant String := Fusa.Files.Join (Dir, N);
+                     Present : constant Boolean := Fusa.Files.Exists (Path);
+                  begin
+                     W.Object_Start;
+                     W.Field ("name", N);
+                     W.Field ("present", Present);
+                     if Present then
+                        Present_Count := Present_Count + 1;
+                        declare
+                           Content : constant String := Fusa.Files.Read_File (Path);
+                        begin
+                           W.Field ("sha256", Fusa.Sha256.Hex_Digest (Content));
+                           W.Field ("sizeBytes", Content'Length);
+                        end;
+                     end if;
+                     W.Object_End;
+                  end;
+               end loop;
+               W.Array_End;
+               W.Key ("summary");
+               W.Object_Start;
+               W.Field ("total", Natural (Names.Length));
+               W.Field ("present", Present_Count);
+               W.Field ("missing", Natural (Names.Length) - Present_Count);
+               W.Object_End;
+               W.Object_End;
+               Emit (Args, Fusa.Json.Writer.To_String (W));
+            end;
+         else
+            declare
+               Buf : Unbounded_String := Null_Unbounded_String;
+            begin
+               for N of Names loop
+                  if Fusa.Files.Exists (Fusa.Files.Join (Dir, N)) then
+                     Present_Count := Present_Count + 1;
+                     Append (Buf, "present  " & N & ASCII.LF);
+                  else
+                     Append (Buf, "missing  " & N & ASCII.LF);
+                  end if;
+               end loop;
+               Append (Buf, Trim_Img (Present_Count) & "/" & Trim_Img (Natural (Names.Length)) &
+                         " evidence artifacts present");
+               Emit (Args, To_String (Buf));
+            end;
+         end if;
+         return Exit_Ok;
+      end;
+   end Cmd_Verify;
+
+   ----------------------------------------------------------------------
+   --  diff -- compare two report documents by fingerprint (#26)
+   ----------------------------------------------------------------------
+
+   type Diff_Item is record
+      Fingerprint : Unbounded_String;
+      Rule_Id     : Unbounded_String;
+      Severity    : Unbounded_String;
+      Message     : Unbounded_String;
+   end record;
+
+   package Diff_Item_Vectors is new Ada.Containers.Indefinite_Vectors (Positive, Diff_Item);
+   subtype Diff_Item_List is Diff_Item_Vectors.Vector;
+
+   function Contains_Fingerprint (L : Diff_Item_List; Fp : String) return Boolean is
+   begin
+      for Item of L loop
+         if To_String (Item.Fingerprint) = Fp then
+            return True;
+         end if;
+      end loop;
+      return False;
+   end Contains_Fingerprint;
+
+   --  Raises Fusa.Json.Json_Error on malformed JSON; a document with no
+   --  "findings" array (or one that isn't an array) yields an empty list
+   --  rather than an error, mirroring the JSON accessors' own
+   --  fail-safe-on-absent convention.
+   function Parse_Report_Findings (Path : String) return Diff_Item_List is
+      Result  : Diff_Item_List;
+      Content : constant String := Fusa.Files.Read_File (Path);
+      Root    : constant Fusa.Json.Value_Access := Fusa.Json.Parse (Content);
+      Items   : constant Fusa.Json.Value_Access := Fusa.Json.Get_Array (Root, "findings");
+   begin
+      for I in 1 .. Fusa.Json.Array_Length (Items) loop
+         declare
+            Item : constant Fusa.Json.Value_Access := Fusa.Json.Array_Item (Items, I);
+            D    : Diff_Item;
+         begin
+            D.Fingerprint := To_Unbounded_String (Fusa.Json.Get_String (Item, "fingerprint"));
+            D.Rule_Id     := To_Unbounded_String (Fusa.Json.Get_String (Item, "ruleId"));
+            D.Severity    := To_Unbounded_String (Fusa.Json.Get_String (Item, "severity"));
+            D.Message     := To_Unbounded_String (Fusa.Json.Get_String (Item, "message"));
+            Result.Append (D);
+         end;
+      end loop;
+      return Result;
+   end Parse_Report_Findings;
+
+   procedure Write_Diff_Items (W : in out Fusa.Json.Writer.Instance; Items : Diff_Item_List) is
+   begin
+      W.Array_Start;
+      for Item of Items loop
+         W.Object_Start;
+         W.Field ("ruleId", To_String (Item.Rule_Id));
+         W.Field ("severity", To_String (Item.Severity));
+         W.Field ("message", To_String (Item.Message));
+         W.Field ("fingerprint", To_String (Item.Fingerprint));
+         W.Object_End;
+      end loop;
+      W.Array_End;
+   end Write_Diff_Items;
+
+   --  fusa:req REQ-100
+   function Cmd_Diff (Args : String_List) return Integer is
+      Format         : constant String := Flag_Value (Args, "--format", "text");
+      Strict         : constant Boolean := Has_Flag (Args, "--strict");
+      File_A, File_B : Unbounded_String := Null_Unbounded_String;
+   begin
+      if Format /= "text" and then Format /= "json" then
+         Ada.Text_IO.Put_Line
+           (Ada.Text_IO.Standard_Error,
+            "ada-FuSa: diff: unsupported --format '" & Format &
+            "' (supported: text, json)");
+         return Exit_Usage;
+      end if;
+
+      declare
+         I : Positive := 1;
+      begin
+         while I <= Natural (Args.Length) loop
+            declare
+               A : constant String := Args.Element (I);
+            begin
+               if A = "--format" or else A = "--output" then
+                  I := I + 2;
+               elsif A = "--strict" or else A = "--no-color" then
+                  I := I + 1;
+               elsif A'Length > 0 and then A (A'First) /= '-' then
+                  if Length (File_A) = 0 then
+                     File_A := To_Unbounded_String (A);
+                  elsif Length (File_B) = 0 then
+                     File_B := To_Unbounded_String (A);
+                  end if;
+                  I := I + 1;
+               else
+                  I := I + 1;
+               end if;
+            end;
+         end loop;
+      end;
+
+      if Length (File_A) = 0 or else Length (File_B) = 0 then
+         Ada.Text_IO.Put_Line
+           (Ada.Text_IO.Standard_Error, "ada-FuSa: diff: requires <report-a> <report-b>");
+         return Exit_Usage;
+      end if;
+
+      if not Fusa.Files.Exists (To_String (File_A)) then
+         return Emit_Runtime_Error
+           (Args, "diff", "not-found", "report not found: " & To_String (File_A));
+      end if;
+      if not Fusa.Files.Exists (To_String (File_B)) then
+         return Emit_Runtime_Error
+           (Args, "diff", "not-found", "report not found: " & To_String (File_B));
+      end if;
+
+      declare
+         List_A, List_B : Diff_Item_List;
+      begin
+         begin
+            List_A := Parse_Report_Findings (To_String (File_A));
+         exception
+            when Fusa.Json.Json_Error =>
+               return Emit_Runtime_Error
+                 (Args, "diff", "invalid-report", "malformed JSON in " & To_String (File_A));
+         end;
+         begin
+            List_B := Parse_Report_Findings (To_String (File_B));
+         exception
+            when Fusa.Json.Json_Error =>
+               return Emit_Runtime_Error
+                 (Args, "diff", "invalid-report", "malformed JSON in " & To_String (File_B));
+         end;
+
+         declare
+            Added, Removed : Diff_Item_List;
+            Has_Error_Add  : Boolean := False;
+         begin
+            for Item of List_B loop
+               if not Contains_Fingerprint (List_A, To_String (Item.Fingerprint)) then
+                  Added.Append (Item);
+                  if To_String (Item.Severity) = "ERROR" then
+                     Has_Error_Add := True;
+                  end if;
+               end if;
+            end loop;
+            for Item of List_A loop
+               if not Contains_Fingerprint (List_B, To_String (Item.Fingerprint)) then
+                  Removed.Append (Item);
+               end if;
+            end loop;
+
+            if Format = "json" then
+               declare
+                  W : Fusa.Json.Writer.Instance;
+               begin
+                  W.Object_Start;
+                  Fusa.Report.Write_Header (W, "diff-report");
+                  W.Key ("added");
+                  Write_Diff_Items (W, Added);
+                  W.Key ("removed");
+                  Write_Diff_Items (W, Removed);
+                  W.Key ("summary");
+                  W.Object_Start;
+                  W.Field ("added", Natural (Added.Length));
+                  W.Field ("removed", Natural (Removed.Length));
+                  W.Field ("unchanged", Natural (List_B.Length) - Natural (Added.Length));
+                  W.Object_End;
+                  W.Object_End;
+                  Emit (Args, Fusa.Json.Writer.To_String (W));
+               end;
+            else
+               declare
+                  Buf : Unbounded_String := Null_Unbounded_String;
+               begin
+                  for Item of Added loop
+                     Append (Buf, "+ [" & To_String (Item.Severity) & "] " &
+                               To_String (Item.Rule_Id) & " " & To_String (Item.Message) &
+                               ASCII.LF);
+                  end loop;
+                  for Item of Removed loop
+                     Append (Buf, "- [" & To_String (Item.Severity) & "] " &
+                               To_String (Item.Rule_Id) & " " & To_String (Item.Message) &
+                               ASCII.LF);
+                  end loop;
+                  Append (Buf, Trim_Img (Natural (Added.Length)) & " added, " &
+                            Trim_Img (Natural (Removed.Length)) & " removed, " &
+                            Trim_Img (Natural (List_B.Length) - Natural (Added.Length)) &
+                            " unchanged");
+                  Emit (Args, To_String (Buf));
+               end;
+            end if;
+
+            if Has_Error_Add or else (Strict and then Natural (Added.Length) > 0) then
+               return Exit_Gate_Fail;
+            end if;
+            return Exit_Ok;
+         end;
+      end;
+   end Cmd_Diff;
+
+   ----------------------------------------------------------------------
+   --  badge -- SVG status badge (#26)
+   ----------------------------------------------------------------------
+
+   --  fusa:req REQ-101
+   function Cmd_Badge (Args : String_List) return Integer is
+      Dir             : constant String := Dir_Of (Args);
+      Label           : constant String := Flag_Value (Args, "--label", "fusa");
+      Message_Given   : constant Boolean := Has_Flag (Args, "--message");
+      Message_Flag    : constant String := Flag_Value (Args, "--message", "");
+      Color_Given     : constant Boolean := Has_Flag (Args, "--color");
+      Color_Flag      : constant String := Flag_Value (Args, "--color", "");
+   begin
+      --  Explicit --message/--color skips running check entirely, so
+      --  `badge` can also render an arbitrary custom status (e.g. a
+      --  version badge) without needing a project to analyse.
+      if Message_Given or else Color_Given then
+         Emit (Args, Fusa.Badge.Render_Svg
+                 (Label,
+                  (if Message_Given then Message_Flag else "unknown"),
+                  (if Color_Given then Color_Flag else "#9f9f9f")));
+         return Exit_Ok;
+      end if;
+
+      declare
+         Cfg : Fusa.Config.Project_Config;
+      begin
+         begin
+            Cfg := Fusa.Config.Load (Dir);
+         exception
+            when Fusa.Config.No_Config_Error =>
+               return Emit_Runtime_Error
+                 (Args, "badge", "no-config", "no .fusa.json found in " & Dir);
+            when Fusa.Config.Invalid_Config_Error =>
+               return Emit_Runtime_Error
+                 (Args, "badge", "invalid-config", "invalid .fusa.json in " & Dir);
+         end;
+
+         declare
+            Files        : constant String_List := Fusa.Source_Scan.Find_Source_Files (Dir, Cfg);
+            Findings     : Finding_List := Fusa.Engine.Run_All (Dir, Files);
+            Errors, Warnings : Natural := 0;
+         begin
+            if Fusa.Config.Dispositions_Exist (Dir) then
+               declare
+                  Disps           : constant Fusa.Config.Disposition_List :=
+                    Fusa.Config.Load_Dispositions (Dir);
+                  Orphan_Findings : Finding_List;
+               begin
+                  Fusa.Config.Apply_Dispositions (Findings, Disps, Orphan_Findings);
+                  for F of Orphan_Findings loop
+                     Findings.Append (F);
+                  end loop;
+               end;
+            end if;
+
+            for F of Findings loop
+               if F.Disposition = Open or else F.Disposition = Rejected then
+                  case F.Severity is
+                     when Error   => Errors   := Errors + 1;
+                     when Warning => Warnings := Warnings + 1;
+                     when Info    => null;
+                  end case;
+               end if;
+            end loop;
+
+            if Errors > 0 then
+               Emit (Args, Fusa.Badge.Render_Svg
+                       (Label, Trim_Img (Errors) & " errors", "#e05d44"));
+            elsif Warnings > 0 then
+               Emit (Args, Fusa.Badge.Render_Svg
+                       (Label, Trim_Img (Warnings) & " warnings", "#dfb317"));
+            else
+               Emit (Args, Fusa.Badge.Render_Svg (Label, "passing", "#4c1"));
+            end if;
+            return Exit_Ok;
+         end;
+      end;
+   end Cmd_Badge;
+
+   ----------------------------------------------------------------------
    --  Usage / dispatch
    ----------------------------------------------------------------------
 
@@ -2930,7 +3314,8 @@ package body Fusa.Cli is
         "usage: adafusa <command> [options]" & ASCII.LF &
         "commands: version capabilities init check trace qualify release audit-pack " &
         "report comp hara tara vuln req disposition pr metrics sign hooks " &
-        "do178 iso26262 iso21434 iec61508 iec62443 unece slsa");
+        "do178 iso26262 iso21434 iec61508 iec62443 unece slsa " &
+        "verify diff badge");
    end Print_Usage;
 
    function Run (Args : String_List) return Integer is
@@ -2999,6 +3384,12 @@ package body Fusa.Cli is
             return Cmd_Unece (Rest);
          elsif Cmd = "slsa" then
             return Cmd_Slsa (Rest);
+         elsif Cmd = "verify" then
+            return Cmd_Verify (Rest);
+         elsif Cmd = "diff" then
+            return Cmd_Diff (Rest);
+         elsif Cmd = "badge" then
+            return Cmd_Badge (Rest);
          elsif Cmd = "--help" or else Cmd = "-h" or else Cmd = "help" then
             Print_Usage;
             return Exit_Ok;
