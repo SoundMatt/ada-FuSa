@@ -720,6 +720,113 @@ begin
           "safety-case gate-fails once a dangling supportedBy reference is present "
           & "(ERROR finding)");
 
+   --  fusa:test REQ-108
+   Check (Fusa.Cli.Run (Args ("cyber", "--dir", Root, "--format", "bogus")) = Exit_Usage,
+          "cyber --format bogus exits 2");
+   declare
+      Exit_Code : Integer;
+      Out_Json  : constant String :=
+        Run_Capturing_Stdout (Args ("cyber", "--dir", Root, "--format", "json"), Exit_Code);
+   begin
+      Check (Exit_Code = Exit_Ok, "cyber exits 0 with no security findings");
+      Check (Ada.Strings.Fixed.Index (Out_Json, """kind"": ""cyber-report""") > 0,
+             "cyber --format json reports the cyber-report kind");
+   end;
+   declare
+      Sec_Root : constant String := "tmp_test_cli_cyber";
+   begin
+      if Ada.Directories.Exists (Sec_Root) then
+         Ada.Directories.Delete_Tree (Sec_Root);
+      end if;
+      Ada.Directories.Create_Path (Sec_Root & "/src");
+      Fusa.Files.Write_File
+        (Sec_Root & "/.fusa.json", "{""project"":{""name"":""t""},""standard"":""generic""}");
+      Fusa.Files.Write_File (Sec_Root & "/.fusa-reqs.json", "{""requirements"":[]}");
+      Fusa.Files.Write_File
+        (Sec_Root & "/src/bad.adb",
+         "procedure Bad is" & ASCII.LF &
+         "   Password : constant String := ""hunter2"";" & ASCII.LF &
+         "begin" & ASCII.LF & "   null;" & ASCII.LF & "end Bad;" & ASCII.LF);
+      Check (Fusa.Cli.Run (Args ("cyber", "--dir", Sec_Root)) = Exit_Gate_Fail,
+             "cyber gate-fails on a SEC001 ERROR finding, same as check");
+      declare
+         Exit_Code : Integer;
+         Out_Text  : constant String :=
+           Run_Capturing_Stdout (Args ("cyber", "--dir", Sec_Root), Exit_Code);
+      begin
+         Check (Ada.Strings.Fixed.Index (Out_Text, "SEC001") > 0,
+                "cyber's output includes the SEC001 finding");
+      end;
+      Ada.Directories.Delete_Tree (Sec_Root);
+   end;
+
+   --  fusa:test REQ-109
+   declare
+      Exit_Code : Integer;
+      Out_Json  : constant String :=
+        Run_Capturing_Stdout (Args ("sci", "--dir", Root, "--format", "json"), Exit_Code);
+   begin
+      Check (Exit_Code = Exit_Ok, "sci always exits 0");
+      Check (Ada.Strings.Fixed.Index (Out_Json, """kind"": ""sci""") > 0
+             and then Ada.Strings.Fixed.Index (Out_Json, """sha256"":") > 0,
+             "sci --format json reports the sci kind and a sha256 digest per item");
+   end;
+
+   --  fusa:test REQ-112
+   Check (Fusa.Cli.Run (Args ("analyze", "--dir", Root, "--format", "bogus")) = Exit_Usage,
+          "analyze --format bogus exits 2");
+   declare
+      Analyze_Root : constant String := "tmp_test_cli_analyze";
+   begin
+      if Ada.Directories.Exists (Analyze_Root) then
+         Ada.Directories.Delete_Tree (Analyze_Root);
+      end if;
+      Ada.Directories.Create_Path (Analyze_Root & "/src");
+      Fusa.Files.Write_File
+        (Analyze_Root & "/.fusa.json", "{""project"":{""name"":""t""},""standard"":""generic""}");
+      Fusa.Files.Write_File (Analyze_Root & "/.fusa-reqs.json", "{""requirements"":[]}");
+      Fusa.Files.Write_File
+        (Analyze_Root & "/src/unused.adb",
+         "with Ada.Strings.Fixed;" & ASCII.LF &
+         "procedure Unused is" & ASCII.LF & "begin" & ASCII.LF & "   null;" & ASCII.LF &
+         "end Unused;" & ASCII.LF);
+      declare
+         Exit_Code : Integer;
+         Out_Text  : constant String :=
+           Run_Capturing_Stdout (Args ("analyze", "--dir", Analyze_Root), Exit_Code);
+      begin
+         Check (Exit_Code = Exit_Ok,
+                "analyze exits 0 even with an ANAL001 finding -- it's INFO severity");
+         Check (Ada.Strings.Fixed.Index (Out_Text, "ANAL001") > 0,
+                "analyze's output includes the ANAL001 finding");
+      end;
+      Ada.Directories.Delete_Tree (Analyze_Root);
+   end;
+
+   --  fusa:test REQ-113
+   Check (Fusa.Cli.Run (Args ("lint", "--dir", Root, "--format", "bogus")) = Exit_Usage,
+          "lint --format bogus exits 2");
+   declare
+      Lint_Root : constant String := "tmp_test_cli_lint";
+   begin
+      if Ada.Directories.Exists (Lint_Root) then
+         Ada.Directories.Delete_Tree (Lint_Root);
+      end if;
+      Ada.Directories.Create_Path (Lint_Root & "/src");
+      Fusa.Files.Write_File
+        (Lint_Root & "/.fusa.json", "{""project"":{""name"":""t""},""standard"":""generic""}");
+      Fusa.Files.Write_File (Lint_Root & "/.fusa-reqs.json", "{""requirements"":[]}");
+      Fusa.Files.Write_File
+        (Lint_Root & "/src/messy.adb",
+         "procedure Messy is  " & ASCII.LF & "begin" & ASCII.LF & "   null;" & ASCII.LF &
+         "end Messy;" & ASCII.LF);
+      Check (Fusa.Cli.Run (Args ("lint", "--dir", Lint_Root)) = Exit_Ok,
+             "lint exits 0 without --strict (LINT findings are WARNING)");
+      Check (Fusa.Cli.Run (Args ("lint", "--dir", Lint_Root, "--strict")) = Exit_Gate_Fail,
+             "lint --strict gate-fails on the trailing-whitespace WARNING");
+      Ada.Directories.Delete_Tree (Lint_Root);
+   end;
+
    --  fusa:test REQ-090
    Check (Fusa.Cli.Run (Args ("req")) = Exit_Usage, "req with no subcommand exits 2");
    Check (Fusa.Cli.Run (Args ("req", "bogus")) = Exit_Usage,

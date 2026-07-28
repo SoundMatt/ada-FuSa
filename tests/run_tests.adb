@@ -16,6 +16,8 @@ with Test_Comp;
 with Test_Hmac;
 with Test_Badge;
 with Test_Deps;
+with Test_Analyze;
+with Test_Rules_Lint;
 with Test_Cli;
 
 procedure Run_Tests is
@@ -36,6 +38,8 @@ begin
    Test_Hmac;
    Test_Badge;
    Test_Deps;
+   Test_Analyze;
+   Test_Rules_Lint;
    Test_Cli;
 
    if Test_Framework.Report then

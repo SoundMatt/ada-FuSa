@@ -104,6 +104,10 @@ the simplest route, since GNAT is not distributed via Homebrew.
 | `adafusa coupling [--dir]` | Structural fan-in/fan-out coupling metric per unit; always exits 0 | text, json |
 | `adafusa fmea [--dir]` | Load/validate `.fusa-fmea.json` design FMEA; scaffolds a template if absent | text, json, csv |
 | `adafusa safety-case [--dir]` | Load/validate/render `.fusa-safety-case.json` GSN safety case; scaffolds a template if absent | text, json, md, mermaid |
+| `adafusa cyber [--dir] [--strict]` | `check`'s findings narrowed to `security` category, as a dedicated `cyber-report` | text, json |
+| `adafusa sci [--dir]` | Software Configuration Index: every source file + evidence artifact, SHA-256 + size; always exits 0 | text, json |
+| `adafusa analyze [--dir] [--strict]` | Deeper own-pass static analysis (unused with-clauses, long parameter lists), separate from `check` | text, json |
+| `adafusa lint [--dir] [--strict]` | General-correctness/formatting hygiene (trailing whitespace, blank-line runs, trailing newline) | text, json |
 
 **Shared flags:** `--dir <path>` (project root, default `.`), `--output <file>` (write instead of
 stdout), `--no-color` (accepted; ada-FuSa does not currently emit ANSI colour), `--format <fmt>`.
@@ -250,6 +254,27 @@ literal from one that merely *appears* as an argument on the same line (e.g. a l
 
 Unlike the rules above, these check for file/directory *presence* at the project root rather than
 scanning source content — each fires at most once per `check` run, regardless of `--dir`'s file count.
+
+### ANAL — deeper own-pass static analysis (`analyze` command, not `check`)
+
+| Rule | Severity | Description |
+|------|----------|--------------|
+| ANAL001 | INFO | a with-clause whose last dotted component never appears again in the file |
+| ANAL002 | WARNING | a subprogram with more than 6 formal parameters |
+
+`analyze` is a separate command from `check` — these findings never appear in `check`'s output and
+never affect its gate. ANAL001 is a **documented heuristic with a real false-positive mode**: a
+package used only via a bare name brought into scope by a `use` clause (e.g. `use Ada.Text_IO;`
+followed only by `Put_Line (...)`, never writing `Text_IO` again) looks unused to this check even
+though it isn't — hence INFO severity, which never gates even under `--strict`.
+
+### LINT — general-correctness / formatting hygiene (`lint` command, not `check`)
+
+| Rule | Severity | Description |
+|------|----------|--------------|
+| LINT001 | WARNING | trailing whitespace at the end of a line |
+| LINT002 | WARNING | a second (or later) consecutive blank line |
+| LINT003 | WARNING | file doesn't end with exactly one trailing newline (missing, or more than one) |
 
 ## Cyclomatic Complexity (`comp`)
 

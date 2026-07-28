@@ -5,6 +5,33 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+### Added (cyber, sci, analyze, lint -- command-catalog completeness, part 1 of 2)
+
+Four of the seven remaining spec §9.2/§9.3 commands (`sas`/`template`/`fix` follow separately --
+each needed more design work or, for `fix`, more care since it would be the first command to
+modify a user's actual source files):
+
+- **`cyber`** (§9.2 SHOULD): runs the same rule+disposition pipeline as `check`, narrowed to
+  `Category = Security` and re-emitted as its own `cyber-report` kind/gate. Not a second detection
+  pass -- SEC001-004 already are CWE-mapped cybersecurity findings; this is a dedicated view onto
+  them.
+- **`sci`** (§9.3 MAY, Software Configuration Index): every source file plus known evidence
+  artifacts, each with a SHA-256 digest and byte size. Purely mechanical/derivable (unlike `sas`),
+  always exits 0.
+- **`analyze`** (§9.3 MAY): new `Fusa.Analyze` module, deliberately *not* registered with
+  `Fusa.Engine` -- `check`'s finding set and gate are unaffected. Two new rules: `ANAL001` (a
+  with-clause whose last dotted component never appears again in the file -- INFO severity, since
+  a package used only via a bare `use`-clause name is a documented, verified-real false positive)
+  and `ANAL002` (more than 6 formal parameters; correctly handles a parameter list whose opening
+  `(` is on the line *after* the `procedure`/`function` keyword, a common Ada style that an earlier
+  same-line-only version of this rule missed entirely during manual testing).
+- **`lint`** (§9.3 MAY): new `Fusa.Rules_Lint` module (named `Rules_Lint`, not `Lint`, to avoid
+  colliding with the existing `Fusa.Category_Kind` enum literal `Fusa.Lint`), also not
+  `Fusa.Engine`-registered. `LINT001` (trailing whitespace), `LINT002` (a second+ consecutive
+  blank line, flagged once per run), `LINT003` (missing or excess trailing newline).
+
+6 new requirements (REQ-108-REQ-113); 528 checks passing (was 503).
+
 ### Added (line/function coverage)
 
 Real `lcov` numbers (not just unit-check counts) were 85.0% lines / 94.0% functions across `src/`
