@@ -204,6 +204,67 @@ package body Fusa.Cli is
       Dal      : constant String := Flag_Value (Args, "--dal", "");
       Pver     : constant String := Flag_Value (Args, "--project-version", "");
    begin
+      --  fusa:req REQ-075
+      --  section 1.2 MAY: an explicit one-shot rename of legacy config/
+      --  requirements files to their canonical names -- distinct from the
+      --  automatic legacy-fallback-with-warning Load/Load_Requirements
+      --  already do transparently on every command.
+      if Has_Flag (Args, "--migrate") then
+         declare
+            Config_Path : constant String := Fusa.Files.Join (Dir, Fusa.Config.Config_File);
+            Reqs_Path   : constant String := Fusa.Files.Join (Dir, Fusa.Config.Reqs_File);
+            Legacy_Cfg  : constant String :=
+              Fusa.Files.Join (Dir, Fusa.Config.Legacy_Config_File);
+            Legacy_Reqs : constant String :=
+              Fusa.Files.Join (Dir, Fusa.Config.Legacy_Reqs_File);
+            Found_Legacy : Boolean := False;
+         begin
+            if Fusa.Files.Exists (Legacy_Cfg) then
+               Found_Legacy := True;
+               if Force or else not Fusa.Files.Exists (Config_Path) then
+                  declare
+                     Cfg : constant Fusa.Config.Project_Config := Fusa.Config.Load (Dir);
+                  begin
+                     Fusa.Config.Save (Dir, Cfg);
+                  end;
+                  Ada.Directories.Delete_File (Legacy_Cfg);
+                  Ada.Text_IO.Put_Line ("migrated " & Legacy_Cfg & " -> " & Config_Path);
+               else
+                  Ada.Text_IO.Put_Line
+                    (Ada.Text_IO.Standard_Error,
+                     "ada-FuSa: " & Config_Path & " already exists, leaving " &
+                     Legacy_Cfg & " unchanged (use --force to overwrite)");
+               end if;
+            end if;
+            if Fusa.Files.Exists (Legacy_Reqs) then
+               Found_Legacy := True;
+               if Force or else not Fusa.Files.Exists (Reqs_Path) then
+                  declare
+                     Dummy_Findings : Finding_List;
+                     Reqs : constant Fusa.Config.Requirement_List :=
+                       Fusa.Config.Load_Requirements (Dir, Dummy_Findings);
+                  begin
+                     Fusa.Config.Save_Requirements (Dir, Reqs);
+                  end;
+                  Ada.Directories.Delete_File (Legacy_Reqs);
+                  Ada.Text_IO.Put_Line ("migrated " & Legacy_Reqs & " -> " & Reqs_Path);
+               else
+                  Ada.Text_IO.Put_Line
+                    (Ada.Text_IO.Standard_Error,
+                     "ada-FuSa: " & Reqs_Path & " already exists, leaving " &
+                     Legacy_Reqs & " unchanged (use --force to overwrite)");
+               end if;
+            end if;
+            if not Found_Legacy then
+               Ada.Text_IO.Put_Line
+                 (Ada.Text_IO.Standard_Error,
+                  "ada-FuSa: init --migrate: no legacy " & Fusa.Config.Legacy_Config_File &
+                  "/" & Fusa.Config.Legacy_Reqs_File & " found in " & Dir);
+            end if;
+         end;
+         return Exit_Ok;
+      end if;
+
       if Length (Name) = 0 then
          declare
             I : Positive := 1;
@@ -836,6 +897,24 @@ package body Fusa.Cli is
          Ada.Directories.Delete_Tree (Tmp);
       end if;
 
+      --  section 6 MAY: sorting by name gives a single, unambiguous order
+      --  that both the emitted results[] and the hash's canonicalization
+      --  input share, so a verifier never has to guess whether to re-sort
+      --  before re-hashing (simple insertion sort -- the case count is
+      --  always small: one per starter rule plus qualify's own checks).
+      for I in 2 .. Natural (Cases.Length) loop
+         declare
+            Key : constant Case_Result := Cases.Element (I);
+            J   : Natural := I - 1;
+         begin
+            while J >= 1 and then Cases.Element (J).Name > Key.Name loop
+               Cases.Replace_Element (J + 1, Cases.Element (J));
+               J := J - 1;
+            end loop;
+            Cases.Replace_Element (J + 1, Key);
+         end;
+      end loop;
+
       declare
          Total, Passed, Failed : Natural := 0;
       begin
@@ -848,29 +927,106 @@ package body Fusa.Cli is
             end if;
          end loop;
 
+         --  fusa:req REQ-077
+         --  section 6 MAY: hash = "sha256:" + hex(SHA-256(canonical)),
+         --  where canonical is this document (minus the hash field itself,
+         --  generatedAt blanked) serialised per RFC 8785 JCS: lexicographic
+         --  keys, no insignificant whitespace. Hand-built rather than via a
+         --  generic recursive canonicalizer, since qualify's document shape
+         --  is fixed and every value is either a plain non-negative integer
+         --  or an ASCII string -- both trivial to format per JCS/ECMAScript
+         --  Number::toString without needing JCS's much harder general
+         --  shortest-round-trip float formatting.
          declare
-            W : Fusa.Json.Writer.Instance;
-         begin
-            W.Object_Start;
-            Fusa.Report.Write_Header (W, "qualification");
-            W.Field ("total", Total);
-            W.Field ("passed", Passed);
-            W.Field ("failed", Failed);
-            W.Key ("results");
-            W.Array_Start;
-            for C of Cases loop
-               W.Object_Start;
-               W.Field ("name", To_String (C.Name));
-               W.Field ("result", To_String (C.Result));
-               W.Object_End;
-            end loop;
-            W.Array_End;
-            W.Object_End;
-            Fusa.Files.Write_File (Effective_Out, Fusa.Json.Writer.To_String (W) & ASCII.LF);
+            Q : constant Character := '"';
 
-            if Format = "json" and then Out_Path'Length = 0 then
-               Ada.Text_IO.Put_Line (Fusa.Json.Writer.To_String (W));
-            end if;
+            function Jcs_Escape (S : String) return String is
+               Buf : Unbounded_String := Null_Unbounded_String;
+            begin
+               for C of S loop
+                  case C is
+                     when '"'  => Append (Buf, '\' & '"');
+                     when '\'  => Append (Buf, '\' & '\');
+                     when Character'Val (8)  => Append (Buf, '\' & 'b');
+                     when Character'Val (9)  => Append (Buf, '\' & 't');
+                     when Character'Val (10) => Append (Buf, '\' & 'n');
+                     when Character'Val (12) => Append (Buf, '\' & 'f');
+                     when Character'Val (13) => Append (Buf, '\' & 'r');
+                     when others =>
+                        if Character'Pos (C) < 16#20# then
+                           declare
+                              Hex : constant String := "0123456789abcdef";
+                              Hi  : constant Natural := Character'Pos (C) / 16;
+                              Lo  : constant Natural := Character'Pos (C) mod 16;
+                           begin
+                              Append (Buf, '\' & 'u' & "00" &
+                                        Hex (Hi + 1 .. Hi + 1) & Hex (Lo + 1 .. Lo + 1));
+                           end;
+                        else
+                           Append (Buf, C);
+                        end if;
+                  end case;
+               end loop;
+               return To_String (Buf);
+            end Jcs_Escape;
+
+            function Jstr (S : String) return String is (Q & Jcs_Escape (S) & Q);
+
+            Canon : Unbounded_String :=
+              To_Unbounded_String ("{" & Q & "failed" & Q & ":" & Trim_Img (Failed));
+            Hash_Value : Unbounded_String;
+         begin
+            Append (Canon, "," & Q & "generatedAt" & Q & ":" & Q & Q);
+            Append (Canon, "," & Q & "kind" & Q & ":" & Jstr ("qualification"));
+            Append (Canon, "," & Q & "language" & Q & ":" & Jstr ("ada"));
+            Append (Canon, "," & Q & "passed" & Q & ":" & Trim_Img (Passed));
+            Append (Canon, "," & Q & "results" & Q & ":[");
+            declare
+               First : Boolean := True;
+            begin
+               for C of Cases loop
+                  if not First then
+                     Append (Canon, ",");
+                  end if;
+                  First := False;
+                  Append (Canon, "{" & Q & "name" & Q & ":" & Jstr (To_String (C.Name)) &
+                            "," & Q & "result" & Q & ":" & Jstr (To_String (C.Result)) & "}");
+               end loop;
+            end;
+            Append (Canon, "]");
+            Append (Canon, "," & Q & "schemaVersion" & Q & ":" & Jstr (Fusa.Schema_Version));
+            Append (Canon, "," & Q & "tool" & Q & ":" & Jstr (Fusa.Tool_Name));
+            Append (Canon, "," & Q & "toolVersion" & Q & ":" & Jstr (Fusa.Version));
+            Append (Canon, "," & Q & "total" & Q & ":" & Trim_Img (Total));
+            Append (Canon, "}");
+            Hash_Value :=
+              To_Unbounded_String ("sha256:" & Fusa.Sha256.Hex_Digest (To_String (Canon)));
+
+            declare
+               W : Fusa.Json.Writer.Instance;
+            begin
+               W.Object_Start;
+               Fusa.Report.Write_Header (W, "qualification");
+               W.Field ("total", Total);
+               W.Field ("passed", Passed);
+               W.Field ("failed", Failed);
+               W.Field ("hash", To_String (Hash_Value));
+               W.Key ("results");
+               W.Array_Start;
+               for C of Cases loop
+                  W.Object_Start;
+                  W.Field ("name", To_String (C.Name));
+                  W.Field ("result", To_String (C.Result));
+                  W.Object_End;
+               end loop;
+               W.Array_End;
+               W.Object_End;
+               Fusa.Files.Write_File (Effective_Out, Fusa.Json.Writer.To_String (W) & ASCII.LF);
+
+               if Format = "json" and then Out_Path'Length = 0 then
+                  Ada.Text_IO.Put_Line (Fusa.Json.Writer.To_String (W));
+               end if;
+            end;
          end;
 
          if Format /= "json" and then Out_Path'Length = 0 then
@@ -904,8 +1060,29 @@ package body Fusa.Cli is
       Dir        : constant String := Dir_Of (Args);
       Output_Dir : constant String := Flag_Value (Args, "--output-dir", Dir);
       Full       : constant Boolean := Has_Flag (Args, "--full");
+      --  section 7 MAY: --spdx-version's mere presence (regardless of an
+      --  explicit value) is what opts in to also emitting an SPDX
+      --  document; its absence keeps the default sbom.json-only behaviour.
+      Spdx_Requested : constant Boolean := Has_Flag (Args, "--spdx-version");
+      Spdx_Version   : constant String := Flag_Value (Args, "--spdx-version", "2.3");
       Cfg        : Fusa.Config.Project_Config;
    begin
+      if Spdx_Requested and then Spdx_Version /= "2.2" and then Spdx_Version /= "2.3"
+        and then Spdx_Version /= "3.0.1"
+      then
+         Ada.Text_IO.Put_Line
+           (Ada.Text_IO.Standard_Error,
+            "ada-FuSa: release: --spdx-version must be one of 2.2, 2.3, 3.0.1");
+         return Exit_Usage;
+      end if;
+      if Spdx_Requested and then Spdx_Version = "3.0.1" then
+         Ada.Text_IO.Put_Line
+           (Ada.Text_IO.Standard_Error,
+            "ada-FuSa: release: --spdx-version 3.0.1 (JSON-LD graph model) is " &
+            "not yet implemented -- only 2.2/2.3 are currently supported");
+         return Exit_Usage;
+      end if;
+
       begin
          Cfg := Fusa.Config.Load (Dir);
       exception
@@ -935,6 +1112,59 @@ package body Fusa.Cli is
            (Fusa.Files.Join (Output_Dir, "sbom.json"), Fusa.Json.Writer.To_String (W) & ASCII.LF);
       end;
       Ada.Text_IO.Put_Line ("wrote " & Fusa.Files.Join (Output_Dir, "sbom.json"));
+
+      --  fusa:req REQ-076
+      if Spdx_Requested then
+         declare
+            Module    : constant String :=
+              "github.com/SoundMatt/" & To_String (Cfg.Name) & "@" & To_String (Cfg.Version);
+            Created   : constant String := Fusa.Report.Now_Rfc3339;
+            --  A short deterministic-per-run suffix keeps the SPDX
+            --  documentNamespace URI unique-enough per SPDX conventions,
+            --  without depending on a random-number generator.
+            Ns_Suffix : constant String :=
+              Fusa.Sha256.Hex_Digest (Module & Created) (1 .. 8);
+            Spdx_Path : constant String :=
+              Fusa.Files.Join
+                (Output_Dir, To_String (Cfg.Name) & "-" & To_String (Cfg.Version) & ".spdx.json");
+            W4 : Fusa.Json.Writer.Instance;
+         begin
+            W4.Object_Start;
+            W4.Field ("spdxVersion", "SPDX-" & Spdx_Version);
+            W4.Field ("dataLicense", "CC0-1.0");
+            W4.Field ("SPDXID", "SPDXRef-DOCUMENT");
+            W4.Field ("name", To_String (Cfg.Name) & "-" & To_String (Cfg.Version));
+            W4.Field ("documentNamespace",
+              "https://github.com/SoundMatt/" & To_String (Cfg.Name) & "/spdx/" &
+              To_String (Cfg.Version) & "-" & Ns_Suffix);
+            W4.Key ("creationInfo");
+            W4.Object_Start;
+            W4.Field ("created", Created);
+            W4.Key ("creators");
+            W4.Array_Start;
+            W4.Value ("Tool: " & Fusa.Tool_Name & "-" & Fusa.Version);
+            W4.Array_End;
+            W4.Object_End;
+            W4.Key ("packages");
+            W4.Array_Start;
+            W4.Object_Start;
+            W4.Field ("SPDXID", "SPDXRef-Package-" & To_String (Cfg.Name));
+            W4.Field ("name", To_String (Cfg.Name));
+            W4.Field ("versionInfo", To_String (Cfg.Version));
+            W4.Field ("downloadLocation", "NOASSERTION");
+            W4.Field ("licenseConcluded", "NOASSERTION");
+            W4.Field ("licenseDeclared", "NOASSERTION");
+            W4.Field ("copyrightText", "NOASSERTION");
+            W4.Object_End;
+            W4.Array_End;
+            W4.Object_End;
+            Fusa.Files.Write_File (Spdx_Path, Fusa.Json.Writer.To_String (W4) & ASCII.LF);
+         end;
+         Ada.Text_IO.Put_Line
+           ("wrote " &
+            Fusa.Files.Join
+              (Output_Dir, To_String (Cfg.Name) & "-" & To_String (Cfg.Version) & ".spdx.json"));
+      end if;
 
       if Full then
          declare
