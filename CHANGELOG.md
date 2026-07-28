@@ -5,6 +5,38 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+### Fixed (deep-audit PR3/11 -- gap-report/hara/tara schema conformance)
+
+Continuing the multi-agent audit fix series. Two of these are genuinely my own bugs from
+implementing these commands earlier in the project: I personally re-verified both against the
+FuSaOps spec text before trusting the audit's report.
+
+- **gap-report `kind` field**: emitted `"<standard>-gap-report"` (e.g. `"do178c-gap-report"`)
+  instead of the spec's closed `kind` enum literal, which is `"gap-report"` for every standard
+  (§3.1) -- py-FuSa shipped this exact mistake previously and had to fix it, per the spec's own
+  change history.
+- **hara/tara `kind` fields**: emitted the bare command name (`"hara"`, `"tara"`) instead of the
+  report-document form (`"hara-report"`, `"tara-report"`) that §1.2.5/§9.2 require.
+- **gap-report `summary`/`objectiveSummary` collision**: the canonical §9.3 schema reserves
+  `"summary"` for the objectives tally (`total`/`satisfied`/`partial`/`gaps`), but the command
+  wrote that tally under `"objectiveSummary"` while a *different*, generic errors/warnings/infos
+  tally of the objectives-file's own config-validation findings (GAP001/GAP002) was written under
+  `"summary"` via the shared `Write_Summary` helper -- backwards, and if simply renamed
+  `objectiveSummary` to `summary` without touching the other call, the two would have collided
+  under the same key. Fixed by giving `Write_Summary` an optional `Key` parameter (defaulting to
+  `"summary"` for every other caller) and having gap-report use the canonical `"summary"` for the
+  objectives tally and `"findingsSummary"` for the config-validation tally.
+- **gap-report invariant violation**: the spec requires `satisfied + partial + gaps = total` and
+  says "a consumer MUST map any unrecognised status to gap (fail-safe)" -- but `Load_Gap_Objectives`
+  only *warned* (GAP002) about an objective with an unrecognised status string, leaving `O.Status`
+  set to the raw invalid text, which then matched none of the three tally branches, breaking the
+  invariant for any malformed-but-loadable objectives file. Fixed by actually normalising the
+  status to `"gap"` when it doesn't match `satisfied`/`partial`/`gap`.
+
+6 new regression tests (including one exercising all four fixes together against a single
+objectives file with a satisfied, an unrecognised-status, and an id-less objective); 594/594
+checks passing (was 588).
+
 ### Fixed (deep-audit PR2/11 -- JSON parser hardening)
 
 Continuing the multi-agent audit fix series. `Fusa.Json` is the parser behind every config and

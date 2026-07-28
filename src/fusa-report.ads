@@ -25,9 +25,16 @@ package Fusa.Report is
    procedure Write_Findings_Array
      (W : in out Fusa.Json.Writer.Instance; Findings : Finding_List);
 
+   --  Key defaults to "summary", the shape every command except the
+   --  standards gap-report commands uses. Gap-report documents reserve
+   --  "summary" for the canonical objectives tally (§9.3) and pass a
+   --  different Key for this general findings tally so the two don't
+   --  collide under the same object.
    --  fusa:req REQ-067
    procedure Write_Summary
-     (W : in out Fusa.Json.Writer.Instance; Findings : Finding_List);
+     (W        : in out Fusa.Json.Writer.Instance;
+      Findings : Finding_List;
+      Key      : String := "summary");
 
    --  fusa:req REQ-068
    function Render_Text (Findings : Finding_List) return String;

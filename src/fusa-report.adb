@@ -80,7 +80,9 @@ package body Fusa.Report is
    end Write_Findings_Array;
 
    procedure Write_Summary
-     (W : in out Fusa.Json.Writer.Instance; Findings : Finding_List)
+     (W        : in out Fusa.Json.Writer.Instance;
+      Findings : Finding_List;
+      Key      : String := "summary")
    is
       Errors, Warnings, Infos : Natural := 0;
    begin
@@ -91,7 +93,7 @@ package body Fusa.Report is
             when Info    => Infos    := Infos + 1;
          end case;
       end loop;
-      W.Key ("summary");
+      W.Key (Key);
       W.Object_Start;
       W.Field ("total", Natural (Findings.Length));
       W.Field ("errors", Errors);

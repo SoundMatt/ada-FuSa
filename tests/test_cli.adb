@@ -316,6 +316,17 @@ begin
    Check (Fusa.Files.Exists (Root & "/.fusa-hara.json"), "hara created .fusa-hara.json");
    Check (Fusa.Cli.Run (Args ("hara", "--dir", Root)) = Exit_Ok,
           "hara against the (still-empty) scaffolded template exits 0");
+   --  Regression: kind used to be the bare command name "hara"; §1.2.5/
+   --  §9.2 require the report-document form "hara-report".
+   declare
+      Exit_Code : Integer;
+      Out_Text  : constant String :=
+        Run_Capturing_Stdout (Args ("hara", "--dir", Root, "--format", "json"), Exit_Code);
+   begin
+      Check (Ada.Strings.Fixed.Index (Out_Text, """kind"": ""hara-report""") > 0,
+             "hara --format json reports kind ""hara-report"", not the bare "
+             & "command name ""hara""");
+   end;
    Fusa.Files.Write_File
      (Root & "/.fusa-hara.json", "{""hazards"":[{""hazard"":""no id""}]}");
    Check (Fusa.Cli.Run (Args ("hara", "--dir", Root)) = Exit_Gate_Fail,
@@ -326,6 +337,17 @@ begin
    Check (Fusa.Cli.Run (Args ("tara", "--dir", Root)) = Exit_Ok,
           "tara with no .fusa-tara.json scaffolds a template and exits 0");
    Check (Fusa.Files.Exists (Root & "/.fusa-tara.json"), "tara created .fusa-tara.json");
+   --  Regression: kind used to be the bare command name "tara"; §1.2.5/
+   --  §9.2 require the report-document form "tara-report".
+   declare
+      Exit_Code : Integer;
+      Out_Text  : constant String :=
+        Run_Capturing_Stdout (Args ("tara", "--dir", Root, "--format", "json"), Exit_Code);
+   begin
+      Check (Ada.Strings.Fixed.Index (Out_Text, """kind"": ""tara-report""") > 0,
+             "tara --format json reports kind ""tara-report"", not the bare "
+             & "command name ""tara""");
+   end;
    Fusa.Files.Write_File
      (Root & "/.fusa-tara.json", "{""threats"":[{""threat"":""no id""}]}");
    Check (Fusa.Cli.Run (Args ("tara", "--dir", Root)) = Exit_Gate_Fail,
@@ -346,14 +368,61 @@ begin
       Check (Exit_Code = Exit_Ok,
              "do178 against the scaffolded starter template (all status ""gap"") exits 0 -- "
              & "gap status alone must never gate");
-      Check (Ada.Strings.Fixed.Index (Out_Text, """kind"": ""do178c-gap-report""") > 0
+      --  Regression: kind used to be "<standard>-gap-report" (e.g.
+      --  "do178c-gap-report"); §3.1's closed kind enum requires the
+      --  literal string "gap-report" for every standard.
+      Check (Ada.Strings.Fixed.Index (Out_Text, """kind"": ""gap-report""") > 0
              and then Ada.Strings.Fixed.Index (Out_Text, """standard"": ""do178c""") > 0,
-             "do178 --format json reports the do178c-gap-report kind and standard fields");
+             "do178 --format json reports the spec-mandated literal ""gap-report"" "
+             & "kind (not ""do178c-gap-report"") and the do178c standard field");
    end;
    Fusa.Files.Write_File
      (Root & "/.fusa-do178c-objectives.json", "{""objectives"":[{""title"":""no id""}]}");
    Check (Fusa.Cli.Run (Args ("do178", "--dir", Root)) = Exit_Gate_Fail,
           "do178 gate-fails once an objective with no id is present (ERROR finding)");
+
+   --  Regression: "summary" is the §9.3 canonical objectives tally
+   --  (total/satisfied/partial/gaps); a generic errors/warnings/infos
+   --  tally of the GAP001/GAP002 config-validation findings used to
+   --  ALSO claim that same key (via Write_Summary's old hardcoded
+   --  "summary"), silently overwriting the objectives tally in the
+   --  written JSON. It must now appear under "findingsSummary" instead.
+   --  Regression: an objective with an unrecognised status used to be
+   --  counted in "total" but in none of satisfied/partial/gaps,
+   --  breaking the spec's satisfied+partial+gaps=total invariant.
+   Fusa.Files.Write_File
+     (Root & "/.fusa-do178c-objectives.json",
+      "{""objectives"":[" &
+      "{""id"":""a"",""status"":""satisfied""}," &
+      "{""id"":""b"",""status"":""bogus""}," &
+      "{""title"":""no id""}" &
+      "]}");
+   declare
+      Exit_Code : Integer;
+      Out_Text  : constant String :=
+        Run_Capturing_Stdout (Args ("do178", "--dir", Root, "--format", "json"), Exit_Code);
+   begin
+      Check (Exit_Code = Exit_Gate_Fail,
+             "the id-less objective's ERROR finding still gate-fails "
+             & "regardless of the summary-key/status-normalisation fixes");
+      Check (Ada.Strings.Fixed.Index (Out_Text, """summary"": {") > 0
+             and then Ada.Strings.Fixed.Index (Out_Text, """total"": 2,") > 0
+             and then Ada.Strings.Fixed.Index (Out_Text, """satisfied"": 1,") > 0
+             and then Ada.Strings.Fixed.Index (Out_Text, """partial"": 0,") > 0
+             and then Ada.Strings.Fixed.Index (Out_Text, """gaps"": 1") > 0,
+             "the objectives ""summary"" counts the id-less objective out of "
+             & """total"" (it was never added to Objectives) and folds the "
+             & "unrecognised-status objective into ""gaps"", so "
+             & "satisfied+partial+gaps=total holds");
+      Check (Ada.Strings.Fixed.Index (Out_Text, """findingsSummary""") > 0
+             and then Ada.Strings.Fixed.Index (Out_Text, """objectiveSummary""") = 0,
+             "the config-validation findings tally is written under "
+             & """findingsSummary"", not the old, now-removed ""objectiveSummary""");
+      Check (Ada.Strings.Fixed.Index (Out_Text, """status"": ""gap""") > 0,
+             "an objective with an unrecognised status is normalised to "
+             & """gap"" fail-safe (§9.3), not left as the invalid raw string, "
+             & "in the written objectives array too");
+   end;
 
    Check (not Fusa.Files.Exists (Root & "/.fusa-iso26262-objectives.json"),
           "no .fusa-iso26262-objectives.json initially");
