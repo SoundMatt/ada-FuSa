@@ -1520,10 +1520,11 @@ package body Fusa.Config is
    end Get_Rating;
 
    function Load_Fmea
-     (Project_Root : String; Findings : in out Finding_List) return Fmea_Entry_List
+     (Project_Root : String; Findings : in out Finding_List) return Fmea_Document
    is
-      Result : Fmea_Entry_List;
-      Path   : constant String := Fusa.Files.Join (Project_Root, Fmea_File);
+      Result       : Fmea_Document;
+      Path         : constant String := Fusa.Files.Join (Project_Root, Fmea_File);
+      Any_Rated    : Boolean := False;
    begin
       if not Fusa.Files.Exists (Path) then
          return Result;
@@ -1539,6 +1540,18 @@ package body Fusa.Config is
             when Fusa.Json.Json_Error =>
                raise Invalid_Config_Error with "parse error in " & Path;
          end;
+
+         if Fusa.Json.Has_Key (Root, "componentsInProject") then
+            declare
+               V : constant Fusa.Json.Value_Access :=
+                 Fusa.Json.Get_Member (Root, "componentsInProject");
+            begin
+               if V /= null and then V.Kind = Fusa.Json.Json_Number and then V.Num_Val >= 0.0 then
+                  Result.Components_In_Project       := Natural (V.Num_Val);
+                  Result.Components_In_Project_Given := True;
+               end if;
+            end;
+         end if;
 
          declare
             Items : constant Fusa.Json.Value_Access := Fusa.Json.Get_Array (Root, "entries");
@@ -1563,11 +1576,13 @@ package body Fusa.Config is
                   else
                      E.Id           := To_Unbounded_String (Id);
                      E.Item         := To_Unbounded_String (Fusa.Json.Get_String (Item, "item"));
-                     E.Func         := To_Unbounded_String (Fusa.Json.Get_String (Item, "function"));
+                     E.File         := To_Unbounded_String (Fusa.Json.Get_String (Item, "file"));
                      E.Failure_Mode :=
                        To_Unbounded_String (Fusa.Json.Get_String (Item, "failureMode"));
                      E.Effect       := To_Unbounded_String (Fusa.Json.Get_String (Item, "effect"));
                      E.Cause        := To_Unbounded_String (Fusa.Json.Get_String (Item, "cause"));
+                     E.Action_Priority :=
+                       To_Unbounded_String (Fusa.Json.Get_String (Item, "actionPriority"));
                      declare
                         Mits : constant Fusa.Json.Value_Access :=
                           Fusa.Json.Get_Array (Item, "mitigations");
@@ -1577,9 +1592,21 @@ package body Fusa.Config is
                              (Fusa.Json.As_String (Fusa.Json.Array_Item (Mits, J)));
                         end loop;
                      end;
+                     declare
+                        Reqs : constant Fusa.Json.Value_Access :=
+                          Fusa.Json.Get_Array (Item, "requirementIds");
+                     begin
+                        for J in 1 .. Fusa.Json.Array_Length (Reqs) loop
+                           E.Requirement_Ids.Append
+                             (Fusa.Json.As_String (Fusa.Json.Array_Item (Reqs, J)));
+                        end loop;
+                     end;
                      E.Severity     := Get_Rating (Item, "severity");
                      E.Occurrence   := Get_Rating (Item, "occurrence");
                      E.Detection    := Get_Rating (Item, "detection");
+                     if E.Occurrence > 0 or else E.Detection > 0 then
+                        Any_Rated := True;
+                     end if;
 
                      if E.Severity = 0 or else E.Occurrence = 0 or else E.Detection = 0 then
                         Findings.Append
@@ -1594,6 +1621,22 @@ package body Fusa.Config is
                               Category    => Fusa.Safety,
                               Remediation =>
                                 "set severity/occurrence/detection to whole numbers 1..10"));
+                     end if;
+
+                     if Length (E.Item) = 0 or else Length (E.File) = 0
+                       or else Length (E.Failure_Mode) = 0 or else Length (E.Effect) = 0
+                     then
+                        Findings.Append
+                          (Make_Finding
+                             (Rule_Id     => "FMEA004",
+                              Severity    => Warning,
+                              Message     =>
+                                "FMEA entry """ & Id & """ is missing one or more of " &
+                                "item/file/failureMode/effect in " & Fmea_File,
+                              Loc         => Make_Location (Fmea_File),
+                              Category    => Fusa.Safety,
+                              Remediation =>
+                                "fill in all required fields for a complete FMEA entry"));
                      end if;
 
                      declare
@@ -1629,12 +1672,17 @@ package body Fusa.Config is
                         end if;
                      end;
 
-                     Result.Append (E);
+                     Result.Entries.Append (E);
                   end if;
                end;
             end loop;
          end;
       end;
+      --  section 9.2: ratingScale is MUST whenever occurrence/detection
+      --  are emitted -- this tool has exactly one rating scale in use.
+      if Any_Rated then
+         Result.Rating_Scale := To_Unbounded_String ("aiag-vda-2019");
+      end if;
       return Result;
    end Load_Fmea;
 

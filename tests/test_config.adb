@@ -366,15 +366,24 @@ begin
    Fusa.Files.Write_File
      (Root & "/" & Fusa.Config.Fmea_File,
       "{""entries"":[" &
-      "{""id"":""FMEA-001"",""severity"":8,""occurrence"":3,""detection"":4," &
-      """mitigations"":[""add overflow check"",""add unit test""]}," &
-      "{""id"":""FMEA-002"",""severity"":11,""occurrence"":2,""detection"":2}," &
-      "{""id"":""FMEA-003"",""severity"":5,""occurrence"":5,""detection"":5,""rpn"":999}," &
+      "{""id"":""FMEA-001"",""item"":""i"",""file"":""src/x.adb""," &
+      """failureMode"":""fm"",""effect"":""ef""," &
+      """severity"":8,""occurrence"":3,""detection"":4," &
+      """actionPriority"":""high""," &
+      """mitigations"":[""add overflow check"",""add unit test""]," &
+      """requirementIds"":[""REQ-1"",""REQ-2""]}," &
+      "{""id"":""FMEA-002"",""item"":""i"",""file"":""src/y.adb""," &
+      """failureMode"":""fm"",""effect"":""ef""," &
+      """severity"":11,""occurrence"":2,""detection"":2}," &
+      "{""id"":""FMEA-003"",""item"":""i"",""file"":""src/z.adb""," &
+      """failureMode"":""fm"",""effect"":""ef""," &
+      """severity"":5,""occurrence"":5,""detection"":5,""rpn"":999}," &
       "{""title"":""no id at all""}" &
       "]}");
    declare
       Findings : Finding_List;
-      Entries  : constant Fusa.Config.Fmea_Entry_List := Fusa.Config.Load_Fmea (Root, Findings);
+      Doc      : constant Fusa.Config.Fmea_Document := Fusa.Config.Load_Fmea (Root, Findings);
+      Entries  : Fusa.Config.Fmea_Entry_List renames Doc.Entries;
       Errors, Warnings : Natural := 0;
    begin
       Check (Natural (Entries.Length) = 3,
@@ -383,6 +392,10 @@ begin
              "RPN is computed as severity*occurrence*detection when not given (8*3*4=96)");
       Check (Natural (Entries.Element (1).Mitigations.Length) = 2,
              "the mitigations array round-trips with both entries");
+      Check (To_String (Entries.Element (1).Action_Priority) = "high",
+             "actionPriority round-trips");
+      Check (Natural (Entries.Element (1).Requirement_Ids.Length) = 2,
+             "requirementIds round-trips with both entries");
       Check (Entries.Element (2).Severity = 0,
              "a severity outside 1..10 is treated as invalid (0), not clamped or accepted");
       Check (Entries.Element (2).Rpn = 0,
@@ -390,6 +403,9 @@ begin
       Check (Entries.Element (3).Rpn = 999,
              "an explicit rpn is preserved verbatim even when it disagrees with "
              & "severity*occurrence*detection (5*5*5=125)");
+      Check (To_String (Doc.Rating_Scale) = "aiag-vda-2019",
+             "ratingScale is set once any entry emits occurrence/detection "
+             & "(section 9.2 MUST)");
       for F of Findings loop
          case F.Severity is
             when Error   => Errors := Errors + 1;
@@ -400,7 +416,30 @@ begin
       Check (Errors = 1, "an entry with no id produces exactly one ERROR finding");
       Check (Warnings = 2,
              "the out-of-range rating and the rpn mismatch each produce their own "
-             & "WARNING finding (2 total)");
+             & "WARNING finding (2 total) -- none of the three surviving entries "
+             & "is missing item/file/failureMode/effect, so FMEA004 never fires here");
+   end;
+
+   --  Regression: "file" is now a MUST field (was entirely absent from
+   --  the old schema) -- an entry missing it (or item/failureMode/
+   --  effect) must be flagged, not silently accepted.
+   Fusa.Files.Write_File
+     (Root & "/" & Fusa.Config.Fmea_File,
+      "{""entries"":[{""id"":""FMEA-INCOMPLETE""}]}");
+   declare
+      Findings : Finding_List;
+      Doc      : constant Fusa.Config.Fmea_Document := Fusa.Config.Load_Fmea (Root, Findings);
+      Fmea004_Hits : Natural := 0;
+   begin
+      Check (Natural (Doc.Entries.Length) = 1,
+             "the entry is still returned (id alone is MUST; the rest is only WARNING)");
+      for F of Findings loop
+         if To_String (F.Rule_Id) = "FMEA004" then
+            Fmea004_Hits := Fmea004_Hits + 1;
+         end if;
+      end loop;
+      Check (Fmea004_Hits = 1,
+             "FMEA004 fires once for an entry missing item/file/failureMode/effect");
    end;
 
    --  fusa:test REQ-107

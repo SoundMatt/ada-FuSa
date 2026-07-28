@@ -4148,8 +4148,9 @@ package body Fusa.Cli is
 
    --  fusa:req REQ-106
    function Cmd_Fmea (Args : String_List) return Integer is
-      Dir    : constant String := Dir_Of (Args);
-      Format : constant String := Flag_Value (Args, "--format", "text");
+      Dir         : constant String := Dir_Of (Args);
+      Format      : constant String := Flag_Value (Args, "--format", "text");
+      Min_Cov_Str : constant String := Flag_Value (Args, "--min-coverage", "");
    begin
       if Format /= "text" and then Format /= "json" and then Format /= "csv" then
          Ada.Text_IO.Put_Line
@@ -4168,90 +4169,170 @@ package body Fusa.Cli is
       end if;
 
       declare
-         Findings : Finding_List;
-         Entries  : constant Fusa.Config.Fmea_Entry_List := Fusa.Config.Load_Fmea (Dir, Findings);
+         Cfg : Fusa.Config.Project_Config;
       begin
-         if Format = "json" then
-            declare
-               W : Fusa.Json.Writer.Instance;
-            begin
-               W.Object_Start;
-               Fusa.Report.Write_Header (W, "fmea-report");
-               W.Key ("entries");
-               W.Array_Start;
-               for E of Entries loop
+         begin
+            Cfg := Fusa.Config.Load (Dir);
+         exception
+            when Fusa.Config.No_Config_Error =>
+               return Emit_Runtime_Error
+                 (Args, "fmea-report", "no-config", "no .fusa.json found in " & Dir);
+            when Fusa.Config.Invalid_Config_Error =>
+               return Emit_Runtime_Error
+                 (Args, "fmea-report", "invalid-config", "invalid .fusa.json in " & Dir);
+         end;
+
+         declare
+            Findings : Finding_List;
+            Doc      : constant Fusa.Config.Fmea_Document := Fusa.Config.Load_Fmea (Dir, Findings);
+            Entries  : Fusa.Config.Fmea_Entry_List renames Doc.Entries;
+
+            --  summary.componentsInProject: the same denominator as
+            --  trace --func-coverage (section 5, section 1.4.1) --
+            --  public/exported functions/methods.
+            Files       : constant String_List := Fusa.Source_Scan.Find_Source_Files (Dir, Cfg);
+            Funcs       : constant Fusa.Func_Scan.Func_List :=
+              Fusa.Func_Scan.Scan_Public_Functions (Dir, Files);
+            High_Priority : Natural := 0;
+            Components_Analyzed  : constant Natural := Natural (Entries.Length);
+            Components_In_Project : constant Natural :=
+              (if Doc.Components_In_Project_Given then Doc.Components_In_Project
+               else Natural (Funcs.Length));
+            Coverage_Pct : constant Natural :=
+              (if Components_In_Project = 0 then 100
+               else Components_Analyzed * 100 / Components_In_Project);
+            Min_Coverage : Natural := 0;
+            Gate_Fail    : Boolean := False;
+         begin
+            for E of Entries loop
+               if To_String (E.Action_Priority) = "high" then
+                  High_Priority := High_Priority + 1;
+               end if;
+            end loop;
+
+            if Min_Cov_Str'Length > 0 then
+               begin
+                  Min_Coverage := Natural'Value (Min_Cov_Str);
+               exception
+                  when Constraint_Error =>
+                     Ada.Text_IO.Put_Line
+                       (Ada.Text_IO.Standard_Error,
+                        "ada-FuSa: fmea: --min-coverage must be a non-negative integer");
+                     return Exit_Usage;
+               end;
+            end if;
+            if Min_Coverage > 0 and then Coverage_Pct < Min_Coverage then
+               Gate_Fail := True;
+            end if;
+
+            if Format = "json" then
+               declare
+                  W : Fusa.Json.Writer.Instance;
+               begin
                   W.Object_Start;
-                  W.Field ("id", To_String (E.Id));
-                  W.Field_If_Non_Blank ("item", To_String (E.Item));
-                  W.Field_If_Non_Blank ("function", To_String (E.Func));
-                  W.Field_If_Non_Blank ("failureMode", To_String (E.Failure_Mode));
-                  W.Field_If_Non_Blank ("effect", To_String (E.Effect));
-                  W.Field_If_Non_Blank ("cause", To_String (E.Cause));
-                  W.Field ("severity", E.Severity);
-                  W.Field ("occurrence", E.Occurrence);
-                  W.Field ("detection", E.Detection);
-                  W.Field ("rpn", E.Rpn);
-                  W.Key ("mitigations");
+                  --  section 9.2: "summary" is the canonical coverage
+                  --  block, NOT the generic errors/warnings/infos tally
+                  --  every other JSON report uses -- that tally goes
+                  --  under "findingsSummary" instead (same collision
+                  --  gap-report/tara had, fixed the same way).
+                  Fusa.Report.Write_Header (W, "fmea-report");
+                  W.Field_If_Non_Blank ("ratingScale", To_String (Doc.Rating_Scale));
+                  W.Key ("entries");
                   W.Array_Start;
-                  for M of E.Mitigations loop
-                     W.Value (M);
+                  for E of Entries loop
+                     W.Object_Start;
+                     W.Field ("id", To_String (E.Id));
+                     W.Field_If_Non_Blank ("item", To_String (E.Item));
+                     W.Field_If_Non_Blank ("file", To_String (E.File));
+                     W.Field_If_Non_Blank ("failureMode", To_String (E.Failure_Mode));
+                     W.Field_If_Non_Blank ("effect", To_String (E.Effect));
+                     W.Field_If_Non_Blank ("cause", To_String (E.Cause));
+                     W.Field ("severity", E.Severity);
+                     W.Field ("occurrence", E.Occurrence);
+                     W.Field ("detection", E.Detection);
+                     W.Field_If_Non_Blank ("actionPriority", To_String (E.Action_Priority));
+                     W.Field ("rpn", E.Rpn);
+                     W.Key ("mitigations");
+                     W.Array_Start;
+                     for M of E.Mitigations loop
+                        W.Value (M);
+                     end loop;
+                     W.Array_End;
+                     W.Key ("requirementIds");
+                     W.Array_Start;
+                     for R of E.Requirement_Ids loop
+                        W.Value (R);
+                     end loop;
+                     W.Array_End;
+                     W.Object_End;
                   end loop;
                   W.Array_End;
+                  W.Key ("summary");
+                  W.Object_Start;
+                  W.Field ("total", Components_Analyzed);
+                  W.Field ("highPriority", High_Priority);
+                  W.Field ("componentsAnalyzed", Components_Analyzed);
+                  W.Field ("componentsInProject", Components_In_Project);
+                  W.Field ("coveragePct", Coverage_Pct);
                   W.Object_End;
-               end loop;
-               W.Array_End;
-               Fusa.Report.Write_Findings_Array (W, Findings);
-               Fusa.Report.Write_Summary (W, Findings);
-               W.Object_End;
-               Emit (Args, Fusa.Json.Writer.To_String (W));
-            end;
-         elsif Format = "csv" then
-            declare
-               Buf : Unbounded_String := Null_Unbounded_String;
-            begin
-               Append (Buf, "id,item,function,failureMode,effect,cause,severity,occurrence," &
-                         "detection,rpn,mitigations" & ASCII.LF);
-               for E of Entries loop
-                  declare
-                     Mits_Joined : Unbounded_String := Null_Unbounded_String;
-                  begin
-                     for M of E.Mitigations loop
-                        if Length (Mits_Joined) > 0 then
-                           Append (Mits_Joined, "; ");
-                        end if;
-                        Append (Mits_Joined, M);
-                     end loop;
-                     Append (Buf, Csv_Field (To_String (E.Id)) & "," &
-                               Csv_Field (To_String (E.Item)) & "," &
-                               Csv_Field (To_String (E.Func)) & "," &
-                               Csv_Field (To_String (E.Failure_Mode)) & "," &
-                               Csv_Field (To_String (E.Effect)) & "," &
-                               Csv_Field (To_String (E.Cause)) & "," &
-                               Trim_Img (E.Severity) & "," & Trim_Img (E.Occurrence) & "," &
-                               Trim_Img (E.Detection) & "," & Trim_Img (E.Rpn) & "," &
-                               Csv_Field (To_String (Mits_Joined)) & ASCII.LF);
-                  end;
-               end loop;
-               Emit (Args, To_String (Buf));
-            end;
-         else
-            declare
-               Buf : Unbounded_String := Null_Unbounded_String;
-            begin
-               for E of Entries loop
-                  Append (Buf, To_String (E.Id) & ": " & To_String (E.Failure_Mode) &
-                            " (RPN=" & Trim_Img (E.Rpn) & ")" & ASCII.LF);
-               end loop;
-               Append (Buf, Trim_Img (Natural (Entries.Length)) & " entries, " &
-                         Trim_Img (Natural (Findings.Length)) & " validation findings");
-               Emit (Args, To_String (Buf));
-            end;
-         end if;
+                  Fusa.Report.Write_Findings_Array (W, Findings);
+                  Fusa.Report.Write_Summary (W, Findings, "findingsSummary");
+                  W.Object_End;
+                  Emit (Args, Fusa.Json.Writer.To_String (W));
+               end;
+            elsif Format = "csv" then
+               declare
+                  Buf : Unbounded_String := Null_Unbounded_String;
+               begin
+                  Append (Buf, "id,item,file,failureMode,effect,cause,severity,occurrence," &
+                            "detection,actionPriority,rpn,mitigations" & ASCII.LF);
+                  for E of Entries loop
+                     declare
+                        Mits_Joined : Unbounded_String := Null_Unbounded_String;
+                     begin
+                        for M of E.Mitigations loop
+                           if Length (Mits_Joined) > 0 then
+                              Append (Mits_Joined, "; ");
+                           end if;
+                           Append (Mits_Joined, M);
+                        end loop;
+                        Append (Buf, Csv_Field (To_String (E.Id)) & "," &
+                                  Csv_Field (To_String (E.Item)) & "," &
+                                  Csv_Field (To_String (E.File)) & "," &
+                                  Csv_Field (To_String (E.Failure_Mode)) & "," &
+                                  Csv_Field (To_String (E.Effect)) & "," &
+                                  Csv_Field (To_String (E.Cause)) & "," &
+                                  Trim_Img (E.Severity) & "," & Trim_Img (E.Occurrence) & "," &
+                                  Trim_Img (E.Detection) & "," &
+                                  Csv_Field (To_String (E.Action_Priority)) & "," &
+                                  Trim_Img (E.Rpn) & "," &
+                                  Csv_Field (To_String (Mits_Joined)) & ASCII.LF);
+                     end;
+                  end loop;
+                  Emit (Args, To_String (Buf));
+               end;
+            else
+               declare
+                  Buf : Unbounded_String := Null_Unbounded_String;
+               begin
+                  for E of Entries loop
+                     Append (Buf, To_String (E.Id) & ": " & To_String (E.Failure_Mode) &
+                               " (RPN=" & Trim_Img (E.Rpn) & ")" & ASCII.LF);
+                  end loop;
+                  Append (Buf, Trim_Img (Components_Analyzed) & " entries, " &
+                            Trim_Img (Components_Analyzed) & "/" &
+                            Trim_Img (Components_In_Project) &
+                            " components analyzed (" & Trim_Img (Coverage_Pct) & "%), " &
+                            Trim_Img (Natural (Findings.Length)) & " validation findings");
+                  Emit (Args, To_String (Buf));
+               end;
+            end if;
 
-         if Fusa.Report.Has_Gate_Failure (Findings, False) then
-            return Exit_Gate_Fail;
-         end if;
-         return Exit_Ok;
+            if Gate_Fail or else Fusa.Report.Has_Gate_Failure (Findings, False) then
+               return Exit_Gate_Fail;
+            end if;
+            return Exit_Ok;
+         end;
       end;
    end Cmd_Fmea;
 

@@ -442,36 +442,59 @@ package Fusa.Config is
 
    Fmea_File : constant String := ".fusa-fmea.json";
 
+   --  section 9.2 (v1.13.0+) canonical shape: "item" is the sole
+   --  component/function identifier (no separate "function" field --
+   --  that was this codebase's own pre-conformance addition), plus a
+   --  MUST "file" field, a SHOULD "actionPriority" (supersedes raw RPN
+   --  per the AIAG-VDA Handbook's own move away from single-threshold
+   --  RPN), and a SHOULD "requirementIds" back-link.
    type Fmea_Entry is record
-      Id           : Unbounded_String;
-      Item         : Unbounded_String;
-      Func         : Unbounded_String;
-      Failure_Mode : Unbounded_String;
-      Effect       : Unbounded_String;
-      Cause        : Unbounded_String;
-      Severity     : Natural := 0; --  0 = absent/invalid (valid range is 1..10)
-      Occurrence   : Natural := 0;
-      Detection    : Natural := 0;
-      Rpn          : Natural := 0; --  Severity * Occurrence * Detection when all three are set
-      Mitigations  : String_List;
+      Id              : Unbounded_String;
+      Item            : Unbounded_String;
+      File            : Unbounded_String;
+      Failure_Mode    : Unbounded_String;
+      Effect          : Unbounded_String;
+      Cause           : Unbounded_String;
+      Severity        : Natural := 0; --  0 = absent/invalid (valid range is 1..10)
+      Occurrence      : Natural := 0;
+      Detection       : Natural := 0;
+      Rpn             : Natural := 0; --  Severity * Occurrence * Detection when all three are set
+      Action_Priority : Unbounded_String; --  "high" | "medium" | "low"
+      Mitigations     : String_List;
+      Requirement_Ids : String_List;
    end record;
 
    package Fmea_Entry_Vectors is new
      Ada.Containers.Indefinite_Vectors (Positive, Fmea_Entry);
    subtype Fmea_Entry_List is Fmea_Entry_Vectors.Vector;
 
+   type Fmea_Document is record
+      --  "aiag-vda-2019" whenever occurrence/detection are emitted (MUST
+      --  in that case, per section 9.2) -- this tool has exactly one
+      --  rating scale, so it is always set once any entry has ratings.
+      Rating_Scale                : Unbounded_String;
+      Entries                     : Fmea_Entry_List;
+      --  Optional override for summary.componentsInProject (mirrors
+      --  Tara_Document.Assets_In_Project) -- defaults to the real
+      --  public-function count from Fusa.Func_Scan when absent.
+      Components_In_Project       : Natural := 0;
+      Components_In_Project_Given : Boolean := False;
+   end record;
+
    --  fusa:req REQ-106
    function Fmea_Exists (Project_Root : String) return Boolean;
 
-   --  Loads .fusa-fmea.json. Returns an empty list if absent. An entry
-   --  missing "id" is an ERROR finding (category safety) and excluded; an
-   --  entry whose severity/occurrence/detection is absent or outside
-   --  1..10 is a WARNING (entry still returned, with that rating left at
-   --  0 and no RPN computed); an explicit "rpn" that disagrees with the
-   --  computed Severity*Occurrence*Detection is a WARNING.
+   --  Loads and validates .fusa-fmea.json. Returns an empty document if
+   --  absent. An entry missing "id" is an ERROR finding (category
+   --  safety) and excluded; an entry missing "item"/"file"/
+   --  "failureMode"/"effect" (all MUST) is a WARNING; an entry whose
+   --  severity/occurrence/detection is absent or outside 1..10 is a
+   --  WARNING (entry still returned, with that rating left at 0 and no
+   --  RPN computed); an explicit "rpn" that disagrees with the computed
+   --  Severity*Occurrence*Detection is a WARNING.
    --  fusa:req REQ-106
    function Load_Fmea
-     (Project_Root : String; Findings : in out Finding_List) return Fmea_Entry_List;
+     (Project_Root : String; Findings : in out Finding_List) return Fmea_Document;
 
    --  fusa:req REQ-106
    procedure Scaffold_Fmea (Project_Root : String);

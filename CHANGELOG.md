@@ -5,6 +5,36 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+### Changed (issue #69, part 2/6 -- fmea schema conformance)
+
+`.fusa-fmea.json`/`fmea.json` brought into conformance with the section 9.2 canonical shape
+(IEC 60812:2018 / AIAG-VDA FMEA Handbook 2019):
+
+- **Removed the stray `"function"` field** -- the canonical schema has a single `"item"`
+  identifier, not a separate `item`/`function` pair (this codebase's own pre-conformance
+  addition).
+- **Added the MUST `"file"` field** (project-relative, per the section 4 rule) -- entries could
+  previously omit it entirely, with no way to locate the analyzed component in the codebase.
+- **Added `"actionPriority"`** (SHOULD, `high`/`medium`/`low` -- supersedes raw RPN thresholding
+  per the AIAG-VDA Handbook's own move away from a single numeric threshold; `rpn` is kept
+  alongside it, MAY, for tools that prefer the legacy metric) and **`"requirementIds"`** (SHOULD,
+  links an entry back to its originating requirement).
+- **Added the `"summary"` block** (`total`/`highPriority`/`componentsAnalyzed`/
+  `componentsInProject`/`coveragePct`) and a new `--min-coverage N` gate, mirroring `trace
+  --func-coverage`'s existing denominator (`Fusa.Func_Scan.Scan_Public_Functions`) -- this is
+  what stops an FMEA from covering only 5 convenient functions while claiming to be thorough.
+  Since `"summary"` is now the canonical coverage block, the generic errors/warnings/infos
+  validation tally moved to `"findingsSummary"` (same collision gap-report/tara had, fixed the
+  same way).
+- **Added `"ratingScale"`** (`"aiag-vda-2019"`, emitted whenever occurrence/detection are
+  present, per the section 9.2 MUST).
+- **New `FMEA004` validation finding** (WARNING) for an entry missing one or more of
+  item/file/failureMode/effect -- previously unvalidated entirely.
+- `fmea` now requires `.fusa.json` (to resolve source directories for the coverage denominator),
+  matching every other project-scanning command's existing no-config/invalid-config error handling.
+
+12 new/updated regression tests; 677/677 checks passing (was 667).
+
 ### Fixed (issue #69, part 1/6 -- tara impact/risk closed-enum vocabulary)
 
 The x-FuSa spec moved to v1.14.1 the same day PR7 shipped `tara`'s SFOP impact/risk derivation,
