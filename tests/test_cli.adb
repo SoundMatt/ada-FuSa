@@ -222,6 +222,44 @@ begin
           "audit-pack honours an explicit --output path");
    Check (Fusa.Files.Exists (Root & "/custom.zip"), "audit-pack wrote to the custom path");
 
+   --  fusa:test REQ-081
+   Check (Fusa.Cli.Run (Args ("comp", "--dir", Root)) = Exit_Ok,
+          "comp with the default threshold (10) exits 0 for this fixture's "
+          & "low-complexity functions");
+   Check (Fusa.Cli.Run (Args ("comp", "--dir", Root, "--threshold", "0")) = Exit_Usage,
+          "comp rejects a --threshold of 0 as a usage error");
+   Check (Fusa.Cli.Run (Args ("comp", "--dir", Root, "--dal", "DAL-Z")) = Exit_Usage,
+          "comp rejects an unrecognised --dal value as a usage error");
+
+   --  V(G) = 1 + 4 (if + 3 elsifs) = 5, which exceeds DAL-A's threshold of
+   --  4 but not the default DAL-B threshold of 10.
+   Fusa.Files.Write_File
+     (Root & "/src/complex5.adb",
+      "procedure Complex5 (A, B, C, D : Boolean) is" & ASCII.LF &
+      "begin" & ASCII.LF &
+      "   if A then null;" & ASCII.LF &
+      "   elsif B then null;" & ASCII.LF &
+      "   elsif C then null;" & ASCII.LF &
+      "   elsif D then null;" & ASCII.LF &
+      "   end if;" & ASCII.LF &
+      "end Complex5;" & ASCII.LF);
+   Check (Fusa.Cli.Run (Args ("comp", "--dir", Root)) = Exit_Ok,
+          "comp with the default threshold (10) still exits 0 once "
+          & "complex5.adb (V(G)=5) is added");
+   Check (Fusa.Cli.Run (Args ("comp", "--dir", Root, "--dal", "DAL-A")) = Exit_Gate_Fail,
+          "comp --dal DAL-A (threshold 4) gate-fails once complex5.adb's "
+          & "V(G)=5 exceeds that low threshold");
+   declare
+      Exit_Code : Integer;
+      Out_Text  : constant String :=
+        Run_Capturing_Stdout
+          (Args ("comp", "--dir", Root, "--dal", "DAL-A", "--format", "json"), Exit_Code);
+   begin
+      Check (Ada.Strings.Fixed.Index (Out_Text, """threshold"": 4") > 0
+             and then Ada.Strings.Fixed.Index (Out_Text, """dal"": ""DAL-A""") > 0,
+             "comp --format json reports the DAL-derived threshold and the dal field");
+   end;
+
    --  trace: no requirements yet -> zero totals, still exits 0
    --  fusa:test REQ-011
    Check (Fusa.Cli.Run (Args ("trace", "--dir", Root)) = Exit_Ok,

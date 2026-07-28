@@ -12,6 +12,7 @@ with Test_Annotations;
 with Test_Zip;
 with Test_Func_Scan;
 with Test_Disposition;
+with Test_Comp;
 with Test_Cli;
 
 procedure Run_Tests is
@@ -28,6 +29,7 @@ begin
    Test_Zip;
    Test_Func_Scan;
    Test_Disposition;
+   Test_Comp;
    Test_Cli;
 
    if Test_Framework.Report then

@@ -148,6 +148,14 @@ repro steps and rationale on each.
   - 2 new requirements (REQ-078/REQ-079). Ada-specific static-analysis/concurrency rules (the
     scope items #25 called out as a genuine Ada-vs-sibling-language value-add opportunity, not just
     parity) remain unimplemented — tracked in #25 for a future round.
+- **`comp` command** (§9.2 SHOULD, DO-178C §6.3.4, consumed by FuSaOps v1.70.0+) (#32, partial —
+  `coverage --mcdc` deferred to a follow-up per the issue's own recommendation to split into two):
+  McCabe cyclomatic complexity V(G) per subprogram body, gated by `--threshold`/`--dal`
+  (A<=4/B<=10 default/C<=15/D<=20), writing `comp-report.json`. New `Fusa.Comp` module — pure
+  text-based decision-point counting (if/elsif/when/for/while/exit-when/and-then/or-else), no full
+  Ada parser. Verified against hand-computed expected V(G) values for several fixtures (including a
+  nested-subprogram case and an unconditional-loop-with-exit-when case) before wiring into the CLI.
+  2 new requirements (REQ-080/REQ-081).
 
 ## v0.1.0 — 2026-07-27
 

@@ -473,6 +473,18 @@
       "title": "Project-structure starter rule pack",
       "text": "FUSA001-FUSA004 check for the presence of a .gpr project file, a LICENSE file, a README file, and .github/workflows CI configuration at the project root, mirroring java-FuSa's project-structure rule category.",
       "level": "SW"
+    },
+    {
+      "id": "REQ-080",
+      "title": "Cyclomatic complexity analysis",
+      "text": "Fusa.Comp.Analyze computes McCabe cyclomatic complexity V(G) per subprogram body in .adb files via text-based decision-point counting (if/elsif, case/exception-handler when, for/while loop headers, exit-when, and-then/or-else), attributing a nested subprogram's decision points to its innermost enclosing subprogram rather than reporting it as a separate result.",
+      "level": "SW"
+    },
+    {
+      "id": "REQ-081",
+      "title": "comp command (DO-178C 6.3.4)",
+      "text": "comp gates on cyclomatic complexity: exits 1 when any function's V(G) exceeds the threshold, 0 otherwise. Threshold defaults to 10 (DAL-B); --dal derives A<=4/B<=10/C<=15/D<=20 and overrides an explicit --threshold; --format json writes the section 9.2 comp-report.json shape.",
+      "level": "SW"
     }
   ]
 }
