@@ -870,42 +870,69 @@ package body Fusa.Config is
    function Determine_Tara_Risk
      (Attack_Feasibility : String; Impact : Sfop_Impact) return String
    is
-      type Level is (Unknown, Lvl_Low, Lvl_Medium, Lvl_High);
+      --  Two DISTINCT closed enums (section 9.2, v1.14.1) -- deliberately
+      --  not the same scale, since they answer different questions
+      --  (likelihood vs. damage). Impact_Rank's "Unknown" is a sentinel
+      --  for "not one of the four recognised values", ranked below
+      --  Negligible so an unrecognised axis never wins Consider's
+      --  highest-of-four comparison against a real one.
+      type Impact_Rank is (Unknown, Negligible, Moderate, Major, Critical);
+      type Feasibility_Rank is (Unrecognised, Very_Low, Low, Medium, High);
+      type Risk_Level is (R_Low, R_Medium, R_High, R_Critical);
 
-      function Feasibility_Level (S : String) return Level is
-        (if S = "very-low" or else S = "low" then Lvl_Low
-         elsif S = "medium" then Lvl_Medium
-         elsif S = "high" then Lvl_High
+      function Impact_Of (S : String) return Impact_Rank is
+        (if S = "negligible" then Negligible
+         elsif S = "moderate" then Moderate
+         elsif S = "major"    then Major
+         elsif S = "critical" then Critical
          else Unknown);
 
-      function Impact_Level (S : String) return Level is
-        (if S = "negligible" or else S = "low" then Lvl_Low
-         elsif S = "medium" then Lvl_Medium
-         elsif S = "high" then Lvl_High
-         else Unknown);
+      function Feasibility_Of (S : String) return Feasibility_Rank is
+        (if S = "very-low" then Very_Low
+         elsif S = "low"    then Low
+         elsif S = "medium" then Medium
+         elsif S = "high"   then High
+         else Unrecognised);
 
-      Feas  : constant Level := Feasibility_Level (Attack_Feasibility);
-      Worst : Level := Feas;
+      --  The x-FuSa family's own canonical feasibility x impact -> risk
+      --  table (section 9.2, v1.14.1) -- ISO/SAE 21434 leaves risk
+      --  determination organization-defined, so this is not a claimed
+      --  external standard table the way ISO 26262-3 Table 4 is for
+      --  ASIL, just the family's shared convention.
+      Table : constant array
+        (Impact_Rank range Negligible .. Critical,
+         Feasibility_Rank range Very_Low .. High) of Risk_Level :=
+        (Negligible => (Very_Low => R_Low,    Low => R_Low,    Medium => R_Low,      High => R_Low),
+         Moderate   => (Very_Low => R_Low,    Low => R_Low,    Medium => R_Medium,   High => R_Medium),
+         Major      => (Very_Low => R_Medium, Low => R_Medium, Medium => R_High,     High => R_High),
+         Critical   => (Very_Low => R_Medium, Low => R_High,   Medium => R_Critical, High => R_Critical));
+
+      Feas  : constant Feasibility_Rank := Feasibility_Of (Attack_Feasibility);
+      Worst : Impact_Rank := Unknown;
 
       procedure Consider (S : String) is
-         Lvl : constant Level := Impact_Level (S);
+         R : constant Impact_Rank := Impact_Of (S);
       begin
-         if Lvl /= Unknown and then Level'Pos (Lvl) > Level'Pos (Worst) then
-            Worst := Lvl;
+         if Impact_Rank'Pos (R) > Impact_Rank'Pos (Worst) then
+            Worst := R;
          end if;
       end Consider;
    begin
-      if Feas = Unknown then
+      if Feas = Unrecognised then
          return "";
       end if;
       Consider (To_String (Impact.Safety));
       Consider (To_String (Impact.Financial));
       Consider (To_String (Impact.Operational));
       Consider (To_String (Impact.Privacy));
-      case Worst is
-         when Unknown | Lvl_Low => return "low";
-         when Lvl_Medium        => return "medium";
-         when Lvl_High          => return "high";
+      if Worst = Unknown then
+         return "";
+      end if;
+      case Table (Worst, Feas) is
+         when R_Low      => return "low";
+         when R_Medium   => return "medium";
+         when R_High     => return "high";
+         when R_Critical => return "critical";
       end case;
    end Determine_Tara_Risk;
 
@@ -1030,11 +1057,37 @@ package body Fusa.Config is
                      end;
 
                      declare
+                        function Valid_Feasibility (S : String) return Boolean is
+                          (S = "high" or else S = "medium" or else S = "low"
+                           or else S = "very-low");
+                        function Valid_Impact (S : String) return Boolean is
+                          (S = "critical" or else S = "major" or else S = "moderate"
+                           or else S = "negligible");
+                        --  Only flags a NON-blank-but-wrong value, not a blank one --
+                        --  a blank axis is already separately caught by the
+                        --  general TARA002 missing-required-field check below,
+                        --  so this stays specific to "someone typed the wrong
+                        --  vocabulary" (e.g. "medium" instead of "moderate").
+                        function Invalid_Nonblank_Impact (S : String) return Boolean is
+                          (S'Length > 0 and then not Valid_Impact (S));
+
+                        Feas_Str : constant String := To_String (T.Attack_Feasibility);
+                        Has_Invalid_Impact : constant Boolean :=
+                          Invalid_Nonblank_Impact (To_String (T.Impact.Safety))
+                          or else Invalid_Nonblank_Impact (To_String (T.Impact.Financial))
+                          or else Invalid_Nonblank_Impact (To_String (T.Impact.Operational))
+                          or else Invalid_Nonblank_Impact (To_String (T.Impact.Privacy));
                         Derived : constant String :=
-                          Determine_Tara_Risk (To_String (T.Attack_Feasibility), T.Impact);
+                          Determine_Tara_Risk (Feas_Str, T.Impact);
                      begin
                         T.Risk := To_Unbounded_String (Derived);
-                        if Derived'Length = 0 then
+                        --  section 9.2 (v1.14.1): impact.* and attackFeasibility
+                        --  are two DISTINCT closed enums -- validated and
+                        --  reported separately so a bad value in one doesn't
+                        --  mask a bad value in the other.
+                        if Feas_Str'Length > 0
+                          and then not Valid_Feasibility (Feas_Str)
+                        then
                            Findings.Append
                              (Make_Finding
                                 (Rule_Id     => "TARA003",
@@ -1048,6 +1101,22 @@ package body Fusa.Config is
                                  Remediation =>
                                    "use one of high, medium, low, very-low for " &
                                    "attackFeasibility"));
+                        end if;
+                        if Has_Invalid_Impact then
+                           Findings.Append
+                             (Make_Finding
+                                (Rule_Id     => "TARA004",
+                                 Severity    => Warning,
+                                 Message     =>
+                                   "threat """ & Id & """ has an unrecognised impact " &
+                                   "value (expected critical|major|moderate|" &
+                                   "negligible on each of safety/financial/" &
+                                   "operational/privacy) in " & Tara_File,
+                                 Loc         => Make_Location (Tara_File),
+                                 Category    => Fusa.Security,
+                                 Remediation =>
+                                   "use one of critical, major, moderate, negligible " &
+                                   "for each SFOP impact axis"));
                         end if;
                      end;
 

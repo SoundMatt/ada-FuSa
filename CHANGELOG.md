@@ -5,6 +5,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+### Fixed (issue #69, part 1/6 -- tara impact/risk closed-enum vocabulary)
+
+The x-FuSa spec moved to v1.14.1 the same day PR7 shipped `tara`'s SFOP impact/risk derivation,
+closing exactly the gap this codebase fell into: `impact`'s four axes and `risk` had no stated
+closed enum as of v1.13.0/v1.14.0, so an implementation was free to pick its own vocabulary.
+This codebase picked `high|medium|low` (reusing `attackFeasibility`'s own vocabulary) for both;
+v1.14.1 makes the family's real, distinct, closed enums normative:
+
+- `impact.{safety,financial,operational,privacy}`: `critical | major | moderate | negligible`
+  (NOT `attackFeasibility`'s `high|medium|low|very-low` -- the two are deliberately different
+  scales for different questions, damage vs. likelihood).
+- `risk`: `critical | high | medium | low`.
+- A new SHOULD-level feasibility x impact -> risk combination table (the x-FuSa family's own
+  canonical convention, since ISO/SAE 21434 leaves risk determination organization-defined).
+
+`Fusa.Config.Determine_Tara_Risk` now implements the exact published table via a 4x4 lookup array,
+and `Load_Tara` validates `impact.*`/`attackFeasibility` against their two distinct closed enums
+separately (new `TARA004` warning for an unrecognised impact value, alongside the existing
+`TARA003` for feasibility), so a typo in one doesn't mask a typo in the other. 6 updated/new
+regression tests; 667/667 checks passing (was 665). Part 1 of 6 for issue #69's remaining scope
+(fmea/safety-case/sas/sci schema conformance, FUSA-STUB detection, attestation still to come).
+
 ### Fixed (deep-audit PR11/11 -- docs, CI, and a TOCTOU write race)
 
 Concluding the multi-agent audit fix series (all 11 planned PRs, all 41 confirmed findings).

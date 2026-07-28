@@ -291,14 +291,18 @@ package Fusa.Config is
    --  fusa:req REQ-083
    function Tara_Exists (Project_Root : String) return Boolean;
 
-   --  Derives a risk rating from Attack_Feasibility and the highest of
-   --  the four SFOP impact levels: both use an ordinal negligible/very-low
-   --  < low < medium < high scale (attackFeasibility has no "negligible"
-   --  level, so it is treated as equivalent to "low" for this comparison
-   --  -- ISO 21434 does not publish a single numeric formula the way
-   --  ISO 26262-3 Table 4 does for ASIL, so this is a documented,
-   --  deterministic heuristic: risk tracks the worse of the two inputs).
-   --  Returns "" if Attack_Feasibility is not a recognised level.
+   --  Derives a risk rating from Attack_Feasibility and the highest-ranked
+   --  of the four SFOP impact axes, via the x-FuSa family's own canonical
+   --  feasibility x impact -> risk combination table (spec section 9.2,
+   --  v1.14.1) -- ISO/SAE 21434 deliberately leaves risk determination
+   --  organization-defined (Clause 15.3), so this table is the family's
+   --  shared convention, not a claimed external standard. Impact axes use
+   --  the closed enum critical|major|moderate|negligible (ranked in that
+   --  order); Attack_Feasibility uses the separate closed enum
+   --  high|medium|low|very-low -- the two are deliberately distinct
+   --  scales for distinct questions (damage vs. likelihood) and MUST NOT
+   --  be conflated. Returns "" if Attack_Feasibility, or every one of the
+   --  four impact axes, is not a recognised value.
    --  fusa:req REQ-083
    function Determine_Tara_Risk
      (Attack_Feasibility : String; Impact : Sfop_Impact) return String;

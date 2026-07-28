@@ -265,8 +265,8 @@ begin
       "{""threats"":[" &
       "{""id"":""THR-001"",""asset"":""a"",""threat"":""t""," &
       """attackVector"":""av"",""attackFeasibility"":""high""," &
-      """impact"":{""safety"":""medium"",""financial"":""low""," &
-      """operational"":""low"",""privacy"":""low""}," &
+      """impact"":{""safety"":""major"",""financial"":""negligible""," &
+      """operational"":""negligible"",""privacy"":""negligible""}," &
       """treatment"":""tr"",""mitigations"":[""m1"",""m2""]}," &
       "{""threat"":""no id or asset at all""}" &
       "]}");
@@ -280,8 +280,9 @@ begin
              "the mitigations array round-trips with both entries");
       Check (To_String (Doc.Threats.Element (1).Risk) = "high",
              "risk is derived from attackFeasibility x the highest SFOP impact "
-             & "level (high feasibility, medium-or-lower impact -> high), not "
-             & "accepted verbatim -- there is no ""risk"" field in the input at all");
+             & "level (high feasibility, major-or-lower impact -> high, per the "
+             & "section 9.2 combination table), not accepted verbatim -- there "
+             & "is no ""risk"" field in the input at all");
       Check (Natural (Findings.Length) = 1
              and then Findings.Element (1).Severity = Error,
              "a threat with no id or asset produces exactly one ERROR finding");
