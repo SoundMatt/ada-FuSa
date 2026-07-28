@@ -2,6 +2,7 @@
 
 package Fusa.Cli is
 
+   --  fusa:req REQ-037
    function Run (Args : String_List) return Integer;
 
 end Fusa.Cli;

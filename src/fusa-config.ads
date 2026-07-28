@@ -28,9 +28,11 @@ package Fusa.Config is
       Exclude_Patterns : String_List;
    end record;
 
+   --  fusa:req REQ-050
    function Default_Config (Name : String) return Project_Config;
 
    --  True if a canonical or legacy config file exists under Project_Root.
+   --  fusa:req REQ-051
    function Exists (Project_Root : String) return Boolean;
 
    --  Loads .fusa.json (falling back to legacy .adafusa.json with a stderr
@@ -40,6 +42,7 @@ package Fusa.Config is
    function Load (Project_Root : String) return Project_Config;
 
    --  Writes the canonical §1.2.1 shape (always the nested `project` form).
+   --  fusa:req REQ-052
    procedure Save (Project_Root : String; Cfg : Project_Config);
 
    ------------------------------------------------------------------
@@ -61,6 +64,7 @@ package Fusa.Config is
    subtype Requirement_List is Requirement_Vectors.Vector;
 
    --  True if a canonical or legacy requirements file exists.
+   --  fusa:req REQ-053
    function Requirements_Exist (Project_Root : String) return Boolean;
 
    --  Loads .fusa-reqs.json (or legacy). Returns an empty list if absent.
@@ -72,6 +76,7 @@ package Fusa.Config is
      (Project_Root : String;
       Findings     : in out Finding_List) return Requirement_List;
 
+   --  fusa:req REQ-054
    procedure Save_Requirements
      (Project_Root : String; Reqs : Requirement_List);
 

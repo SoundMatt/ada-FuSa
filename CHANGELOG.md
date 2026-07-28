@@ -93,6 +93,17 @@ repro steps and rationale on each.
   now report category `style` instead of the blanket `ADA` → `safety` prefix mapping, so filtering
   findings by category no longer bundles style nits in with genuinely safety-relevant findings like
   `ADA001`/`ADA003`/`ADA004`. Rule ids are unchanged (#37).
+- `trace --func-coverage N` (spec §1.4.1, SHOULD/phased): gates on the percentage of a project's
+  public `.ads` function/procedure declarations carrying a directly-preceding `fusa:req` tag,
+  mirroring `--req-coverage`/`--sec-tested` but not implied by `--strict`. Backed by a new
+  `Fusa.Func_Scan` module; JSON `coverage` gains `totalFunctions`/`taggedFunctions`, text output
+  gains a `functions:N tagged:N` line. See README "Function-level tagging" for the documented
+  counting rule (per-overload, excludes `tests/`, excludes generic formal parameters) (#23).
+- ada-FuSa's own function-level tag coverage raised from ~10% (measured precisely — the ~31%
+  figure in #23 was file-level, which spec §1.4.1 warns overstates real coverage) to 100%: 46 new
+  requirements (REQ-024–REQ-069) added, one `fusa:req` tag placed directly above every one of the
+  71 public function/procedure declarations across `src/*.ads`. `trace --func-coverage 100` is now
+  a CI gate alongside `--req-coverage 100`.
 
 ## v0.1.0 — 2026-07-27
 
