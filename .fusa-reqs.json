@@ -683,6 +683,12 @@
       "title": "sas command (Software Accomplishment Summary)",
       "text": "sas always writes both sas.json (envelope + tool-defined body, per spec section 9.3's own note) and sas.md, aggregating figures ada-FuSa already computes elsewhere (requirement traced/tested/secTested counts via Fusa.Annotations.Scan, check's own finding counts, comp violations, disposition status, problem-report open/closed counts). Asserting the software life cycle is complete is a human sign-off this tool cannot make; this only reports the current, honest state of that evidence, whatever it is. Always exits 0, like report.",
       "level": "SW"
+    },
+    {
+      "id": "REQ-115",
+      "title": "template command (project scaffolding)",
+      "text": "template list / template apply <name> [--dir] [--project-name] [--force] scaffolds a source-tree/build/CI skeleton complementary to init (which only writes .fusa.json/.fusa-reqs.json). Only one template, 'default', exists rather than several with only cosmetic differences. Writes a minimal .gpr, src/ and tests/ directories, README.md, and .github/workflows/ci.yml. Deliberately never writes a LICENSE file -- choosing a license is a legal/business decision this tool must never make on a user's behalf; the scaffolded README explicitly tells the user to add one. Each file is created only if absent (or unconditionally with --force), mirroring init's per-file behavior.",
+      "level": "SW"
     }
   ]
 }

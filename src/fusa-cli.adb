@@ -202,6 +202,7 @@ package body Fusa.Cli is
       W.Value ("analyze");
       W.Value ("lint");
       W.Value ("sas");
+      W.Value ("template");
       W.Array_End;
 
       W.Key ("formats");
@@ -245,6 +246,7 @@ package body Fusa.Cli is
       W.Key ("analyze");      W.Array_Start; W.Value ("text"); W.Value ("json"); W.Array_End;
       W.Key ("lint");         W.Array_Start; W.Value ("text"); W.Value ("json"); W.Array_End;
       W.Key ("sas");          W.Array_Start; W.Value ("json"); W.Value ("md"); W.Array_End;
+      W.Key ("template");     W.Array_Start; W.Value ("text"); W.Value ("json"); W.Array_End;
       W.Object_End;
 
       W.Key ("standards");
@@ -4559,6 +4561,157 @@ package body Fusa.Cli is
    end Cmd_Sas;
 
    ----------------------------------------------------------------------
+   --  template -- project scaffolding (spec section 9.3 MAY)
+   ----------------------------------------------------------------------
+
+   --  Only one template ("default") exists: a source-tree/build/CI
+   --  skeleton complementary to `init` (which only ever writes
+   --  .fusa.json/.fusa-reqs.json) -- not a second copy of the same
+   --  templates enumerated to have several when the only real difference
+   --  between candidate variants would be cosmetic. Deliberately does
+   --  NOT write a LICENSE file: choosing a license is a legal/business
+   --  decision this tool must never make on a user's behalf: the
+   --  scaffolded README explicitly tells the user to add one.
+   procedure Write_If_Absent (Path, Content : String; Force : Boolean) is
+   begin
+      if Force or else not Fusa.Files.Exists (Path) then
+         Fusa.Files.Write_File (Path, Content);
+         Ada.Text_IO.Put_Line ("created " & Path);
+      else
+         Ada.Text_IO.Put_Line
+           (Ada.Text_IO.Standard_Error,
+            "ada-FuSa: " & Path & " already exists, leaving unchanged " &
+            "(use --force to overwrite)");
+      end if;
+   end Write_If_Absent;
+
+   --  fusa:req REQ-115
+   function Cmd_Template (Args : String_List) return Integer is
+   begin
+      if Args.Is_Empty then
+         Ada.Text_IO.Put_Line
+           (Ada.Text_IO.Standard_Error, "ada-FuSa: template: missing subcommand (list|apply)");
+         return Exit_Usage;
+      end if;
+      declare
+         Verb : constant String := Args.Element (1);
+         Rest : String_List := Args;
+      begin
+         Rest.Delete_First;
+
+         if Verb = "list" then
+            declare
+               Format : constant String := Flag_Value (Rest, "--format", "text");
+            begin
+               if Format = "json" then
+                  declare
+                     W : Fusa.Json.Writer.Instance;
+                  begin
+                     W.Object_Start;
+                     Fusa.Report.Write_Header (W, "template-list");
+                     W.Key ("templates");
+                     W.Array_Start;
+                     W.Object_Start;
+                     W.Field ("name", "default");
+                     W.Field ("description",
+                       "minimal Ada project skeleton: .gpr, src/, tests/, README.md, " &
+                       ".github/workflows/ci.yml -- does not write a LICENSE file");
+                     W.Object_End;
+                     W.Array_End;
+                     W.Object_End;
+                     Emit (Rest, Fusa.Json.Writer.To_String (W));
+                  end;
+               else
+                  Emit (Rest, "default: minimal Ada project skeleton (.gpr, src/, tests/, " &
+                          "README.md, .github/workflows/ci.yml -- no LICENSE)");
+               end if;
+            end;
+            return Exit_Ok;
+
+         elsif Verb = "apply" then
+            if Rest.Is_Empty then
+               Ada.Text_IO.Put_Line
+                 (Ada.Text_IO.Standard_Error, "ada-FuSa: template apply: requires <name>");
+               return Exit_Usage;
+            end if;
+            declare
+               Name  : constant String := Rest.Element (1);
+               Dir   : constant String := Dir_Of (Rest);
+               Force : constant Boolean := Has_Flag (Rest, "--force");
+               Proj_Name : constant String :=
+                 Flag_Value (Rest, "--project-name", "myproject");
+            begin
+               if Name /= "default" then
+                  Ada.Text_IO.Put_Line
+                    (Ada.Text_IO.Standard_Error,
+                     "ada-FuSa: template apply: unknown template '" & Name &
+                     "' (available: default)");
+                  return Exit_Usage;
+               end if;
+
+               if not Fusa.Files.Exists (Dir) then
+                  Ada.Directories.Create_Path (Dir);
+               end if;
+               if not Fusa.Files.Exists (Dir & "/src") then
+                  Ada.Directories.Create_Path (Dir & "/src");
+               end if;
+               if not Fusa.Files.Exists (Dir & "/tests") then
+                  Ada.Directories.Create_Path (Dir & "/tests");
+               end if;
+               if not Fusa.Files.Exists (Dir & "/.github/workflows") then
+                  Ada.Directories.Create_Path (Dir & "/.github/workflows");
+               end if;
+
+               Write_If_Absent
+                 (Fusa.Files.Join (Dir, Proj_Name & ".gpr"),
+                  "project " & Proj_Name & " is" & ASCII.LF & ASCII.LF &
+                  "   for Source_Dirs use (""src"");" & ASCII.LF &
+                  "   for Object_Dir use ""obj"";" & ASCII.LF &
+                  "   for Exec_Dir use ""bin"";" & ASCII.LF & ASCII.LF &
+                  "   package Compiler is" & ASCII.LF &
+                  "      for Default_Switches (""Ada"") use" & ASCII.LF &
+                  "        (""-gnatwa"", ""-gnat2022"", ""-g"");" & ASCII.LF &
+                  "   end Compiler;" & ASCII.LF & ASCII.LF &
+                  "end " & Proj_Name & ";" & ASCII.LF,
+                  Force);
+
+               Write_If_Absent
+                 (Fusa.Files.Join (Dir, "README.md"),
+                  "# " & Proj_Name & ASCII.LF & ASCII.LF &
+                  "TODO: describe this project." & ASCII.LF & ASCII.LF &
+                  "## License" & ASCII.LF & ASCII.LF &
+                  "TODO: choose and add a LICENSE file appropriate for this project -- " &
+                  "ada-FuSa does not select one on your behalf." & ASCII.LF,
+                  Force);
+
+               Write_If_Absent
+                 (Fusa.Files.Join (Dir, ".github/workflows/ci.yml"),
+                  "name: CI" & ASCII.LF & ASCII.LF &
+                  "on: [push, pull_request]" & ASCII.LF & ASCII.LF &
+                  "jobs:" & ASCII.LF &
+                  "  build:" & ASCII.LF &
+                  "    runs-on: ubuntu-latest" & ASCII.LF &
+                  "    steps:" & ASCII.LF &
+                  "      - uses: actions/checkout@v4" & ASCII.LF &
+                  "      - uses: alire-project/setup-alire@v4" & ASCII.LF &
+                  "      - run: alr build" & ASCII.LF &
+                  "      # add `adafusa check`/`adafusa qualify` steps here once " &
+                  "ada-FuSa is installed in this CI image" & ASCII.LF,
+                  Force);
+
+               return Exit_Ok;
+            end;
+
+         else
+            Ada.Text_IO.Put_Line
+              (Ada.Text_IO.Standard_Error,
+               "ada-FuSa: template: unknown subcommand '" & Verb & "' (expected list|apply)");
+            return Exit_Usage;
+         end if;
+      end;
+   end Cmd_Template;
+
+   ----------------------------------------------------------------------
    --  Usage / dispatch
    ----------------------------------------------------------------------
 
@@ -4570,7 +4723,7 @@ package body Fusa.Cli is
         "report comp hara tara vuln req disposition pr metrics sign hooks " &
         "do178 iso26262 iso21434 iec61508 iec62443 unece slsa " &
         "verify diff badge boundary impact coupling fmea safety-case " &
-        "cyber sci analyze lint sas");
+        "cyber sci analyze lint sas template");
    end Print_Usage;
 
    function Run (Args : String_List) return Integer is
@@ -4665,6 +4818,8 @@ package body Fusa.Cli is
             return Cmd_Lint (Rest);
          elsif Cmd = "sas" then
             return Cmd_Sas (Rest);
+         elsif Cmd = "template" then
+            return Cmd_Template (Rest);
          elsif Cmd = "--help" or else Cmd = "-h" or else Cmd = "help" then
             Print_Usage;
             return Exit_Ok;
