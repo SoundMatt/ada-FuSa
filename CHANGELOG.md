@@ -5,6 +5,41 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+### Fixed (deep-audit PR8/11 -- rule-engine correctness)
+
+Continuing the multi-agent audit fix series. Six issues in the ADA00x/SEC00x/ANAL00x rule packs:
+
+- **False positives on prose in comments**: `Scan_Substring` (used by six of the twelve style rules)
+  never stripped comments before matching, so a comment merely mentioning a flagged construct by
+  name (e.g. `-- see ADA001: pragma Suppress disables a check`) triggered the same finding as
+  actually using it. Fixed with a new `Code_Portion` helper (quote-aware, so an embedded `"a -- b"`
+  in a string literal isn't mistaken for a comment marker) applied to `Scan_Substring`,
+  `Scan_Exception_Handler` (ADA002), and `Scan_Credential_Literal` (SEC001/SEC002) -- with an
+  explicit opt-out for ADA007, whose whole purpose is to scan comment text for `TODO` markers.
+- **ADA002's fixed lookback window**: searched only 6 lines above a `when others =>` for a bare
+  `exception` keyword to distinguish a real handler from a `case` statement's default branch, so a
+  handler with more than 6 preceding `when`-branches (one per distinct predefined exception, a
+  common pattern) was misclassified as a case statement and missed entirely. Fixed with an
+  unbounded backward scan that stops at whichever of a bare `exception` or a `case ... is` appears
+  first.
+- **SEC004 missed unqualified `Spawn` calls**: the needle `"OS_LIB.SPAWN"` never matched a call
+  reachable via a preceding `use GNAT.OS_Lib;`. Fixed by detecting the `use` clause first and, when
+  present, also matching a standalone `SPAWN` identifier (word-boundary checked, so `Respawn_Count`
+  doesn't false-positive).
+- **ADA008 missed the GNATprove-scoped form**: `pragma Warnings (GNATprove, Off, ...)` -- the
+  variant SPARK code commonly uses to silence gnatprove-specific warnings only -- was invisible to
+  the plain `"pragma Warnings (Off"` needle. Fixed by scanning for both forms.
+- **ANAL002's parameter counter inflated by string-literal contents**: `Count_Params` split a
+  parameter profile's interior text on every literal `;`/`:` with no awareness of string-literal
+  quoting, so a single parameter with a default value like `"a;b:c"` was misparsed into phantom
+  extra parameters. Fixed with a `Mask_String_Literals` helper that blanks quoted content before
+  delimiter scanning.
+
+10 new regression tests, including one that incidentally surfaced a pre-existing, separate bug
+(ADA007's `"TODO"` needle also matches the substring inside an identifier like `Todo` -- not one
+of the 41 confirmed findings, so left alone rather than scope-creeping into a new fix); 634/634
+checks passing (was 626).
+
 ### Changed (deep-audit PR7/11 + issue #69 -- hara/tara schema conformance)
 
 Continuing the multi-agent audit fix series, and starting on issue #69's broader schema-conformance

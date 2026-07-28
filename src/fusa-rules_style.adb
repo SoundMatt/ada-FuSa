@@ -49,6 +49,30 @@ package body Fusa.Rules_Style is
       return Result (1 .. Out_Len);
    end Normalize_For_Match;
 
+   --  Returns the "code portion" of Line: everything before a "--"
+   --  comment marker that isn't itself inside a string literal (so
+   --  `S : String := "a -- b";` is NOT truncated at the embedded "--").
+   --  Used to strip comments before substring-matching, so a rule
+   --  doesn't flag prose that merely mentions a dangerous construct by
+   --  name (e.g. "-- see ADA001 re: pragma Suppress" should not itself
+   --  trigger ADA001). Deliberately NOT applied when scanning for a
+   --  "-- fusa:unsafe" suppression comment -- that lookup specifically
+   --  searches inside comments.
+   function Code_Portion (Line : String) return String is
+      In_String : Boolean := False;
+   begin
+      for I in Line'First .. Line'Last loop
+         if Line (I) = '"' then
+            In_String := not In_String;
+         elsif not In_String and then I < Line'Last
+           and then Line (I) = '-' and then Line (I + 1) = '-'
+         then
+            return Line (Line'First .. I - 1);
+         end if;
+      end loop;
+      return Line;
+   end Code_Portion;
+
    --  Approximate "is Pos inside a quoted region" check: counts
    --  double-quote characters before Pos on the (normalized) line. An odd
    --  count means Pos falls inside quotes -- either a real Ada string
@@ -69,12 +93,6 @@ package body Fusa.Rules_Style is
       end loop;
       return Quote_Count mod 2 = 1;
    end Is_Quoted;
-
-   --  How many lines before a "when others =>" to search for a bare
-   --  "exception" keyword when distinguishing a real exception handler
-   --  from a "case ... is ... when others =>" default branch -- see
-   --  Scan_Exception_Handler.
-   Exception_Lookback : constant := 6;
 
    --  fusa:req REQ-023
    --  Derive_Category's blanket ADA -> Safety mapping (spec section 1.5.1)
@@ -100,7 +118,11 @@ package body Fusa.Rules_Style is
       Needle            : String;
       Message           : String;
       Remediation       : String;
-      Require_No_Unsafe : Boolean) return Finding_List
+      Require_No_Unsafe : Boolean;
+      --  False for rules whose needle is itself only ever meaningful
+      --  inside a comment (e.g. ADA007's "TODO" marker) -- Code_Portion
+      --  would strip exactly the text those rules exist to find.
+      Strip_Comments    : Boolean := True) return Finding_List
    is
       Result      : Finding_List;
       Norm_Needle : constant String := Normalize_For_Match (Needle);
@@ -117,7 +139,9 @@ package body Fusa.Rules_Style is
                   for I in 1 .. Natural (Lines.Length) loop
                      declare
                         Line      : constant String := Lines.Element (I);
-                        Norm_Line : constant String := Normalize_For_Match (Line);
+                        Norm_Line : constant String :=
+                          Normalize_For_Match
+                            (if Strip_Comments then Code_Portion (Line) else Line);
                         Match_Pos : constant Natural :=
                           Ada.Strings.Fixed.Index (Norm_Line, Norm_Needle);
                      begin
@@ -186,7 +210,7 @@ package body Fusa.Rules_Style is
                   for I in 1 .. Natural (Lines.Length) loop
                      declare
                         Norm_Line : constant String :=
-                          Normalize_For_Match (Lines.Element (I));
+                          Normalize_For_Match (Code_Portion (Lines.Element (I)));
                         Match_Pos : constant Natural :=
                           Ada.Strings.Fixed.Index (Norm_Line, Norm_Needle);
                      begin
@@ -196,14 +220,29 @@ package body Fusa.Rules_Style is
                            declare
                               Is_Exception_Handler : Boolean := False;
                            begin
-                              for J in Natural'Max (1, I - Exception_Lookback) .. I - 1 loop
-                                 if Ada.Strings.Fixed.Index
-                                      (Normalize_For_Match (Lines.Element (J)),
-                                       "EXCEPTION") > 0
-                                 then
-                                    Is_Exception_Handler := True;
-                                    exit;
-                                 end if;
+                              --  Regression: a fixed lookback window missed a
+                              --  real exception handler once more than
+                              --  Exception_Lookback when-branches preceded
+                              --  the "when others =>" (e.g. one "when" per
+                              --  distinct predefined exception). Scanning
+                              --  backward with no fixed limit, stopping at
+                              --  whichever of a bare "exception" keyword or a
+                              --  "case ... is" appears FIRST, correctly
+                              --  handles arbitrarily many preceding branches
+                              --  and still distinguishes a real handler from
+                              --  a case statement's default branch.
+                              for J in reverse 1 .. I - 1 loop
+                                 declare
+                                    Norm_J : constant String :=
+                                      Normalize_For_Match (Code_Portion (Lines.Element (J)));
+                                 begin
+                                    if Ada.Strings.Fixed.Index (Norm_J, "EXCEPTION") > 0 then
+                                       Is_Exception_Handler := True;
+                                       exit;
+                                    elsif Ada.Strings.Fixed.Index (Norm_J, "CASE ") > 0 then
+                                       exit;
+                                    end if;
+                                 end;
                               end loop;
 
                               if Is_Exception_Handler then
@@ -352,7 +391,8 @@ package body Fusa.Rules_Style is
                   for I in 1 .. Natural (Lines.Length) loop
                      declare
                         Line       : constant String := Lines.Element (I);
-                        Norm_Line  : constant String := Normalize_For_Match (Line);
+                        Norm_Line  : constant String :=
+                          Normalize_For_Match (Code_Portion (Line));
                         Kw_Pos     : constant Natural :=
                           Ada.Strings.Fixed.Index (Norm_Line, Norm_Kw);
                         Assign_Pos : constant Natural :=
@@ -399,6 +439,116 @@ package body Fusa.Rules_Style is
       end loop;
       return Result;
    end Scan_Credential_Literal;
+
+   --  Word-boundary check: True if the Length-character substring starting
+   --  at Pos in Line is not immediately adjacent to another identifier
+   --  character (letter/digit/underscore) on either side -- so matching
+   --  "SPAWN" doesn't also fire on "RESPAWN" or "SPAWNER".
+   function Is_Word_Boundary_Match
+     (Line : String; Pos : Positive; Length : Positive) return Boolean
+   is
+      function Is_Ident_Char (C : Character) return Boolean is
+        (C in 'A' .. 'Z' | '0' .. '9' | '_');
+      Before_Ok : constant Boolean :=
+        Pos = Line'First or else not Is_Ident_Char (Line (Pos - 1));
+      After_Pos : constant Natural := Pos + Length;
+   begin
+      return Before_Ok
+        and then (After_Pos > Line'Last or else not Is_Ident_Char (Line (After_Pos)));
+   end Is_Word_Boundary_Match;
+
+   --  SEC004-specific: the plain "OS_LIB.SPAWN" needle never matches an
+   --  unqualified call reachable via "use GNAT.OS_Lib;" (e.g. a bare
+   --  "Spawn (...)"). If the file has such a use clause, a standalone
+   --  "SPAWN" identifier (word-boundary, so "RESPAWN"/"SPAWNER" don't
+   --  false-positive) is treated as a match too.
+   function Scan_Os_Lib_Spawn
+     (Project_Root : String; Files : String_List) return Finding_List
+   is
+      Result      : Finding_List;
+      Message     : constant String :=
+        "spawning an external process risks command injection if any " &
+        "argument is built from untrusted input (CWE-78)";
+      Remediation : constant String :=
+        "validate/allowlist all arguments derived from external input, or " &
+        "justify with a trailing ""-- fusa:unsafe <reason>"" comment";
+   begin
+      for Rel of Files loop
+         declare
+            Full : constant String := Fusa.Files.Join (Project_Root, Rel);
+         begin
+            if Fusa.Files.Exists (Full) then
+               declare
+                  Content        : constant String := Fusa.Files.Read_File (Full);
+                  Lines          : constant String_List := Fusa.Files.Split_Lines (Content);
+                  Has_Use_Clause : Boolean := False;
+               begin
+                  for Line of Lines loop
+                     if Ada.Strings.Fixed.Index
+                          (Normalize_For_Match (Code_Portion (Line)), "USE GNAT.OS_LIB") > 0
+                     then
+                        Has_Use_Clause := True;
+                        exit;
+                     end if;
+                  end loop;
+
+                  for I in 1 .. Natural (Lines.Length) loop
+                     declare
+                        Norm_Line : constant String :=
+                          Normalize_For_Match (Code_Portion (Lines.Element (I)));
+                        Qualified_Pos : constant Natural :=
+                          Ada.Strings.Fixed.Index (Norm_Line, "OS_LIB.SPAWN");
+                        Match_Pos     : Natural := Qualified_Pos;
+                     begin
+                        if Match_Pos = 0 and then Has_Use_Clause then
+                           declare
+                              P : Natural := Ada.Strings.Fixed.Index (Norm_Line, "SPAWN");
+                           begin
+                              while P > 0 loop
+                                 if Is_Word_Boundary_Match (Norm_Line, P, 5) then
+                                    Match_Pos := P;
+                                    exit;
+                                 end if;
+                                 P := Ada.Strings.Fixed.Index
+                                        (Norm_Line (P + 1 .. Norm_Line'Last), "SPAWN");
+                              end loop;
+                           end;
+                        end if;
+
+                        if Match_Pos > 0 and then not Is_Quoted (Norm_Line, Match_Pos) then
+                           declare
+                              Suppressed : Boolean := False;
+                           begin
+                              for J in Natural'Max (1, I - Suppress_Lookback) ..
+                                Natural'Min (I + Suppress_Lookahead, Natural (Lines.Length))
+                              loop
+                                 if Ada.Strings.Fixed.Index
+                                      (Lines.Element (J), "fusa:unsafe") > 0
+                                 then
+                                    Suppressed := True;
+                                    exit;
+                                 end if;
+                              end loop;
+                              if not Suppressed then
+                                 Result.Append
+                                   (Make_Finding
+                                      (Rule_Id     => "SEC004",
+                                       Severity    => Warning,
+                                       Message     => Message,
+                                       Loc         => Make_Location (Rel, I),
+                                       Category    => Rule_Category ("SEC004"),
+                                       Remediation => Remediation));
+                              end if;
+                           end;
+                        end if;
+                     end;
+                  end loop;
+               end;
+            end if;
+         end;
+      end loop;
+      return Result;
+   end Scan_Os_Lib_Spawn;
 
    ----------------------------------------------------------------------
    --  ADA001 -- unjustified check-disabling Suppress pragma
@@ -505,7 +655,7 @@ package body Fusa.Rules_Style is
          (Project_Root, Files, "ADA007", Info, "TODO",
           "TODO comment marks incomplete work",
           "resolve the TODO or file a tracked issue before release",
-          Require_No_Unsafe => False));
+          Require_No_Unsafe => False, Strip_Comments => False));
 
    ----------------------------------------------------------------------
    --  ADA008 -- unjustified compiler-diagnostic suppression
@@ -515,14 +665,36 @@ package body Fusa.Rules_Style is
 
    overriding function Id (R : Ada008_Rule) return String is ("ADA008");
    overriding function Description (R : Ada008_Rule) return String is
-     ("pragma Warnings (Off, ...) used without a -- fusa:unsafe justification");
+     ("pragma Warnings (Off, ...) -- plain or the GNATprove-scoped " &
+      """(GNATprove, Off, ...)"" form -- used without a -- fusa:unsafe justification");
    overriding function Run
      (R : Ada008_Rule; Project_Root : String; Files : String_List) return Finding_List
-   is (Scan_Substring
-         (Project_Root, Files, "ADA008", Warning, "pragma Warnings (Off",
-          "pragma Warnings (Off) silences compiler diagnostics",
-          "justify with a trailing ""-- fusa:unsafe <reason>"" comment, or fix the underlying warning",
-          Require_No_Unsafe => True));
+   is
+      --  The needle "pragma Warnings (Off" never matched the three-argument
+      --  tool-scoped form "pragma Warnings (GNATprove, Off, ...)" that
+      --  SPARK code commonly uses to silence gnatprove-specific warnings
+      --  only -- the token right after "(" is "GNATprove," there, not
+      --  "Off". Both forms are scanned for and combined; they are
+      --  mutually exclusive substrings, so a line can never match both.
+      Result : Finding_List :=
+        Scan_Substring
+          (Project_Root, Files, "ADA008", Warning, "pragma Warnings (Off",
+           "pragma Warnings (Off) silences compiler diagnostics",
+           "justify with a trailing ""-- fusa:unsafe <reason>"" comment, or " &
+           "fix the underlying warning",
+           Require_No_Unsafe => True);
+   begin
+      for F of Scan_Substring
+        (Project_Root, Files, "ADA008", Warning, "pragma Warnings (GNATprove, Off",
+         "pragma Warnings (GNATprove, Off) silences gnatprove diagnostics",
+         "justify with a trailing ""-- fusa:unsafe <reason>"" comment, or " &
+         "fix the underlying warning",
+         Require_No_Unsafe => True)
+      loop
+         Result.Append (F);
+      end loop;
+      return Result;
+   end Run;
 
    ----------------------------------------------------------------------
    --  SEC001 -- possible hardcoded password
@@ -602,16 +774,11 @@ package body Fusa.Rules_Style is
 
    overriding function Id (R : Sec004_Rule) return String is ("SEC004");
    overriding function Description (R : Sec004_Rule) return String is
-     ("GNAT.OS_Lib.Spawn referenced without -- fusa:unsafe");
+     ("GNAT.OS_Lib.Spawn (qualified or, after a ""use GNAT.OS_Lib;"", " &
+      "unqualified) referenced without -- fusa:unsafe");
    overriding function Run
      (R : Sec004_Rule; Project_Root : String; Files : String_List) return Finding_List
-   is (Scan_Substring
-         (Project_Root, Files, "SEC004", Warning, "OS_LIB.SPAWN",
-          "spawning an external process risks command injection if any " &
-          "argument is built from untrusted input (CWE-78)",
-          "validate/allowlist all arguments derived from external input, or " &
-          "justify with a trailing ""-- fusa:unsafe <reason>"" comment",
-          Require_No_Unsafe => True));
+   is (Scan_Os_Lib_Spawn (Project_Root, Files));
 
    ----------------------------------------------------------------------
    --  Registration

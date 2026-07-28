@@ -314,6 +314,169 @@ begin
       Check (Sec003_Hits = 1, "SEC003 fires on a GNAT.MD5 with-clause");
    end;
 
+   --  Regression: Scan_Substring never stripped comments before matching,
+   --  so a comment merely mentioning a flagged construct by name (not
+   --  actually using it) produced a false-positive finding. Affects
+   --  ADA001/ADA003/ADA004/ADA008/SEC003/SEC004; ADA001 is exercised here
+   --  as the representative case.
+   Fusa.Files.Write_File
+     (Root & "/src/prose.adb",
+      "procedure Prose is" & ASCII.LF &
+      "   -- see ADA001: pragma Suppress disables a check, don't do it" & ASCII.LF &
+      "begin" & ASCII.LF & "   null;" & ASCII.LF & "end Prose;" & ASCII.LF);
+   declare
+      Files    : String_List;
+      Findings : Finding_List;
+      Ada001_Hits : Natural := 0;
+   begin
+      Files.Append ("src/prose.adb");
+      Findings := Fusa.Engine.Run_All (Root, Files);
+      for F of Findings loop
+         if To_String (F.Rule_Id) = "ADA001" then
+            Ada001_Hits := Ada001_Hits + 1;
+         end if;
+      end loop;
+      Check (Ada001_Hits = 0,
+             "ADA001 does not fire on a comment that merely mentions "
+             & """pragma Suppress"" by name -- comments are stripped "
+             & "before matching");
+   end;
+
+   --  Regression: ADA007's "TODO" needle is only ever meaningful inside a
+   --  comment -- Scan_Substring's comment-stripping fix above must not
+   --  also blind ADA007 to the very comments it exists to find.
+   Fusa.Files.Write_File
+     (Root & "/src/deferred.adb",
+      "procedure Deferred is" & ASCII.LF &
+      "begin" & ASCII.LF & "   null; -- TODO fix this" & ASCII.LF & "end Deferred;" & ASCII.LF);
+   declare
+      Files    : String_List;
+      Findings : Finding_List;
+      Ada007_Hits : Natural := 0;
+   begin
+      Files.Append ("src/deferred.adb");
+      Findings := Fusa.Engine.Run_All (Root, Files);
+      for F of Findings loop
+         if To_String (F.Rule_Id) = "ADA007" then
+            Ada007_Hits := Ada007_Hits + 1;
+         end if;
+      end loop;
+      Check (Ada007_Hits = 1,
+             "ADA007 still fires on a real ""-- TODO"" comment -- it is "
+             & "exempted from the comment-stripping fix, since its whole "
+             & "purpose is to scan comment text");
+   end;
+
+   --  Regression: SEC004's "OS_LIB.SPAWN" needle never matched an
+   --  unqualified call reachable via "use GNAT.OS_Lib;".
+   Fusa.Files.Write_File
+     (Root & "/src/spawn_qualified.adb",
+      "with GNAT.OS_Lib;" & ASCII.LF &
+      "procedure Spawn_Qualified is" & ASCII.LF & "begin" & ASCII.LF &
+      "   GNAT.OS_Lib.Spawn (""ls"", (1 .. 0 => <>));" & ASCII.LF &
+      "end Spawn_Qualified;" & ASCII.LF);
+   Fusa.Files.Write_File
+     (Root & "/src/spawn_unqualified.adb",
+      "with GNAT.OS_Lib; use GNAT.OS_Lib;" & ASCII.LF &
+      "procedure Spawn_Unqualified is" & ASCII.LF & "begin" & ASCII.LF &
+      "   Spawn (""ls"", (1 .. 0 => <>));" & ASCII.LF &
+      "end Spawn_Unqualified;" & ASCII.LF);
+   Fusa.Files.Write_File
+     (Root & "/src/respawn.adb",
+      "procedure Respawn is" & ASCII.LF &
+      "   Respawn_Count : Natural := 0;" & ASCII.LF &
+      "begin" & ASCII.LF & "   null;" & ASCII.LF & "end Respawn;" & ASCII.LF);
+   declare
+      Files    : String_List;
+      Findings : Finding_List;
+      Hits_Qualified, Hits_Unqualified, Hits_Respawn : Natural := 0;
+   begin
+      Files.Append ("src/spawn_qualified.adb");
+      Files.Append ("src/spawn_unqualified.adb");
+      Files.Append ("src/respawn.adb");
+      Findings := Fusa.Engine.Run_All (Root, Files);
+      for F of Findings loop
+         if To_String (F.Rule_Id) = "SEC004" then
+            if To_String (F.Loc.File) = "src/spawn_qualified.adb" then
+               Hits_Qualified := Hits_Qualified + 1;
+            elsif To_String (F.Loc.File) = "src/spawn_unqualified.adb" then
+               Hits_Unqualified := Hits_Unqualified + 1;
+            elsif To_String (F.Loc.File) = "src/respawn.adb" then
+               Hits_Respawn := Hits_Respawn + 1;
+            end if;
+         end if;
+      end loop;
+      Check (Hits_Qualified = 1, "SEC004 still fires on a fully-qualified GNAT.OS_Lib.Spawn call");
+      Check (Hits_Unqualified = 1,
+             "SEC004 now also fires on an unqualified Spawn call reachable "
+             & "via a preceding ""use GNAT.OS_Lib;""");
+      Check (Hits_Respawn = 0,
+             "SEC004 does not fire on ""Respawn_Count"", which merely "
+             & "contains ""SPAWN"" as a substring, not as a standalone "
+             & "identifier (word-boundary check)");
+   end;
+
+   --  Regression: ADA008's needle never matched the GNATprove-scoped
+   --  three-argument form "pragma Warnings (GNATprove, Off, ...)".
+   Fusa.Files.Write_File
+     (Root & "/src/warnoff.adb",
+      "pragma Warnings (Off, ""x"");" & ASCII.LF &
+      "pragma Warnings (GNATprove, Off, ""y"");" & ASCII.LF &
+      "procedure Warnoff is" & ASCII.LF & "begin" & ASCII.LF &
+      "   null;" & ASCII.LF & "end Warnoff;" & ASCII.LF);
+   declare
+      Files    : String_List;
+      Findings : Finding_List;
+      Ada008_Hits : Natural := 0;
+   begin
+      Files.Append ("src/warnoff.adb");
+      Findings := Fusa.Engine.Run_All (Root, Files);
+      for F of Findings loop
+         if To_String (F.Rule_Id) = "ADA008" then
+            Ada008_Hits := Ada008_Hits + 1;
+         end if;
+      end loop;
+      Check (Ada008_Hits = 2,
+             "ADA008 fires on both the plain ""pragma Warnings (Off"" form "
+             & "and the GNATprove-scoped ""pragma Warnings (GNATprove, "
+             & "Off"" form");
+   end;
+
+   --  Regression: ADA002's fixed lookback window missed a real exception
+   --  handler once more than a few when-branches preceded "when others =>".
+   Fusa.Files.Write_File
+     (Root & "/src/many_handlers.adb",
+      "procedure Many_Handlers is" & ASCII.LF &
+      "begin" & ASCII.LF & "   null;" & ASCII.LF &
+      "exception" & ASCII.LF &
+      "   when Constraint_Error => null;" & ASCII.LF &
+      "   when Storage_Error => null;" & ASCII.LF &
+      "   when Program_Error => null;" & ASCII.LF &
+      "   when Tasking_Error => null;" & ASCII.LF &
+      "   when Numeric_Error => null;" & ASCII.LF &
+      "   when Data_Error => null;" & ASCII.LF &
+      "   when Name_Error => null;" & ASCII.LF &
+      "   when Device_Error => null;" & ASCII.LF &
+      "   when others => null;" & ASCII.LF &
+      "end Many_Handlers;" & ASCII.LF);
+   declare
+      Files    : String_List;
+      Findings : Finding_List;
+      Ada002_Hits : Natural := 0;
+   begin
+      Files.Append ("src/many_handlers.adb");
+      Findings := Fusa.Engine.Run_All (Root, Files);
+      for F of Findings loop
+         if To_String (F.Rule_Id) = "ADA002" then
+            Ada002_Hits := Ada002_Hits + 1;
+         end if;
+      end loop;
+      Check (Ada002_Hits = 1,
+             "ADA002 still finds a real blanket ""when others"" handler "
+             & "even with 8 other when-branches preceding it -- well "
+             & "beyond the old fixed 6-line lookback window");
+   end;
+
    --  fusa:test REQ-079
    declare
       Proj_Root : constant String := "tmp_test_engine_project";
