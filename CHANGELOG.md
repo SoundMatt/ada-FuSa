@@ -5,6 +5,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+### Fixed (issue #69, part 5/6 -- sci hash/version field conformance)
+
+`sci.json` brought into conformance with section 2.7's hash-field convention and the section 9.3
+canonical `artifacts[]` shape:
+
+- **Renamed the top-level array from `"items"` to `"artifacts"`**, matching the spec's canonical
+  key.
+- **Renamed the per-entry `"sha256"` field to `"hash"`, prefixed with `"sha256:"`** -- per section
+  2.7, a field named for its algorithm (`sha256`) carries bare hex, but a field named `hash`
+  (as sci's is, canonically) MUST carry the `"<algo>:<value>"` form. (audit-pack's `manifest.json`
+  uses a genuinely algorithm-named `"sha256"` field and was already correct as-is -- not touched.)
+- **Added a `"version"` field per artifact**, from the project's own `.fusa.json` version.
+
+2 new/updated regression tests; 690/690 checks passing (was 688).
+
 ### Changed (issue #69, part 4/6 -- sas schema conformance)
 
 `sas.json` rewritten from its ad hoc `project`/`requirements`/`check`/`comp`/`dispositions`/
