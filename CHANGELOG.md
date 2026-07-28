@@ -5,6 +5,32 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+### Fixed (deep-audit PR4/11 -- qualify's self-test independence)
+
+Continuing the multi-agent audit fix series.
+
+- **FUSA00x known-answer case coupled to the qualified project's own state**: the case that
+  proves FUSA001-004 (missing LICENSE/README/`*.gpr`/`.github/workflows`) work ran those rules
+  against `--dir` -- the real project being qualified -- and reported PASS only when none of them
+  fired. That makes the "known answer" whatever markers the target project happens to have, not a
+  controlled fixture: a project missing any one of those four markers (completely normal, e.g.
+  right after `adafusa init`) would report qualify as FAILED even though FUSA00x is working
+  exactly as designed. This is exactly why `test_cli.adb`'s shared fixture had to be seeded with
+  a LICENSE, README, `*.gpr`, and `.github/workflows` at setup, purely to make the self-test
+  pass. Fixed by running FUSA001-004 against qualify's own scratch directory (already used for
+  the other rules' fixtures, guaranteed to hold none of the four markers) instead of `--dir` --
+  the self-test is now a real, project-independent known answer.
+- **No positive-detection coverage**: the same case only ever asserted "none of FUSA001-004
+  fired" as one combined bucket; it never proved each rule actually *fires* when its marker is
+  missing. Split into four individual `rule-FUSA00x-known-answer` cases (matching every other
+  rule's one-case-per-rule convention), each now asserting the rule does fire against the
+  marker-free scratch directory.
+- **Inconsistent `--format` error message**: `qualify`'s unsupported-format error was the only
+  one of ~20 commands missing the `(supported: ...)` suffix.
+
+3 new regression tests, including one against a project deliberately built with none of the four
+FUSA00x markers (proving qualify now passes regardless); 596/596 checks passing (was 594).
+
 ### Fixed (deep-audit PR3/11 -- gap-report/hara/tara schema conformance)
 
 Continuing the multi-agent audit fix series. Two of these are genuinely my own bugs from
