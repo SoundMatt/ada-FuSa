@@ -7,6 +7,8 @@ with Fusa.Source_Scan;
 with Fusa.Config;
 with Fusa.Rules_Style;
 pragma Unreferenced (Fusa.Rules_Style);
+with Fusa.Rules_Project;
+pragma Unreferenced (Fusa.Rules_Project);
 with Test_Engine_Rules;
 with Test_Framework; use Test_Framework;
 
@@ -191,6 +193,110 @@ begin
                 "ADA001 (unjustified pragma Suppress) still reports category "
                 & "'safety', unaffected by the ADA005/ADA006/ADA008 override");
       end;
+   end;
+
+   --  fusa:test REQ-078
+   --  Each case lives in its own file, far enough from any fusa:unsafe
+   --  comment in another case that the Suppress_Lookback/Lookahead windows
+   --  (5/2 lines) can't overlap between cases.
+   Fusa.Files.Write_File
+     (Root & "/src/sec1.adb",
+      "procedure Sec1 is" & ASCII.LF &
+      "   Password : constant String := ""hunter2"";" & ASCII.LF &
+      "begin" & ASCII.LF & "   null;" & ASCII.LF & "end Sec1;" & ASCII.LF);
+   Fusa.Files.Write_File
+     (Root & "/src/sec1_justified.adb",
+      "procedure Sec1_Justified is" & ASCII.LF &
+      "   -- fusa:unsafe test fixture only" & ASCII.LF &
+      "   Password : constant String := ""hunter2"";" & ASCII.LF &
+      "begin" & ASCII.LF & "   null;" & ASCII.LF & "end Sec1_Justified;" & ASCII.LF);
+   Fusa.Files.Write_File
+     (Root & "/src/sec1_dynamic.adb",
+      "procedure Sec1_Dynamic is" & ASCII.LF &
+      "   Auth_Token : constant String := Read_Env_Var;" & ASCII.LF &
+      "begin" & ASCII.LF & "   null;" & ASCII.LF & "end Sec1_Dynamic;" & ASCII.LF);
+   Fusa.Files.Write_File
+     (Root & "/src/weak.adb",
+      "with GNAT.MD5;" & ASCII.LF &
+      "with GNAT.OS_Lib;" & ASCII.LF &
+      "procedure Weak is" & ASCII.LF &
+      "begin" & ASCII.LF &
+      "   null;" & ASCII.LF &
+      "end Weak;" & ASCII.LF);
+
+   declare
+      Files    : String_List;
+      Findings : Finding_List;
+      Sec001_Hits_Total, Sec001_Hits_Justified, Sec001_Hits_Dynamic : Natural := 0;
+      Sec003_Hits : Natural := 0;
+   begin
+      Files.Append ("src/sec1.adb");
+      Files.Append ("src/sec1_justified.adb");
+      Files.Append ("src/sec1_dynamic.adb");
+      Files.Append ("src/weak.adb");
+      Findings := Fusa.Engine.Run_All (Root, Files);
+      for F of Findings loop
+         if To_String (F.Rule_Id) = "SEC001" then
+            if To_String (F.Loc.File) = "src/sec1.adb" then
+               Sec001_Hits_Total := Sec001_Hits_Total + 1;
+            elsif To_String (F.Loc.File) = "src/sec1_justified.adb" then
+               Sec001_Hits_Justified := Sec001_Hits_Justified + 1;
+            elsif To_String (F.Loc.File) = "src/sec1_dynamic.adb" then
+               Sec001_Hits_Dynamic := Sec001_Hits_Dynamic + 1;
+            end if;
+         elsif To_String (F.Rule_Id) = "SEC003" then
+            Sec003_Hits := Sec003_Hits + 1;
+         end if;
+      end loop;
+      Check (Sec001_Hits_Total = 1,
+             "SEC001 fires on an identifier ending in 'password' directly "
+             & "assigned a string literal");
+      Check (Sec001_Hits_Justified = 0,
+             "SEC001 is suppressed by a preceding -- fusa:unsafe comment");
+      Check (Sec001_Hits_Dynamic = 0,
+             "SEC001 does not fire when the identifier doesn't contain "
+             & "'password' at all, even for a similarly-themed name "
+             & "like 'Auth_Token'");
+      Check (Sec003_Hits = 1, "SEC003 fires on a GNAT.MD5 with-clause");
+   end;
+
+   --  fusa:test REQ-079
+   declare
+      Proj_Root : constant String := "tmp_test_engine_project";
+      Files     : String_List;
+      Fusa_Findings : Finding_List;
+      Fusa_Hits : Natural := 0;
+   begin
+      if Ada.Directories.Exists (Proj_Root) then
+         Ada.Directories.Delete_Tree (Proj_Root);
+      end if;
+      Ada.Directories.Create_Path (Proj_Root);
+      Fusa_Findings := Fusa.Engine.Run_All (Proj_Root, Files);
+      for F of Fusa_Findings loop
+         if To_String (F.Rule_Id) (1 .. 4) = "FUSA" then
+            Fusa_Hits := Fusa_Hits + 1;
+         end if;
+      end loop;
+      Check (Fusa_Hits = 4,
+             "all four FUSA00x rules fire when a project root has no .gpr, "
+             & "LICENSE, README, or .github/workflows");
+
+      Ada.Directories.Create_Path (Proj_Root & "/.github/workflows");
+      Fusa.Files.Write_File (Proj_Root & "/LICENSE", "MPL-2.0");
+      Fusa.Files.Write_File (Proj_Root & "/README.md", "# T");
+      Fusa.Files.Write_File (Proj_Root & "/t.gpr", "project T is end T;");
+
+      Fusa_Findings := Fusa.Engine.Run_All (Proj_Root, Files);
+      Fusa_Hits := 0;
+      for F of Fusa_Findings loop
+         if To_String (F.Rule_Id) (1 .. 4) = "FUSA" then
+            Fusa_Hits := Fusa_Hits + 1;
+         end if;
+      end loop;
+      Check (Fusa_Hits = 0,
+             "none of the FUSA00x rules fire once all four markers are present");
+
+      Ada.Directories.Delete_Tree (Proj_Root);
    end;
 
    Ada.Directories.Delete_Tree (Root);

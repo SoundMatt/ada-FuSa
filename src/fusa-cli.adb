@@ -892,6 +892,52 @@ package body Fusa.Cli is
       Check_Rule ("ADA008",
         "pragma Warnings (Off, ""x"");" & ASCII.LF & "procedure P is" & ASCII.LF &
         "begin" & ASCII.LF & "   null;" & ASCII.LF & "end P;" & ASCII.LF);
+      --  fusa:test REQ-078
+      Check_Rule ("SEC001",
+        "procedure P is" & ASCII.LF &
+        "   Password : constant String := ""hunter2"";" & ASCII.LF &
+        "begin" & ASCII.LF & "   null;" & ASCII.LF & "end P;" & ASCII.LF);
+      Check_Rule ("SEC002",
+        "procedure P is" & ASCII.LF &
+        "   Secret : constant String := ""x"";" & ASCII.LF &
+        "begin" & ASCII.LF & "   null;" & ASCII.LF & "end P;" & ASCII.LF);
+      Check_Rule ("SEC003",
+        "with GNAT.MD5;" & ASCII.LF & "procedure P is" & ASCII.LF &
+        "begin" & ASCII.LF & "   null;" & ASCII.LF & "end P;" & ASCII.LF);
+      Check_Rule ("SEC004",
+        "with GNAT.OS_Lib;" & ASCII.LF & "procedure P is" & ASCII.LF &
+        "begin" & ASCII.LF &
+        "   GNAT.OS_Lib.Spawn (""ls"", (1 .. 0 => <>));" & ASCII.LF &
+        "end P;" & ASCII.LF);
+
+      --  fusa:test REQ-079
+      --  FUSA001-004 check Project_Root, not the single-file fixture
+      --  Check_Rule writes -- they can't be "triggered" the same way the
+      --  content-scanning rules above are, since qualify runs against
+      --  ada-FuSa's own real project root (which already has all four
+      --  markers). Their absence-of-false-positive behaviour is already
+      --  exercised on every qualify run (Run_All below runs every
+      --  registered rule, including these, against Dir); this just makes
+      --  that an explicit, named, reported known-answer case rather than
+      --  a silent side effect.
+      declare
+         Empty_Files : String_List;
+         Findings    : constant Finding_List := Fusa.Engine.Run_All (Dir, Empty_Files);
+         Fusa_Hit    : Boolean := False;
+      begin
+         for F of Findings loop
+            if To_String (F.Rule_Id) = "FUSA001" or else To_String (F.Rule_Id) = "FUSA002"
+              or else To_String (F.Rule_Id) = "FUSA003" or else To_String (F.Rule_Id) = "FUSA004"
+            then
+               Fusa_Hit := True;
+            end if;
+         end loop;
+         Cases.Append
+           (Case_Result'
+              (Name   => To_Unbounded_String ("rule-FUSA00x-known-answer"),
+               Result => To_Unbounded_String
+                 (if not Fusa_Hit then "PASS" else "FAIL")));
+      end;
 
       if Ada.Directories.Exists (Tmp) then
          Ada.Directories.Delete_Tree (Tmp);

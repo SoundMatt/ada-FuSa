@@ -2,10 +2,12 @@ with Ada.Command_Line;
 with Fusa; use Fusa;
 with Fusa.Cli;
 
---  Forces elaboration of the starter rule pack so its rules register
+--  Forces elaboration of the starter rule packs so their rules register
 --  themselves with Fusa.Engine before any command runs.
 with Fusa.Rules_Style;
 pragma Unreferenced (Fusa.Rules_Style);
+with Fusa.Rules_Project;
+pragma Unreferenced (Fusa.Rules_Project);
 
 procedure Adafusa_Main is
    Args : String_List;

@@ -132,6 +132,22 @@ repro steps and rationale on each.
     `Load_Requirements` already perform transparently on every command.
   - 3 new requirements (REQ-075/REQ-076/REQ-077). The fourth MAY item in #38 (`init` `.github`/
     git-hook scaffolding) remains deferred per the issue's own low-priority guidance.
+- Starter rule pack expanded from 8 to 16 rules (#25):
+  - `SEC001`–`SEC004` (CWE-mapped security, new `Scan_Credential_Literal` matcher in
+    `fusa-rules_style.adb`): possible hardcoded password/secret/API-key (CWE-798, requires the
+    identifier, `:=`, and a string literal all on the same line — a plain needle match on `"PASSWORD
+    :="` almost never fires on real Ada, since a typed declaration reads `Password : constant String
+    := ...`, with the type name between the identifier and `:=`), `GNAT.MD5` reference (CWE-327),
+    `GNAT.OS_Lib.Spawn` reference (CWE-78). All four honour `-- fusa:unsafe`.
+  - `FUSA001`–`FUSA004` (new `Fusa.Rules_Project` package): project-structure presence checks
+    (`.gpr`, `LICENSE`, `README`, `.github/workflows`), mirroring java-FuSa's `FUSA` rule category —
+    a genuinely different rule shape (existence checks against the project root, not content
+    scanning) from every other rule so far.
+  - `qualify` gained known-answer cases for all 8 new rules (13 total, up from 8), keeping its
+    "tests every registered rule" claim honest.
+  - 2 new requirements (REQ-078/REQ-079). Ada-specific static-analysis/concurrency rules (the
+    scope items #25 called out as a genuine Ada-vs-sibling-language value-add opportunity, not just
+    parity) remain unimplemented — tracked in #25 for a future round.
 
 ## v0.1.0 — 2026-07-27
 

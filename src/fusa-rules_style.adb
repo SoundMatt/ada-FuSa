@@ -322,6 +322,84 @@ package body Fusa.Rules_Style is
       return Result;
    end Scan_Tabs;
 
+   --  SEC001/SEC002-specific: a plain needle match on e.g. "PASSWORD :="
+   --  almost never fires on real Ada, since a typed declaration reads
+   --  "Password : constant String := ..." -- the type name sits between
+   --  the identifier and ":=". This instead requires, on the same line:
+   --  Keyword, then later ":=", then later a '"' (the assigned value is a
+   --  string literal, not e.g. a function call reading a secret at
+   --  runtime, which is exactly the safe pattern this rule should not flag).
+   function Scan_Credential_Literal
+     (Project_Root : String;
+      Files        : String_List;
+      Rule_Id      : String;
+      Keyword      : String;
+      Message      : String;
+      Remediation  : String) return Finding_List
+   is
+      Result  : Finding_List;
+      Norm_Kw : constant String := Normalize_For_Match (Keyword);
+   begin
+      for Rel of Files loop
+         declare
+            Full : constant String := Fusa.Files.Join (Project_Root, Rel);
+         begin
+            if Fusa.Files.Exists (Full) then
+               declare
+                  Content : constant String := Fusa.Files.Read_File (Full);
+                  Lines   : constant String_List := Fusa.Files.Split_Lines (Content);
+               begin
+                  for I in 1 .. Natural (Lines.Length) loop
+                     declare
+                        Line       : constant String := Lines.Element (I);
+                        Norm_Line  : constant String := Normalize_For_Match (Line);
+                        Kw_Pos     : constant Natural :=
+                          Ada.Strings.Fixed.Index (Norm_Line, Norm_Kw);
+                        Assign_Pos : constant Natural :=
+                          (if Kw_Pos = 0 then 0
+                           else Ada.Strings.Fixed.Index
+                                  (Norm_Line (Kw_Pos .. Norm_Line'Last), ":="));
+                     begin
+                        if Kw_Pos > 0 and then Assign_Pos > 0
+                          and then not Is_Quoted (Norm_Line, Kw_Pos)
+                          and then Ada.Strings.Fixed.Index
+                                     (Norm_Line (Assign_Pos .. Norm_Line'Last), """") > 0
+                        then
+                           declare
+                              Suppressed : Boolean := False;
+                           begin
+                              for J in Natural'Max (1, I - Suppress_Lookback) ..
+                                Natural'Min (I + Suppress_Lookahead, Natural (Lines.Length))
+                              loop
+                                 if Ada.Strings.Fixed.Index
+                                      (Lines.Element (J), "fusa:unsafe") > 0
+                                 then
+                                    Suppressed := True;
+                                    exit;
+                                 end if;
+                              end loop;
+
+                              if not Suppressed then
+                                 Result.Append
+                                   (Make_Finding
+                                      (Rule_Id     => Rule_Id,
+                                       Severity    => Error,
+                                       Message     => Message,
+                                       Loc         => Make_Location (Rel, I),
+                                       Category    => Rule_Category (Rule_Id),
+                                       Remediation => Remediation));
+                              end if;
+                           end;
+                        end if;
+                     end;
+                  end loop;
+               end;
+            end if;
+         end;
+      end loop;
+      return Result;
+   end Scan_Credential_Literal;
+
    ----------------------------------------------------------------------
    --  ADA001 -- unjustified check-disabling Suppress pragma
    ----------------------------------------------------------------------
@@ -447,6 +525,95 @@ package body Fusa.Rules_Style is
           Require_No_Unsafe => True));
 
    ----------------------------------------------------------------------
+   --  SEC001 -- possible hardcoded password
+   ----------------------------------------------------------------------
+
+   type Sec001_Rule is new Rule_Interface with null record;
+
+   overriding function Id (R : Sec001_Rule) return String is ("SEC001");
+   overriding function Description (R : Sec001_Rule) return String is
+     ("identifier ending in ""password"" assigned a literal without -- fusa:unsafe");
+   overriding function Run
+     (R : Sec001_Rule; Project_Root : String; Files : String_List) return Finding_List
+   is (Scan_Credential_Literal
+         (Project_Root, Files, "SEC001", "PASSWORD",
+          "possible hardcoded credential (CWE-798)",
+          "load the credential from a secret store or environment variable at " &
+          "runtime instead, or justify with a trailing " &
+          """-- fusa:unsafe <reason>"" comment if this is test/fixture data"));
+
+   ----------------------------------------------------------------------
+   --  SEC002 -- possible hardcoded secret/API key
+   ----------------------------------------------------------------------
+
+   type Sec002_Rule is new Rule_Interface with null record;
+
+   overriding function Id (R : Sec002_Rule) return String is ("SEC002");
+   overriding function Description (R : Sec002_Rule) return String is
+     ("identifier ending in ""secret""/""api_key"" assigned a literal without " &
+      "-- fusa:unsafe");
+   overriding function Run
+     (R : Sec002_Rule; Project_Root : String; Files : String_List) return Finding_List
+   is
+      Result : Finding_List :=
+        Scan_Credential_Literal
+          (Project_Root, Files, "SEC002", "SECRET",
+           "possible hardcoded credential (CWE-798)",
+           "load the credential from a secret store or environment variable " &
+           "at runtime instead, or justify with a trailing " &
+           """-- fusa:unsafe <reason>"" comment if this is test/fixture data");
+   begin
+      for F of Scan_Credential_Literal
+        (Project_Root, Files, "SEC002", "API_KEY",
+         "possible hardcoded credential (CWE-798)",
+         "load the credential from a secret store or environment variable " &
+         "at runtime instead, or justify with a trailing " &
+         """-- fusa:unsafe <reason>"" comment if this is test/fixture data")
+      loop
+         Result.Append (F);
+      end loop;
+      return Result;
+   end Run;
+
+   ----------------------------------------------------------------------
+   --  SEC003 -- weak hash algorithm reference (MD5)
+   ----------------------------------------------------------------------
+
+   type Sec003_Rule is new Rule_Interface with null record;
+
+   overriding function Id (R : Sec003_Rule) return String is ("SEC003");
+   overriding function Description (R : Sec003_Rule) return String is
+     ("GNAT.MD5 referenced without -- fusa:unsafe");
+   overriding function Run
+     (R : Sec003_Rule; Project_Root : String; Files : String_List) return Finding_List
+   is (Scan_Substring
+         (Project_Root, Files, "SEC003", Warning, "GNAT.MD5",
+          "MD5 is a cryptographically broken hash (CWE-327)",
+          "use SHA-256 or stronger for anything security-relevant, or justify " &
+          "with a trailing ""-- fusa:unsafe <reason>"" comment if this is " &
+          "non-cryptographic use (e.g. a checksum)",
+          Require_No_Unsafe => True));
+
+   ----------------------------------------------------------------------
+   --  SEC004 -- external process spawn (command injection risk)
+   ----------------------------------------------------------------------
+
+   type Sec004_Rule is new Rule_Interface with null record;
+
+   overriding function Id (R : Sec004_Rule) return String is ("SEC004");
+   overriding function Description (R : Sec004_Rule) return String is
+     ("GNAT.OS_Lib.Spawn referenced without -- fusa:unsafe");
+   overriding function Run
+     (R : Sec004_Rule; Project_Root : String; Files : String_List) return Finding_List
+   is (Scan_Substring
+         (Project_Root, Files, "SEC004", Warning, "OS_LIB.SPAWN",
+          "spawning an external process risks command injection if any " &
+          "argument is built from untrusted input (CWE-78)",
+          "validate/allowlist all arguments derived from external input, or " &
+          "justify with a trailing ""-- fusa:unsafe <reason>"" comment",
+          Require_No_Unsafe => True));
+
+   ----------------------------------------------------------------------
    --  Registration
    ----------------------------------------------------------------------
 
@@ -458,6 +625,10 @@ package body Fusa.Rules_Style is
    R006 : aliased Ada006_Rule;
    R007 : aliased Ada007_Rule;
    R008 : aliased Ada008_Rule;
+   S001 : aliased Sec001_Rule;
+   S002 : aliased Sec002_Rule;
+   S003 : aliased Sec003_Rule;
+   S004 : aliased Sec004_Rule;
 
 begin
    Register (R001'Access);
@@ -468,4 +639,8 @@ begin
    Register (R006'Access);
    Register (R007'Access);
    Register (R008'Access);
+   Register (S001'Access);
+   Register (S002'Access);
+   Register (S003'Access);
+   Register (S004'Access);
 end Fusa.Rules_Style;
