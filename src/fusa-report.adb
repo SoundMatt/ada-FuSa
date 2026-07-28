@@ -234,7 +234,11 @@ package body Fusa.Report is
    is
    begin
       for F of Findings loop
-         if F.Disposition = Open then
+         --  section 4.1 (MUST): gates on absent/"open"/"rejected" -- only
+         --  "accepted"/"deferred" are real waivers that suppress the gate.
+         --  "rejected" means a proposed waiver was denied, not that the
+         --  finding itself was dismissed.
+         if F.Disposition = Open or else F.Disposition = Rejected then
             if F.Severity = Error then
                return True;
             end if;

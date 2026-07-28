@@ -80,4 +80,49 @@ package Fusa.Config is
    procedure Save_Requirements
      (Project_Root : String; Reqs : Requirement_List);
 
+   ------------------------------------------------------------------
+   --  .fusa-dispositions.json (spec section 1.2.3 / section 4.1)
+   ------------------------------------------------------------------
+
+   Dispositions_File : constant String := ".fusa-dispositions.json";
+
+   type Disposition_Entry is record
+      Fingerprint : Unbounded_String; --  SHOULD, primary match key
+      Rule_Id     : Unbounded_String; --  MAY, fallback match key
+      File        : Unbounded_String; --  MAY, fallback match key (project-relative)
+      Line        : Natural := 0;     --  MAY, fallback match key (0 = unset)
+      Status      : Disposition_Kind := Open; --  MUST: accepted | deferred | rejected
+      Note        : Unbounded_String; --  SHOULD
+      By          : Unbounded_String; --  SHOULD
+      At_Time     : Unbounded_String; --  SHOULD, RFC 3339 ("at" is an Ada reserved word)
+   end record;
+
+   package Disposition_Vectors is new
+     Ada.Containers.Indefinite_Vectors (Positive, Disposition_Entry);
+   subtype Disposition_List is Disposition_Vectors.Vector;
+
+   --  True if a .fusa-dispositions.json file exists (no legacy fallback --
+   --  this file was not part of the original v0.1.0 schema).
+   --  fusa:req REQ-070
+   function Dispositions_Exist (Project_Root : String) return Boolean;
+
+   --  Loads .fusa-dispositions.json. Returns an empty list if absent. An
+   --  entry with a missing/unrecognised "status" is skipped (Status stays
+   --  Open, which Apply_Dispositions never applies to a finding).
+   --  fusa:req REQ-071
+   function Load_Dispositions (Project_Root : String) return Disposition_List;
+
+   --  section 4.1 matching: fingerprint (MUST, when both sides have one) ->
+   --  ruleId+file+line (MAY fallback) -> ruleId-only rule-level (MAY
+   --  fallback), in that precedence order. Sets each matched Finding's
+   --  Disposition field in place. An accepted/deferred entry matching no
+   --  finding in Findings is an orphaned waiver (SHOULD warn, category
+   --  config); a rejected orphan is silent (the denied finding was
+   --  resolved, which is success).
+   --  fusa:req REQ-072
+   procedure Apply_Dispositions
+     (Findings        : in out Finding_List;
+      Disps           : Disposition_List;
+      Orphan_Findings : in out Finding_List);
+
 end Fusa.Config;

@@ -287,4 +287,154 @@ package body Fusa.Config is
          Fusa.Json.Writer.To_String (W) & ASCII.LF);
    end Save_Requirements;
 
+   ----------------------------------------------------------------------
+   --  .fusa-dispositions.json
+   ----------------------------------------------------------------------
+
+   function Dispositions_Exist (Project_Root : String) return Boolean is
+     (Fusa.Files.Exists (Fusa.Files.Join (Project_Root, Dispositions_File)));
+
+   function Parse_Status (S : String) return Disposition_Kind is
+     (if S = "accepted" then Accepted
+      elsif S = "deferred" then Deferred
+      elsif S = "rejected" then Rejected
+      else Open); --  missing/unrecognised: never applied (see Apply_Dispositions)
+
+   function Load_Dispositions (Project_Root : String) return Disposition_List is
+      Result : Disposition_List;
+      Path   : constant String := Fusa.Files.Join (Project_Root, Dispositions_File);
+   begin
+      if not Fusa.Files.Exists (Path) then
+         return Result;
+      end if;
+
+      declare
+         Content : constant String := Fusa.Files.Read_File (Path);
+         Root    : Fusa.Json.Value_Access;
+      begin
+         begin
+            Root := Fusa.Json.Parse (Content);
+         exception
+            when Fusa.Json.Json_Error =>
+               raise Invalid_Config_Error with "parse error in " & Path;
+         end;
+
+         declare
+            Items : constant Fusa.Json.Value_Access :=
+              Fusa.Json.Get_Array (Root, "dispositions");
+         begin
+            for I in 1 .. Fusa.Json.Array_Length (Items) loop
+               declare
+                  Item : constant Fusa.Json.Value_Access :=
+                    Fusa.Json.Array_Item (Items, I);
+                  Line_Val : constant Fusa.Json.Value_Access :=
+                    Fusa.Json.Get_Member (Item, "line");
+                  E : Disposition_Entry;
+               begin
+                  E.Fingerprint := To_Unbounded_String (Fusa.Json.Get_String (Item, "fingerprint"));
+                  E.Rule_Id     := To_Unbounded_String (Fusa.Json.Get_String (Item, "ruleId"));
+                  E.File        := To_Unbounded_String (Fusa.Json.Get_String (Item, "file"));
+                  if Line_Val /= null and then Line_Val.Kind = Fusa.Json.Json_Number
+                    and then Line_Val.Num_Val >= 0.0
+                  then
+                     E.Line := Natural (Line_Val.Num_Val);
+                  end if;
+                  E.Status  := Parse_Status (Fusa.Json.Get_String (Item, "status"));
+                  E.Note    := To_Unbounded_String (Fusa.Json.Get_String (Item, "note"));
+                  E.By      := To_Unbounded_String (Fusa.Json.Get_String (Item, "by"));
+                  E.At_Time := To_Unbounded_String (Fusa.Json.Get_String (Item, "at"));
+                  Result.Append (E);
+               end;
+            end loop;
+         end;
+      end;
+      return Result;
+   end Load_Dispositions;
+
+   procedure Apply_Dispositions
+     (Findings        : in out Finding_List;
+      Disps           : Disposition_List;
+      Orphan_Findings : in out Finding_List)
+   is
+      Used : array (1 .. Integer'Max (Natural (Disps.Length), 1)) of Boolean :=
+        (others => False);
+
+      function Matches (E : Disposition_Entry; F : Finding) return Boolean is
+      begin
+         if E.Status = Open then
+            return False; --  missing/unrecognised status: never matches
+         end if;
+         if Length (E.Fingerprint) > 0 and then Length (F.Fingerprint) > 0 then
+            return E.Fingerprint = F.Fingerprint;
+         end if;
+         if Length (E.Rule_Id) = 0 or else E.Rule_Id /= F.Rule_Id then
+            return False;
+         end if;
+         if Length (E.File) > 0 then
+            return E.Line = 0
+              or else (E.File = F.Loc.File and then E.Line = F.Loc.Line);
+         end if;
+         --  Rule-level fallback: ruleId only, no file/line -- matches
+         --  every finding for that rule project-wide.
+         return True;
+      end Matches;
+   begin
+      for I in 1 .. Natural (Findings.Length) loop
+         declare
+            F : Finding := Findings.Element (I);
+         begin
+            --  Fingerprint matches take precedence over the fallback keys
+            --  (section 4.1 MUST), so scan for one before falling back.
+            for Pass in 1 .. 2 loop
+               for J in 1 .. Natural (Disps.Length) loop
+                  declare
+                     E : constant Disposition_Entry := Disps.Element (J);
+                     Is_Fp_Match : constant Boolean :=
+                       Length (E.Fingerprint) > 0 and then Length (F.Fingerprint) > 0
+                       and then E.Fingerprint = F.Fingerprint;
+                  begin
+                     if (Pass = 1 and then Is_Fp_Match)
+                       or else (Pass = 2 and then not Is_Fp_Match and then Matches (E, F))
+                     then
+                        F.Disposition := E.Status;
+                        Used (J) := True;
+                        Findings.Replace_Element (I, F);
+                        goto Matched;
+                     end if;
+                  end;
+               end loop;
+            end loop;
+            <<Matched>>
+            null;
+         end;
+      end loop;
+
+      for J in 1 .. Natural (Disps.Length) loop
+         declare
+            E : constant Disposition_Entry := Disps.Element (J);
+         begin
+            if not Used (J) and then (E.Status = Accepted or else E.Status = Deferred) then
+               Orphan_Findings.Append
+                 (Make_Finding
+                    (Rule_Id     => "DISP001",
+                     Severity    => Warning,
+                     Message     =>
+                       "orphaned " & Image (E.Status) & " disposition matches no "
+                       & "current finding: " &
+                       (if Length (E.Fingerprint) > 0
+                        then To_String (E.Fingerprint)
+                        else To_String (E.Rule_Id)),
+                     Loc         => Make_Location
+                       (File => (if Length (E.File) > 0 then To_String (E.File)
+                                 else Dispositions_File),
+                        Line => E.Line),
+                     Category    => Config_Category,
+                     Remediation =>
+                       "remove the stale disposition entry, or update its "
+                       & "match key if the finding moved"));
+            end if;
+         end;
+      end loop;
+   end Apply_Dispositions;
+
 end Fusa.Config;

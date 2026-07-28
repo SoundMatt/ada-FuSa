@@ -104,6 +104,16 @@ repro steps and rationale on each.
   requirements (REQ-024–REQ-069) added, one `fusa:req` tag placed directly above every one of the
   71 public function/procedure declarations across `src/*.ads`. `trace --func-coverage 100` is now
   a CI gate alongside `--req-coverage 100`.
+- Finding disposition/waiver support (spec §4.1, SHOULD): `check`/`report` now read
+  `.fusa-dispositions.json`, if present, and apply each entry's `status` (`accepted`/`deferred`/
+  `rejected`) to matching findings — `fingerprint` primary match key, `ruleId`+`file`+`line` or
+  rule-level `ruleId`-only fallback. An `accepted`/`deferred` entry matching no finding surfaces a
+  `DISP001` WARNING (category `config`); an orphaned `rejected` entry is silent. See README
+  "Dispositions / waivers" (#30).
+- **[Fixed as part of #30]** `Has_Gate_Failure` previously excluded *any* non-`Open` disposition
+  from gating, which meant a `rejected` finding (a denied waiver — still fully open per spec §4.1)
+  would have incorrectly stopped gating too, once dispositions became reachable. Only
+  `accepted`/`deferred` now suppress the gate.
 
 ## v0.1.0 — 2026-07-27
 
