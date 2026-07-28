@@ -8,7 +8,8 @@ package Fusa.Files is
    --  fusa:req REQ-057
    function Is_Directory (Path : String) return Boolean;
 
-   Read_Error : exception;
+   Read_Error  : exception;
+   Write_Error : exception;
 
    --  Reads the entire file as a raw byte string (see Fusa.Sha256 for the
    --  "Character = one byte" convention used throughout ada-FuSa).
@@ -19,6 +20,21 @@ package Fusa.Files is
    --  are not created.
    --  fusa:req REQ-059
    procedure Write_File (Path : String; Content : String);
+
+   --  Same effect as Write_File, but closes the TOCTOU window between a
+   --  caller's earlier Read_File(Path) and this write: Content is written
+   --  to a fresh temporary file in Path's own directory, then atomically
+   --  renamed onto Path (POSIX rename() replaces whatever is at the
+   --  destination -- including a symlink entry itself, not whatever it
+   --  points to -- so even if Path was swapped for a symlink after the
+   --  read, this cannot be tricked into writing through it to an
+   --  unintended location). For commands like `fix --apply` that
+   --  overwrite a file based on content read moments earlier, unlike
+   --  Write_File's plain create-or-truncate, which writes directly
+   --  through whatever Path currently resolves to at the moment of the
+   --  call.
+   --  fusa:req REQ-118
+   procedure Write_File_Atomic (Path : String; Content : String);
 
    --  Joins a directory and a relative path with exactly one "/".
    --  fusa:req REQ-060

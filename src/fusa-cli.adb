@@ -5161,7 +5161,14 @@ package body Fusa.Cli is
                         if Fixed /= Original then
                            Changed.Append (Rel);
                            if Apply then
-                              Fusa.Files.Write_File (Full, Fixed);
+                              --  Write_File_Atomic (not the plain
+                              --  Write_File every other command uses)
+                              --  closes the TOCTOU window between the
+                              --  Read_File above and this write -- fix
+                              --  is the one command that overwrites an
+                              --  existing project source file based on
+                              --  content read moments earlier.
+                              Fusa.Files.Write_File_Atomic (Full, Fixed);
                            end if;
                         end if;
                      end;

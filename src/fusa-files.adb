@@ -1,5 +1,7 @@
 with Ada.Directories; use Ada.Directories;
 with Ada.Streams.Stream_IO;
+with Interfaces.C; use Interfaces.C;
+with Interfaces.C.Strings;
 
 package body Fusa.Files is
 
@@ -53,6 +55,36 @@ package body Fusa.Files is
       Write (File, Buf);
       Close (File);
    end Write_File;
+
+   procedure Write_File_Atomic (Path : String; Content : String) is
+      --  Ada.Directories.Rename deliberately does NOT overwrite an
+      --  existing destination (RM A.16.1 -- confirmed empirically:
+      --  it raises Use_Error rather than replacing it), so it cannot be
+      --  used for this. POSIX rename(2), imported directly here exactly
+      --  like Make_Executable's chmod(2) import, DOES atomically replace
+      --  an existing destination (including a symlink entry itself, not
+      --  whatever it points to), which is the actual property this
+      --  procedure exists to provide.
+      function C_Rename
+        (Old_Path, New_Path : Interfaces.C.Strings.chars_ptr) return Interfaces.C.int;
+      pragma Import (C, C_Rename, "rename");
+
+      Temp   : constant String := Path & ".fusa-fix-tmp";
+      Result : Interfaces.C.int;
+   begin
+      Write_File (Temp, Content);
+      declare
+         Old_C : Interfaces.C.Strings.chars_ptr := Interfaces.C.Strings.New_String (Temp);
+         New_C : Interfaces.C.Strings.chars_ptr := Interfaces.C.Strings.New_String (Path);
+      begin
+         Result := C_Rename (Old_C, New_C);
+         Interfaces.C.Strings.Free (Old_C);
+         Interfaces.C.Strings.Free (New_C);
+      end;
+      if Result /= 0 then
+         raise Write_Error with "cannot atomically replace file: " & Path;
+      end if;
+   end Write_File_Atomic;
 
    --  Removes "." path segments (a bare "." segment, e.g. from "./src" or
    --  "src/./sub"), RESOLVES ".." segments by popping the preceding real
