@@ -350,6 +350,165 @@ begin
              "vuln surfaces an informational VULN001 finding once alire.toml exists");
    end;
 
+   --  fusa:test REQ-099
+   declare
+      Verify_Root : constant String := "tmp_test_cli_verify";
+   begin
+      if Ada.Directories.Exists (Verify_Root) then
+         Ada.Directories.Delete_Tree (Verify_Root);
+      end if;
+      Ada.Directories.Create_Path (Verify_Root);
+      Check (Fusa.Cli.Run (Args ("verify", "--dir", Verify_Root)) = Exit_Ok,
+             "verify exits 0 even when no evidence artifacts exist at all");
+      declare
+         Exit_Code : Integer;
+         Out_Empty : constant String :=
+           Run_Capturing_Stdout (Args ("verify", "--dir", Verify_Root), Exit_Code);
+      begin
+         Check (Ada.Strings.Fixed.Index (Out_Empty, "0/") > 0,
+                "verify reports 0 present artifacts against an empty project");
+      end;
+      Fusa.Files.Write_File (Verify_Root & "/.fusa.json", "{""project"":{""name"":""t""}}");
+      declare
+         Exit_Code : Integer;
+         Out_Json  : constant String :=
+           Run_Capturing_Stdout
+             (Args ("verify", "--dir", Verify_Root, "--format", "json"), Exit_Code);
+      begin
+         Check (Exit_Code = Exit_Ok, "verify --format json still exits 0");
+         Check (Ada.Strings.Fixed.Index (Out_Json, """present"": true") > 0
+                and then Ada.Strings.Fixed.Index (Out_Json, """sha256"":") > 0,
+                "verify --format json reports present=true and a sha256 digest for "
+                & "an artifact that now exists");
+      end;
+      Ada.Directories.Delete_Tree (Verify_Root);
+   end;
+
+   --  fusa:test REQ-101
+   declare
+      Badge_Root : constant String := "tmp_test_cli_badge";
+   begin
+      if Ada.Directories.Exists (Badge_Root) then
+         Ada.Directories.Delete_Tree (Badge_Root);
+      end if;
+      Ada.Directories.Create_Path (Badge_Root & "/src");
+      Ada.Directories.Create_Path (Badge_Root & "/.github/workflows");
+      Fusa.Files.Write_File
+        (Badge_Root & "/.fusa.json", "{""project"":{""name"":""badgeproj""},""standard"":""generic""}");
+      Fusa.Files.Write_File (Badge_Root & "/.fusa-reqs.json", "{""requirements"":[]}");
+      Fusa.Files.Write_File (Badge_Root & "/LICENSE", "MPL-2.0");
+      Fusa.Files.Write_File (Badge_Root & "/README.md", "# Test fixture");
+      Fusa.Files.Write_File (Badge_Root & "/t.gpr", "project T is end T;");
+      Fusa.Files.Write_File (Badge_Root & "/.github/workflows/ci.yml", "name: CI");
+      declare
+         Exit_Code : Integer;
+         Out_Clean : constant String :=
+           Run_Capturing_Stdout (Args ("badge", "--dir", Badge_Root), Exit_Code);
+      begin
+         Check (Exit_Code = Exit_Ok, "badge exits 0 on a clean project");
+         Check (Ada.Strings.Fixed.Index (Out_Clean, "<svg") = 1, "badge emits an SVG document");
+         Check (Ada.Strings.Fixed.Index (Out_Clean, ">passing<") > 0,
+                "badge shows 'passing' when there are no findings");
+      end;
+      Fusa.Files.Write_File
+        (Badge_Root & "/src/bad.adb",
+         "procedure Bad is begin pragma Suppress (All_Checks); end Bad;" & ASCII.LF);
+      declare
+         Exit_Code : Integer;
+         Out_Err   : constant String :=
+           Run_Capturing_Stdout (Args ("badge", "--dir", Badge_Root), Exit_Code);
+      begin
+         Check (Exit_Code = Exit_Ok, "badge itself still exits 0 even when the underlying "
+                & "project has ERROR findings -- it always succeeds at generating the artifact");
+         Check (Ada.Strings.Fixed.Index (Out_Err, ">1 errors<") > 0,
+                "badge shows the error count once an ADA001 finding is present");
+      end;
+      declare
+         Exit_Code : Integer;
+         Out_Custom : constant String :=
+           Run_Capturing_Stdout
+             (Args ("badge", "--dir", Badge_Root, "--message", "v1.0.0", "--color", "#007ec6"),
+              Exit_Code);
+      begin
+         Check (Ada.Strings.Fixed.Index (Out_Custom, ">v1.0.0<") > 0
+                and then Ada.Strings.Fixed.Index (Out_Custom, "#007ec6") > 0,
+                "badge --message/--color renders a custom badge without running check at all "
+                & "(no error count leaks through despite the project still having one)");
+      end;
+      Ada.Directories.Delete_Tree (Badge_Root);
+   end;
+
+   --  fusa:test REQ-100
+   declare
+      Diff_Root : constant String := "tmp_test_cli_diff";
+   begin
+      if Ada.Directories.Exists (Diff_Root) then
+         Ada.Directories.Delete_Tree (Diff_Root);
+      end if;
+      Ada.Directories.Create_Path (Diff_Root & "/src");
+      Fusa.Files.Write_File
+        (Diff_Root & "/.fusa.json", "{""project"":{""name"":""diffproj""},""standard"":""generic""}");
+      Fusa.Files.Write_File (Diff_Root & "/.fusa-reqs.json", "{""requirements"":[]}");
+
+      Check (Fusa.Cli.Run (Args ("diff", Diff_Root & "/a.json")) = Exit_Usage,
+             "diff with only one report path exits 2 (usage)");
+
+      declare
+         Exit_Code_A : Integer;
+      begin
+         Fusa.Files.Write_File
+           (Diff_Root & "/a.json",
+            Run_Capturing_Stdout
+              (Args ("check", "--dir", Diff_Root, "--format", "json"), Exit_Code_A));
+      end;
+      Fusa.Files.Write_File
+        (Diff_Root & "/src/bad.adb",
+         "procedure Bad is begin pragma Suppress (All_Checks); end Bad;" & ASCII.LF);
+      declare
+         Exit_Code_B : Integer;
+      begin
+         Fusa.Files.Write_File
+           (Diff_Root & "/b.json",
+            Run_Capturing_Stdout
+              (Args ("check", "--dir", Diff_Root, "--format", "json"), Exit_Code_B));
+      end;
+
+      Check (Fusa.Cli.Run
+               (Args ("diff", Diff_Root & "/a.json", Diff_Root & "/a.json")) = Exit_Ok,
+             "diffing a report against itself exits 0 (nothing added)");
+      Check (Fusa.Cli.Run
+               (Args ("diff", Diff_Root & "/a.json", Diff_Root & "/b.json")) = Exit_Gate_Fail,
+             "diff gate-fails once the second report has a new ERROR finding the first "
+             & "did not have");
+      declare
+         Exit_Code : Integer;
+         Out_Text  : constant String :=
+           Run_Capturing_Stdout
+             (Args ("diff", Diff_Root & "/a.json", Diff_Root & "/b.json"), Exit_Code);
+      begin
+         Check (Ada.Strings.Fixed.Index (Out_Text, "+ [ERROR] ADA001") > 0,
+                "diff's text output marks the newly-added ADA001 finding with a leading '+'");
+      end;
+      declare
+         Exit_Code : Integer;
+         Out_Json  : constant String :=
+           Run_Capturing_Stdout
+             (Args ("diff", Diff_Root & "/a.json", Diff_Root & "/b.json", "--format", "json"),
+              Exit_Code);
+      begin
+         Check (Ada.Strings.Fixed.Index (Out_Json, """added"": 1") > 0,
+                "diff --format json reports exactly one added finding");
+      end;
+      Check (Fusa.Cli.Run
+               (Args ("diff", Diff_Root & "/b.json", Diff_Root & "/a.json")) = Exit_Ok,
+             "diffing in the other direction (an ERROR finding REMOVED, not added) does not "
+             & "gate -- fixing something is never a failure");
+      Check (Fusa.Cli.Run
+               (Args ("diff", Diff_Root & "/a.json", Diff_Root & "/nope.json")) = Exit_Runtime,
+             "diff against a nonexistent report file exits 3 (runtime error)");
+      Ada.Directories.Delete_Tree (Diff_Root);
+   end;
+
    --  fusa:test REQ-090
    Check (Fusa.Cli.Run (Args ("req")) = Exit_Usage, "req with no subcommand exits 2");
    Check (Fusa.Cli.Run (Args ("req", "bogus")) = Exit_Usage,

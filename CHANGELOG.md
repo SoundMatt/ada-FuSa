@@ -213,6 +213,20 @@ repro steps and rationale on each.
     standard ids, per the spec's requirement that capabilities be accurate.
   - `sas`/`sci` (a differently-shaped follow-up per the issue's own phasing) deferred.
   - 2 new requirements (REQ-096/REQ-097).
+- **Evidence & verification utilities** (#26, partial — `verify`/`diff`/`badge` per the issue's own
+  recommended starter scope; `safety-case`/`fmea`/`boundary`/`coupling`/`impact` deferred to
+  follow-ups since they need real design work, e.g. what Ada-specific evidence a GSN safety-case
+  argument node should point to):
+  - `verify`: an evidence manifest listing every known artifact filename's presence, SHA-256 digest,
+    and byte size. Always exits 0 — it documents current evidence state rather than gating on it.
+  - `diff <a> <b>`: compares two report documents by finding fingerprint (§4.2), reporting
+    added/removed/unchanged. Gates on any added ERROR finding (or, with `--strict`, any addition at
+    all); a removed finding never gates.
+  - `badge`: a self-contained SVG status badge (new `Fusa.Badge` module, hand-rolled shields.io-flat
+    style — no real font metrics without an external dependency, so text width is a per-character
+    estimate) driven by the same rule+disposition pipeline as `check`, or an explicit
+    `--message`/`--color` override that skips analysis entirely. Always exits 0.
+  - 4 new requirements (REQ-098–REQ-101).
 
 ## v0.1.0 — 2026-07-27
 
