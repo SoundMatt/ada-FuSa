@@ -642,4 +642,190 @@ package body Fusa.Config is
       end if;
    end Scaffold_Tara;
 
+   ----------------------------------------------------------------------
+   --  .fusa-dispositions.json (write side, for `disposition add`)
+   ----------------------------------------------------------------------
+
+   procedure Save_Dispositions (Project_Root : String; Disps : Disposition_List) is
+      W : Fusa.Json.Writer.Instance;
+   begin
+      W.Object_Start;
+      W.Key ("dispositions");
+      W.Array_Start;
+      for E of Disps loop
+         W.Object_Start;
+         W.Field_If_Non_Blank ("fingerprint", To_String (E.Fingerprint));
+         W.Field_If_Non_Blank ("ruleId", To_String (E.Rule_Id));
+         W.Field_If_Non_Blank ("file", To_String (E.File));
+         if E.Line > 0 then
+            W.Field ("line", E.Line);
+         end if;
+         W.Field ("status", Image (E.Status));
+         W.Field_If_Non_Blank ("note", To_String (E.Note));
+         W.Field_If_Non_Blank ("by", To_String (E.By));
+         W.Field_If_Non_Blank ("at", To_String (E.At_Time));
+         W.Object_End;
+      end loop;
+      W.Array_End;
+      W.Object_End;
+      Fusa.Files.Write_File
+        (Fusa.Files.Join (Project_Root, Dispositions_File),
+         Fusa.Json.Writer.To_String (W) & ASCII.LF);
+   end Save_Dispositions;
+
+   ----------------------------------------------------------------------
+   --  .fusa-pr.json
+   ----------------------------------------------------------------------
+
+   function Pr_Exists (Project_Root : String) return Boolean is
+     (Fusa.Files.Exists (Fusa.Files.Join (Project_Root, Pr_File)));
+
+   function Load_Pr (Project_Root : String) return Problem_Report_List is
+      Result : Problem_Report_List;
+      Path   : constant String := Fusa.Files.Join (Project_Root, Pr_File);
+   begin
+      if not Fusa.Files.Exists (Path) then
+         return Result;
+      end if;
+
+      declare
+         Content : constant String := Fusa.Files.Read_File (Path);
+         Root    : Fusa.Json.Value_Access;
+      begin
+         begin
+            Root := Fusa.Json.Parse (Content);
+         exception
+            when Fusa.Json.Json_Error =>
+               raise Invalid_Config_Error with "parse error in " & Path;
+         end;
+
+         declare
+            Items : constant Fusa.Json.Value_Access :=
+              Fusa.Json.Get_Array (Root, "reports");
+         begin
+            for I in 1 .. Fusa.Json.Array_Length (Items) loop
+               declare
+                  Item : constant Fusa.Json.Value_Access := Fusa.Json.Array_Item (Items, I);
+                  P    : Problem_Report;
+               begin
+                  P.Id         := To_Unbounded_String (Fusa.Json.Get_String (Item, "id"));
+                  P.Title      := To_Unbounded_String (Fusa.Json.Get_String (Item, "title"));
+                  P.Severity   := To_Unbounded_String (Fusa.Json.Get_String (Item, "severity"));
+                  P.Status     :=
+                    To_Unbounded_String (Fusa.Json.Get_String (Item, "status", "open"));
+                  P.Resolution := To_Unbounded_String (Fusa.Json.Get_String (Item, "resolution"));
+                  P.Opened_At  := To_Unbounded_String (Fusa.Json.Get_String (Item, "openedAt"));
+                  P.Closed_At  := To_Unbounded_String (Fusa.Json.Get_String (Item, "closedAt"));
+                  if Length (P.Id) > 0 then
+                     Result.Append (P);
+                  end if;
+               end;
+            end loop;
+         end;
+      end;
+      return Result;
+   end Load_Pr;
+
+   procedure Save_Pr (Project_Root : String; Reports : Problem_Report_List) is
+      W : Fusa.Json.Writer.Instance;
+   begin
+      W.Object_Start;
+      W.Key ("reports");
+      W.Array_Start;
+      for P of Reports loop
+         W.Object_Start;
+         W.Field ("id", To_String (P.Id));
+         W.Field ("title", To_String (P.Title));
+         W.Field_If_Non_Blank ("severity", To_String (P.Severity));
+         W.Field ("status", To_String (P.Status));
+         W.Field_If_Non_Blank ("resolution", To_String (P.Resolution));
+         W.Field_If_Non_Blank ("openedAt", To_String (P.Opened_At));
+         W.Field_If_Non_Blank ("closedAt", To_String (P.Closed_At));
+         W.Object_End;
+      end loop;
+      W.Array_End;
+      W.Object_End;
+      Fusa.Files.Write_File
+        (Fusa.Files.Join (Project_Root, Pr_File), Fusa.Json.Writer.To_String (W) & ASCII.LF);
+   end Save_Pr;
+
+   ----------------------------------------------------------------------
+   --  .fusa-metrics.json
+   ----------------------------------------------------------------------
+
+   function Get_Natural
+     (V : Fusa.Json.Value_Access; Key : String; Default : Natural := 0) return Natural
+   is
+      M : constant Fusa.Json.Value_Access := Fusa.Json.Get_Member (V, Key);
+   begin
+      if M = null or else M.Kind /= Fusa.Json.Json_Number or else M.Num_Val < 0.0 then
+         return Default;
+      end if;
+      return Natural (M.Num_Val);
+   end Get_Natural;
+
+   function Load_Metrics (Project_Root : String) return Metric_Snapshot_List is
+      Result : Metric_Snapshot_List;
+      Path   : constant String := Fusa.Files.Join (Project_Root, Metrics_File);
+   begin
+      if not Fusa.Files.Exists (Path) then
+         return Result;
+      end if;
+
+      declare
+         Content : constant String := Fusa.Files.Read_File (Path);
+         Root    : Fusa.Json.Value_Access;
+      begin
+         begin
+            Root := Fusa.Json.Parse (Content);
+         exception
+            when Fusa.Json.Json_Error =>
+               raise Invalid_Config_Error with "parse error in " & Path;
+         end;
+
+         declare
+            Items : constant Fusa.Json.Value_Access :=
+              Fusa.Json.Get_Array (Root, "snapshots");
+         begin
+            for I in 1 .. Fusa.Json.Array_Length (Items) loop
+               declare
+                  Item : constant Fusa.Json.Value_Access := Fusa.Json.Array_Item (Items, I);
+                  S    : Metric_Snapshot;
+               begin
+                  S.At_Time         := To_Unbounded_String (Fusa.Json.Get_String (Item, "at"));
+                  S.Total_Reqs      := Get_Natural (Item, "totalRequirements");
+                  S.Check_Errors    := Get_Natural (Item, "checkErrors");
+                  S.Check_Warnings  := Get_Natural (Item, "checkWarnings");
+                  S.Check_Infos     := Get_Natural (Item, "checkInfos");
+                  S.Comp_Violations := Get_Natural (Item, "compViolations");
+                  Result.Append (S);
+               end;
+            end loop;
+         end;
+      end;
+      return Result;
+   end Load_Metrics;
+
+   procedure Save_Metrics (Project_Root : String; Snapshots : Metric_Snapshot_List) is
+      W : Fusa.Json.Writer.Instance;
+   begin
+      W.Object_Start;
+      W.Key ("snapshots");
+      W.Array_Start;
+      for S of Snapshots loop
+         W.Object_Start;
+         W.Field ("at", To_String (S.At_Time));
+         W.Field ("totalRequirements", S.Total_Reqs);
+         W.Field ("checkErrors", S.Check_Errors);
+         W.Field ("checkWarnings", S.Check_Warnings);
+         W.Field ("checkInfos", S.Check_Infos);
+         W.Field ("compViolations", S.Comp_Violations);
+         W.Object_End;
+      end loop;
+      W.Array_End;
+      W.Object_End;
+      Fusa.Files.Write_File
+        (Fusa.Files.Join (Project_Root, Metrics_File), Fusa.Json.Writer.To_String (W) & ASCII.LF);
+   end Save_Metrics;
+
 end Fusa.Config;

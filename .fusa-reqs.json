@@ -515,6 +515,60 @@
       "title": "vuln command",
       "text": "vuln emits a section 4 finding-list (per the spec section 13 canonical direction for vuln.json). No vulnerability database is integrated: an alire.toml present in the project surfaces one INFO finding documenting that limitation; its absence produces an empty (clean) finding list. Wired into release --full, replacing the prior always-skipped stub.",
       "level": "SW"
+    },
+    {
+      "id": "REQ-087",
+      "title": "HMAC-SHA256",
+      "text": "Fusa.Hmac.Sha256_Hex implements HMAC-SHA256 per RFC 2104 (key hashed down when longer than the 64-byte block size, zero-padded when shorter), built on Fusa.Sha256, for evidence-file integrity signing. Verified against RFC 4231 test vectors 1 and 6.",
+      "level": "SW"
+    },
+    {
+      "id": "REQ-088",
+      "title": "Dispositions file persistence (write side)",
+      "text": "Save_Dispositions writes a Disposition_List to .fusa-dispositions.json, for the disposition add management verb.",
+      "level": "SW"
+    },
+    {
+      "id": "REQ-089",
+      "title": ".fusa-pr.json load/save",
+      "text": "Pr_Exists/Load_Pr/Save_Pr handle the DO-178C section 11.17 problem-report log file, mirroring Load_Requirements/Save_Requirements's pattern.",
+      "level": "SW"
+    },
+    {
+      "id": "REQ-090",
+      "title": "req management command",
+      "text": "req list prints all requirements from .fusa-reqs.json; req add <id> <title> appends a new requirement, rejecting a duplicate id with a usage error.",
+      "level": "SW"
+    },
+    {
+      "id": "REQ-091",
+      "title": "disposition management command",
+      "text": "disposition list prints all entries from .fusa-dispositions.json; disposition add <fingerprint-or-ruleId> <accepted|deferred|rejected> [rationale] appends a new entry, distinguishing a fingerprint from a bare rule id by the sha256: prefix a fingerprint always carries, and rejecting an unrecognised status with a usage error.",
+      "level": "SW"
+    },
+    {
+      "id": "REQ-092",
+      "title": "hooks management command",
+      "text": "hooks install writes an executable .git/hooks/pre-commit running check --strict, refusing to overwrite a hook it did not itself install (detected via a marker comment) or to run outside a git repository; hooks remove deletes only a hook it installed.",
+      "level": "SW"
+    },
+    {
+      "id": "REQ-093",
+      "title": "sign management command",
+      "text": "sign sign <file> computes an HMAC-SHA256 (via --key or --key-file) over the file's content and writes <file>.sig; sign verify recomputes and compares, exiting 1 (gate fail) on a mismatch.",
+      "level": "SW"
+    },
+    {
+      "id": "REQ-094",
+      "title": ".fusa-metrics.json history and metrics command",
+      "text": "Load_Metrics/Save_Metrics persist an append-only history of safety-metric snapshots (requirement count, check severity counts, comp violations). metrics record captures and appends a new snapshot from a live check/comp run; metrics (no subcommand) lists the recorded history.",
+      "level": "SW"
+    },
+    {
+      "id": "REQ-095",
+      "title": "pr management command",
+      "text": "pr init scaffolds .fusa-pr.json; pr add <id> <title> appends an open problem report; pr list prints all reports; pr close <id> marks a report closed with a resolution and timestamp, rejecting an unknown id with a usage error.",
+      "level": "SW"
     }
   ]
 }

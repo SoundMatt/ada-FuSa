@@ -202,4 +202,66 @@ package Fusa.Config is
    --  fusa:req REQ-083
    procedure Scaffold_Tara (Project_Root : String);
 
+   --  fusa:req REQ-088
+   --  Writes Disps to .fusa-dispositions.json, for the `disposition add`
+   --  management verb (see #29). Overwrites the whole file -- callers that
+   --  want to add one entry MUST Load_Dispositions first, Append to the
+   --  result, then Save_Dispositions the combined list.
+   procedure Save_Dispositions (Project_Root : String; Disps : Disposition_List);
+
+   ------------------------------------------------------------------
+   --  .fusa-pr.json (DO-178C section 11.17 problem-report log)
+   ------------------------------------------------------------------
+
+   Pr_File : constant String := ".fusa-pr.json";
+
+   type Problem_Report is record
+      Id         : Unbounded_String;
+      Title      : Unbounded_String;
+      Severity   : Unbounded_String;
+      Status     : Unbounded_String; --  "open" | "closed"
+      Resolution : Unbounded_String; --  blank while open
+      Opened_At  : Unbounded_String; --  RFC 3339
+      Closed_At  : Unbounded_String; --  blank while open
+   end record;
+
+   package Problem_Report_Vectors is new
+     Ada.Containers.Indefinite_Vectors (Positive, Problem_Report);
+   subtype Problem_Report_List is Problem_Report_Vectors.Vector;
+
+   --  fusa:req REQ-089
+   function Pr_Exists (Project_Root : String) return Boolean;
+
+   --  Loads .fusa-pr.json. Returns an empty list if absent.
+   --  fusa:req REQ-089
+   function Load_Pr (Project_Root : String) return Problem_Report_List;
+
+   --  fusa:req REQ-089
+   procedure Save_Pr (Project_Root : String; Reports : Problem_Report_List);
+
+   ------------------------------------------------------------------
+   --  .fusa-metrics.json (append-only safety-metrics history)
+   ------------------------------------------------------------------
+
+   Metrics_File : constant String := ".fusa-metrics.json";
+
+   type Metric_Snapshot is record
+      At_Time          : Unbounded_String; --  RFC 3339
+      Total_Reqs       : Natural := 0;
+      Check_Errors     : Natural := 0;
+      Check_Warnings   : Natural := 0;
+      Check_Infos      : Natural := 0;
+      Comp_Violations  : Natural := 0;
+   end record;
+
+   package Metric_Snapshot_Vectors is new
+     Ada.Containers.Indefinite_Vectors (Positive, Metric_Snapshot);
+   subtype Metric_Snapshot_List is Metric_Snapshot_Vectors.Vector;
+
+   --  fusa:req REQ-094
+   function Load_Metrics (Project_Root : String) return Metric_Snapshot_List;
+
+   --  fusa:req REQ-094
+   procedure Save_Metrics (Project_Root : String; Snapshots : Metric_Snapshot_List);
+
 end Fusa.Config;

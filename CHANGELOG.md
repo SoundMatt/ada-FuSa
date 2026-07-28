@@ -171,6 +171,27 @@ repro steps and rationale on each.
     limitation), nothing otherwise. Wired into `release --full`, replacing the prior
     always-skipped stub.
   - 5 new requirements (REQ-082–REQ-086).
+- **Requirement/PR management commands** (#29) — six small, independent CLI verbs:
+  - `req list`/`req add <id> <title>`: manage `.fusa-reqs.json` from the CLI instead of
+    hand-editing it, rejecting a duplicate id.
+  - `disposition list`/`disposition add <fingerprint-or-ruleId> <status> [rationale]`: manage
+    `.fusa-dispositions.json` waivers, distinguishing a fingerprint from a bare rule id by the
+    `sha256:` prefix a fingerprint always carries.
+  - `pr init`/`list`/`add`/`close`: a DO-178C §11.17 problem-report log (new `.fusa-pr.json`,
+    `Fusa.Config` section mirroring `Load_Requirements`/`Save_Requirements`).
+  - `metrics [record]`: an append-only safety-metrics history (`.fusa-metrics.json`) — `record`
+    captures requirement count, check severity counts, and `comp` violations from a live run.
+  - `sign sign|verify <file> --key <key>`: HMAC-SHA256 evidence-file integrity signing. New
+    `Fusa.Hmac` module (RFC 2104, built on the existing `Fusa.Sha256`) — verified against RFC 4231
+    test vectors 1 and 6 before wiring into the CLI. Caught and fixed a real bug during manual
+    testing: `verify` compared the freshly-computed HMAC against a stored signature still carrying
+    its trailing `ASCII.LF` (`Ada.Strings.Fixed.Trim`'s default blank set is space-only, not
+    LF/CR), which made every verification spuriously fail even with the correct key.
+  - `hooks install|remove`: git pre-commit hook scaffolding, running `check --strict`. Refuses to
+    clobber a hook it didn't install itself (a marker comment) or to run outside a git repository.
+    Sets the executable bit via a direct `chmod()` C import (mirroring the existing `isatty()`
+    import already used for TTY detection) — Ada has no portable file-permission API.
+  - 9 new requirements (REQ-087–REQ-095).
 
 ## v0.1.0 — 2026-07-27
 
