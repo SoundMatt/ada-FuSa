@@ -19,10 +19,13 @@ with Fusa.Analyze;
 with Fusa.Rules_Lint;
 with Fusa.Fix;
 with Fusa.Report;
+with Fusa.Json;
 with Fusa.Json.Writer;
 with Fusa.Sha256;
 with Fusa.Hmac;
 with Fusa.Zip;
+with Fusa.Attestation;
+with Fusa.Stub_Detect;
 
 package body Fusa.Cli is
 
@@ -1777,6 +1780,9 @@ package body Fusa.Cli is
       Dir    : constant String := Dir_Of (Args);
       Format : constant String := Flag_Value (Args, "--format", "text");
       Init   : constant Boolean := Has_Flag (Args, "--init");
+      Require_Attestation : constant Boolean :=
+        Has_Flag (Args, "--require-attestation")
+        or else Has_Flag (Args, "--strict");
    begin
       if Format /= "text" and then Format /= "json" then
          Ada.Text_IO.Put_Line
@@ -1822,6 +1828,15 @@ package body Fusa.Cli is
          Findings : Finding_List;
          Doc      : constant Fusa.Config.Hara_Document := Fusa.Config.Load_Hara (Dir, Findings);
          Hazards_With_Asil, Hazards_With_Sg, Sg_With_Fssr : Natural := 0;
+
+         Raw_Root : constant Fusa.Json.Value_Access :=
+           Fusa.Json.Parse
+             (Fusa.Files.Read_File
+                (Fusa.Files.Join (Dir, Fusa.Config.Hara_File)));
+         Att      : constant Fusa.Attestation.Info :=
+           Fusa.Attestation.Parse (Raw_Root);
+         Attestation_Suppresses : constant Boolean :=
+           Fusa.Attestation.Is_Fresh_Reviewed (Att, Raw_Root);
       begin
          for H of Doc.Hazards loop
             if Length (H.Risk.Asil) > 0 then
@@ -1836,6 +1851,36 @@ package body Fusa.Cli is
                Sg_With_Fssr := Sg_With_Fssr + 1;
             end if;
          end loop;
+
+         --  section 1.6.1: rule A/B run over the content this command
+         --  itself just loaded, gating this command's own exit code.
+         declare
+            Hazard_Descriptions : String_List;
+         begin
+            for H of Doc.Hazards loop
+               Fusa.Stub_Detect.Check_Placeholder
+                 (Findings, Fusa.Config.Hara_File, To_String (H.Id),
+                  "description", To_String (H.Description));
+               Hazard_Descriptions.Append (To_String (H.Description));
+            end loop;
+            Fusa.Stub_Detect.Check_Blanket_Fallback
+              (Findings, Fusa.Config.Hara_File, "description",
+               Hazard_Descriptions, Attestation_Suppresses);
+         end;
+
+         if Fusa.Config.Dispositions_Exist (Dir) then
+            declare
+               Disps : constant Fusa.Config.Disposition_List :=
+                 Fusa.Config.Load_Dispositions (Dir);
+               Orphan_Findings : Finding_List;
+            begin
+               Fusa.Config.Apply_Dispositions
+                 (Findings, Disps, Orphan_Findings);
+               for F of Orphan_Findings loop
+                  Findings.Append (F);
+               end loop;
+            end;
+         end if;
 
          if Format = "json" then
             declare
@@ -1918,6 +1963,7 @@ package body Fusa.Cli is
                W.Field ("safetyGoalsWithFssrRefs", Sg_With_Fssr);
                W.Field ("danglingReferences", Doc.Dangling_References);
                W.Object_End;
+               Fusa.Attestation.Write (W, Att);
                Fusa.Report.Write_Findings_Array (W, Findings);
                Fusa.Report.Write_Summary (W, Findings);
                W.Object_End;
@@ -1938,7 +1984,11 @@ package body Fusa.Cli is
             end;
          end if;
 
-         if Fusa.Report.Has_Gate_Failure (Findings, False) then
+         if Fusa.Report.Has_Gate_Failure (Findings, False)
+           or else (Require_Attestation
+                    and then Fusa.Stub_Detect.Has_Unsuppressed_Rule_B
+                               (Findings))
+         then
             return Exit_Gate_Fail;
          end if;
          return Exit_Ok;
@@ -1955,6 +2005,9 @@ package body Fusa.Cli is
       Format    : constant String := Flag_Value (Args, "--format", "text");
       Init      : constant Boolean := Has_Flag (Args, "--init");
       Min_Cov_Str : constant String := Flag_Value (Args, "--min-coverage", "");
+      Require_Attestation : constant Boolean :=
+        Has_Flag (Args, "--require-attestation")
+        or else Has_Flag (Args, "--strict");
    begin
       if Format /= "text" and then Format /= "json" then
          Ada.Text_IO.Put_Line
@@ -2015,12 +2068,55 @@ package body Fusa.Cli is
          Assets_Analyzed  : constant Natural := Count_Distinct_Assets;
          Assets_In_Project : constant Natural :=
            (if Doc.Assets_In_Project_Given then Doc.Assets_In_Project else Assets_Analyzed);
+         --  section 9.2 MUST: coveragePct must never exceed 100, even
+         --  when a user-supplied assetsInProject override understates the
+         --  true denominator (analyzed > in-project is a bad override,
+         --  not evidence of >100% coverage).
          Coverage_Pct     : constant Natural :=
            (if Assets_In_Project = 0 then 100
-            else Assets_Analyzed * 100 / Assets_In_Project);
+            else Natural'Min (100, Assets_Analyzed * 100 / Assets_In_Project));
          Min_Coverage     : Natural := 0;
          Gate_Fail        : Boolean := False;
+
+         Raw_Root : constant Fusa.Json.Value_Access :=
+           Fusa.Json.Parse
+             (Fusa.Files.Read_File
+                (Fusa.Files.Join (Dir, Fusa.Config.Tara_File)));
+         Att      : constant Fusa.Attestation.Info :=
+           Fusa.Attestation.Parse (Raw_Root);
+         Attestation_Suppresses : constant Boolean :=
+           Fusa.Attestation.Is_Fresh_Reviewed (Att, Raw_Root);
       begin
+         --  section 1.6.1: rule A/B run over the content this command
+         --  itself just loaded, gating this command's own exit code.
+         declare
+            Threat_Descriptions : String_List;
+         begin
+            for T of Doc.Threats loop
+               Fusa.Stub_Detect.Check_Placeholder
+                 (Findings, Fusa.Config.Tara_File, To_String (T.Id),
+                  "threat", To_String (T.Description));
+               Threat_Descriptions.Append (To_String (T.Description));
+            end loop;
+            Fusa.Stub_Detect.Check_Blanket_Fallback
+              (Findings, Fusa.Config.Tara_File, "threat",
+               Threat_Descriptions, Attestation_Suppresses);
+         end;
+
+         if Fusa.Config.Dispositions_Exist (Dir) then
+            declare
+               Disps : constant Fusa.Config.Disposition_List :=
+                 Fusa.Config.Load_Dispositions (Dir);
+               Orphan_Findings : Finding_List;
+            begin
+               Fusa.Config.Apply_Dispositions
+                 (Findings, Disps, Orphan_Findings);
+               for F of Orphan_Findings loop
+                  Findings.Append (F);
+               end loop;
+            end;
+         end if;
+
          if Min_Cov_Str'Length > 0 then
             begin
                Min_Coverage := Natural'Value (Min_Cov_Str);
@@ -2094,6 +2190,7 @@ package body Fusa.Cli is
                W.Field_If_Non_Blank
                  ("assetInventoryMethod", To_String (Doc.Asset_Inventory_Method));
                W.Object_End;
+               Fusa.Attestation.Write (W, Att);
                Fusa.Report.Write_Findings_Array (W, Findings);
                Fusa.Report.Write_Summary (W, Findings, "findingsSummary");
                W.Object_End;
@@ -2115,7 +2212,11 @@ package body Fusa.Cli is
             end;
          end if;
 
-         if Gate_Fail or else Fusa.Report.Has_Gate_Failure (Findings, False) then
+         if Gate_Fail or else Fusa.Report.Has_Gate_Failure (Findings, False)
+           or else (Require_Attestation
+                    and then Fusa.Stub_Detect.Has_Unsuppressed_Rule_B
+                               (Findings))
+         then
             return Exit_Gate_Fail;
          end if;
          return Exit_Ok;
@@ -4151,6 +4252,9 @@ package body Fusa.Cli is
       Dir         : constant String := Dir_Of (Args);
       Format      : constant String := Flag_Value (Args, "--format", "text");
       Min_Cov_Str : constant String := Flag_Value (Args, "--min-coverage", "");
+      Require_Attestation : constant Boolean :=
+        Has_Flag (Args, "--require-attestation")
+        or else Has_Flag (Args, "--strict");
    begin
       if Format /= "text" and then Format /= "json" and then Format /= "csv" then
          Ada.Text_IO.Put_Line
@@ -4198,17 +4302,76 @@ package body Fusa.Cli is
             Components_In_Project : constant Natural :=
               (if Doc.Components_In_Project_Given then Doc.Components_In_Project
                else Natural (Funcs.Length));
+            --  section 9.2 MUST: coveragePct must never exceed 100, even
+            --  when a user-supplied componentsInProject override
+            --  understates the true denominator.
             Coverage_Pct : constant Natural :=
               (if Components_In_Project = 0 then 100
-               else Components_Analyzed * 100 / Components_In_Project);
+               else Natural'Min
+                 (100, Components_Analyzed * 100 / Components_In_Project));
             Min_Coverage : Natural := 0;
             Gate_Fail    : Boolean := False;
+
+            Raw_Root : constant Fusa.Json.Value_Access :=
+              Fusa.Json.Parse
+                (Fusa.Files.Read_File
+                   (Fusa.Files.Join (Dir, Fusa.Config.Fmea_File)));
+            Att      : constant Fusa.Attestation.Info :=
+              Fusa.Attestation.Parse (Raw_Root);
+            Attestation_Suppresses : constant Boolean :=
+              Fusa.Attestation.Is_Fresh_Reviewed (Att, Raw_Root);
          begin
             for E of Entries loop
                if To_String (E.Action_Priority) = "high" then
                   High_Priority := High_Priority + 1;
                end if;
             end loop;
+
+            --  section 1.6.1: rule A/B run over the content this command
+            --  itself just loaded, gating this command's own exit code.
+            --  Rule 3's own examples name failureMode/effect/cause as
+            --  fmea's targets.
+            declare
+               Failure_Modes, Effects, Causes : String_List;
+            begin
+               for E of Entries loop
+                  Fusa.Stub_Detect.Check_Placeholder
+                    (Findings, Fusa.Config.Fmea_File, To_String (E.Id),
+                     "failureMode", To_String (E.Failure_Mode));
+                  Fusa.Stub_Detect.Check_Placeholder
+                    (Findings, Fusa.Config.Fmea_File, To_String (E.Id),
+                     "effect", To_String (E.Effect));
+                  Fusa.Stub_Detect.Check_Placeholder
+                    (Findings, Fusa.Config.Fmea_File, To_String (E.Id),
+                     "cause", To_String (E.Cause));
+                  Failure_Modes.Append (To_String (E.Failure_Mode));
+                  Effects.Append (To_String (E.Effect));
+                  Causes.Append (To_String (E.Cause));
+               end loop;
+               Fusa.Stub_Detect.Check_Blanket_Fallback
+                 (Findings, Fusa.Config.Fmea_File, "failureMode",
+                  Failure_Modes, Attestation_Suppresses);
+               Fusa.Stub_Detect.Check_Blanket_Fallback
+                 (Findings, Fusa.Config.Fmea_File, "effect",
+                  Effects, Attestation_Suppresses);
+               Fusa.Stub_Detect.Check_Blanket_Fallback
+                 (Findings, Fusa.Config.Fmea_File, "cause",
+                  Causes, Attestation_Suppresses);
+            end;
+
+            if Fusa.Config.Dispositions_Exist (Dir) then
+               declare
+                  Disps : constant Fusa.Config.Disposition_List :=
+                    Fusa.Config.Load_Dispositions (Dir);
+                  Orphan_Findings : Finding_List;
+               begin
+                  Fusa.Config.Apply_Dispositions
+                    (Findings, Disps, Orphan_Findings);
+                  for F of Orphan_Findings loop
+                     Findings.Append (F);
+                  end loop;
+               end;
+            end if;
 
             if Min_Cov_Str'Length > 0 then
                begin
@@ -4275,6 +4438,7 @@ package body Fusa.Cli is
                   W.Field ("componentsInProject", Components_In_Project);
                   W.Field ("coveragePct", Coverage_Pct);
                   W.Object_End;
+                  Fusa.Attestation.Write (W, Att);
                   Fusa.Report.Write_Findings_Array (W, Findings);
                   Fusa.Report.Write_Summary (W, Findings, "findingsSummary");
                   W.Object_End;
@@ -4328,7 +4492,11 @@ package body Fusa.Cli is
                end;
             end if;
 
-            if Gate_Fail or else Fusa.Report.Has_Gate_Failure (Findings, False) then
+            if Gate_Fail or else Fusa.Report.Has_Gate_Failure (Findings, False)
+              or else (Require_Attestation
+                       and then Fusa.Stub_Detect.Has_Unsuppressed_Rule_B
+                                  (Findings))
+            then
                return Exit_Gate_Fail;
             end if;
             return Exit_Ok;
@@ -4344,6 +4512,9 @@ package body Fusa.Cli is
    function Cmd_Safety_Case (Args : String_List) return Integer is
       Dir    : constant String := Dir_Of (Args);
       Format : constant String := Flag_Value (Args, "--format", "text");
+      Require_Attestation : constant Boolean :=
+        Has_Flag (Args, "--require-attestation")
+        or else Has_Flag (Args, "--strict");
    begin
       if Format /= "text" and then Format /= "json" and then Format /= "md"
         and then Format /= "mermaid"
@@ -4369,6 +4540,15 @@ package body Fusa.Cli is
          Nodes     : constant Fusa.Config.Gsn_Node_List :=
            Fusa.Config.Load_Safety_Case (Dir, Findings, Root_Goal);
 
+         Raw_Root : constant Fusa.Json.Value_Access :=
+           Fusa.Json.Parse
+             (Fusa.Files.Read_File
+                (Fusa.Files.Join (Dir, Fusa.Config.Safety_Case_File)));
+         Att      : constant Fusa.Attestation.Info :=
+           Fusa.Attestation.Parse (Raw_Root);
+         Attestation_Suppresses : constant Boolean :=
+           Fusa.Attestation.Is_Fresh_Reviewed (Att, Raw_Root);
+
          function Find_Node (Id : String) return Fusa.Config.Gsn_Node is
             Empty : Fusa.Config.Gsn_Node;
          begin
@@ -4380,6 +4560,37 @@ package body Fusa.Cli is
             return Empty;
          end Find_Node;
       begin
+         --  section 1.6.1: rule A/B run over the content this command
+         --  itself just loaded, gating this command's own exit code.
+         --  Rule 3's own examples name a GSN node's text as the target.
+         declare
+            Node_Texts : String_List;
+         begin
+            for N of Nodes loop
+               Fusa.Stub_Detect.Check_Placeholder
+                 (Findings, Fusa.Config.Safety_Case_File, To_String (N.Id),
+                  "text", To_String (N.Text));
+               Node_Texts.Append (To_String (N.Text));
+            end loop;
+            Fusa.Stub_Detect.Check_Blanket_Fallback
+              (Findings, Fusa.Config.Safety_Case_File, "text",
+               Node_Texts, Attestation_Suppresses);
+         end;
+
+         if Fusa.Config.Dispositions_Exist (Dir) then
+            declare
+               Disps : constant Fusa.Config.Disposition_List :=
+                 Fusa.Config.Load_Dispositions (Dir);
+               Orphan_Findings : Finding_List;
+            begin
+               Fusa.Config.Apply_Dispositions
+                 (Findings, Disps, Orphan_Findings);
+               for F of Orphan_Findings loop
+                  Findings.Append (F);
+               end loop;
+            end;
+         end if;
+
          if Format = "json" then
             declare
                W : Fusa.Json.Writer.Instance;
@@ -4434,6 +4645,7 @@ package body Fusa.Cli is
                   W.Field ("undeveloped", Completeness.Undeveloped);
                   W.Object_End;
                end;
+               Fusa.Attestation.Write (W, Att);
                Fusa.Report.Write_Findings_Array (W, Findings);
                Fusa.Report.Write_Summary (W, Findings);
                W.Object_End;
@@ -4539,7 +4751,11 @@ package body Fusa.Cli is
             end;
          end if;
 
-         if Fusa.Report.Has_Gate_Failure (Findings, False) then
+         if Fusa.Report.Has_Gate_Failure (Findings, False)
+           or else (Require_Attestation
+                    and then Fusa.Stub_Detect.Has_Unsuppressed_Rule_B
+                               (Findings))
+         then
             return Exit_Gate_Fail;
          end if;
          return Exit_Ok;
@@ -4981,39 +5197,64 @@ package body Fusa.Cli is
                   end if;
                end loop;
 
+               --  section 1.6.2 carry-forward MUST: sas has no input file
+               --  of its own (it is always regenerated from other
+               --  evidence), so a prior run's attestation must be loaded
+               --  from the existing sas.json (if any) before it is
+               --  overwritten below, and carried onto the freshly-built
+               --  document unchanged. Staleness then falls out
+               --  automatically from Is_Fresh_Reviewed's hash check.
                declare
-                  W : Fusa.Json.Writer.Instance;
+                  Prior_Att : Fusa.Attestation.Info;
+                  Prior_Path : constant String :=
+                    Fusa.Files.Join (Output_Dir, "sas.json");
                begin
-                  W.Object_Start;
-                  Fusa.Report.Write_Header (W, "sas");
-                  W.Key ("checklist");
-                  W.Array_Start;
-                  for C of Checklist loop
-                     W.Object_Start;
-                     W.Field ("item", To_String (C.Item));
-                     W.Field ("clause", To_String (C.Clause));
-                     W.Field ("present", C.Present);
-                     if C.Present then
-                        W.Field_If_Non_Blank
-                          ("evidence", To_String (C.Evidence));
-                     end if;
-                     W.Object_End;
-                  end loop;
-                  W.Array_End;
-                  W.Key ("summary");
-                  W.Object_Start;
-                  W.Field ("total", Total);
-                  W.Field ("present", Present);
-                  W.Object_End;
-                  W.Object_End;
+                  if Fusa.Files.Exists (Prior_Path) then
+                     begin
+                        Prior_Att := Fusa.Attestation.Parse
+                          (Fusa.Json.Parse
+                             (Fusa.Files.Read_File (Prior_Path)));
+                     exception
+                        when Fusa.Json.Json_Error =>
+                           null;
+                     end;
+                  end if;
+
                   declare
-                     Sas_Json_Path : constant String :=
-                       Fusa.Files.Join (Output_Dir, "sas.json");
+                     W : Fusa.Json.Writer.Instance;
                   begin
-                     Fusa.Files.Write_File
-                       (Sas_Json_Path,
-                        Fusa.Json.Writer.To_String (W) & ASCII.LF);
-                     Ada.Text_IO.Put_Line ("wrote " & Sas_Json_Path);
+                     W.Object_Start;
+                     Fusa.Report.Write_Header (W, "sas");
+                     W.Key ("checklist");
+                     W.Array_Start;
+                     for C of Checklist loop
+                        W.Object_Start;
+                        W.Field ("item", To_String (C.Item));
+                        W.Field ("clause", To_String (C.Clause));
+                        W.Field ("present", C.Present);
+                        if C.Present then
+                           W.Field_If_Non_Blank
+                             ("evidence", To_String (C.Evidence));
+                        end if;
+                        W.Object_End;
+                     end loop;
+                     W.Array_End;
+                     W.Key ("summary");
+                     W.Object_Start;
+                     W.Field ("total", Total);
+                     W.Field ("present", Present);
+                     W.Object_End;
+                     Fusa.Attestation.Write (W, Prior_Att);
+                     W.Object_End;
+                     declare
+                        Sas_Json_Path : constant String :=
+                          Fusa.Files.Join (Output_Dir, "sas.json");
+                     begin
+                        Fusa.Files.Write_File
+                          (Sas_Json_Path,
+                           Fusa.Json.Writer.To_String (W) & ASCII.LF);
+                        Ada.Text_IO.Put_Line ("wrote " & Sas_Json_Path);
+                     end;
                   end;
                end;
 

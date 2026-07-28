@@ -23,8 +23,8 @@ package Fusa is
    --  go-FuSa/c-FuSa/cpp-FuSa/rust-FuSa/py-FuSa all correct theirs to
    --  strings like "1.10.4", not truncated to "1.10").
    --  fusa:req REQ-003
-   Schema_Version : constant String := "1.11";
-   Spec_Version   : constant String := "1.11.0";
+   Schema_Version : constant String := "1.15";
+   Spec_Version   : constant String := "1.15.0";
 
    --  §2.3 exit codes
    --  fusa:req REQ-001

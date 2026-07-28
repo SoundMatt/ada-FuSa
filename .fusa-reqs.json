@@ -707,6 +707,18 @@
       "title": "Fusa.Files.Write_File_Atomic (TOCTOU-safe overwrite)",
       "text": "Write_File_Atomic writes to a temp file then atomically renames onto the target, closing the read-then-write TOCTOU window used by fix --apply.",
       "level": "SW"
+    },
+    {
+      "id": "REQ-119",
+      "title": "Fusa.Stub_Detect (section 1.6.1 Rule A/B detection heuristics)",
+      "text": "Rule A (FUSA-STUB001, always-on ERROR) flags placeholder/instructional text in a qualitative field; Rule B (FUSA-STUB002, WARNING) flags a distinct-value ratio below 0.1 across >= 10 entries. Runs inside hara/fmea/tara/safety-case over the content each command itself just loaded, gating that command's own exit code via the normal section 4 Finding mechanism.",
+      "level": "SW"
+    },
+    {
+      "id": "REQ-120",
+      "title": "Fusa.Attestation (section 1.6.2 attestation object support)",
+      "text": "Parses/writes an artifact's document-level attestation object, computes its RFC 8785 JCS canonical content hash (excluding attestation/generatedAt), and determines whether a non-stale, independently-reviewed attestation suppresses a Rule B finding. hara/fmea/tara/safety-case carry an input file's own attestation through to output; sas (which has no input file) carries a prior run's attestation forward across regeneration. --require-attestation (and --strict, which implies it) escalates an unsuppressed Rule B finding to exit 1.",
+      "level": "SW"
     }
   ]
 }
