@@ -677,6 +677,12 @@
       "title": "lint CLI command",
       "text": "lint runs Fusa.Rules_Lint.Scan over the project's source files and emits a lint-report finding-list (text/json), gating under --strict since all LINT findings are WARNING severity.",
       "level": "SW"
+    },
+    {
+      "id": "REQ-114",
+      "title": "sas command (Software Accomplishment Summary)",
+      "text": "sas always writes both sas.json (envelope + tool-defined body, per spec section 9.3's own note) and sas.md, aggregating figures ada-FuSa already computes elsewhere (requirement traced/tested/secTested counts via Fusa.Annotations.Scan, check's own finding counts, comp violations, disposition status, problem-report open/closed counts). Asserting the software life cycle is complete is a human sign-off this tool cannot make; this only reports the current, honest state of that evidence, whatever it is. Always exits 0, like report.",
+      "level": "SW"
     }
   ]
 }
