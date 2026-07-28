@@ -178,6 +178,13 @@ package body Fusa.Cli is
       W.Value ("metrics");
       W.Value ("sign");
       W.Value ("hooks");
+      W.Value ("do178");
+      W.Value ("iso26262");
+      W.Value ("iso21434");
+      W.Value ("iec61508");
+      W.Value ("iec62443");
+      W.Value ("unece");
+      W.Value ("slsa");
       W.Array_End;
 
       W.Key ("formats");
@@ -201,10 +208,24 @@ package body Fusa.Cli is
       W.Key ("metrics");      W.Array_Start; W.Value ("text"); W.Value ("json"); W.Array_End;
       W.Key ("sign");         W.Array_Start; W.Value ("text"); W.Array_End;
       W.Key ("hooks");        W.Array_Start; W.Value ("text"); W.Array_End;
+      W.Key ("do178");        W.Array_Start; W.Value ("text"); W.Value ("json"); W.Array_End;
+      W.Key ("iso26262");     W.Array_Start; W.Value ("text"); W.Value ("json"); W.Array_End;
+      W.Key ("iso21434");     W.Array_Start; W.Value ("text"); W.Value ("json"); W.Array_End;
+      W.Key ("iec61508");     W.Array_Start; W.Value ("text"); W.Value ("json"); W.Array_End;
+      W.Key ("iec62443");     W.Array_Start; W.Value ("text"); W.Value ("json"); W.Array_End;
+      W.Key ("unece");        W.Array_Start; W.Value ("text"); W.Value ("json"); W.Array_End;
+      W.Key ("slsa");         W.Array_Start; W.Value ("text"); W.Value ("json"); W.Array_End;
       W.Object_End;
 
       W.Key ("standards");
       W.Array_Start;
+      W.Value ("do178c");
+      W.Value ("iso26262");
+      W.Value ("iso21434");
+      W.Value ("iec61508");
+      W.Value ("iec62443-4-1");
+      W.Value ("unece-r155");
+      W.Value ("slsa");
       W.Array_End;
 
       W.Object_End;
@@ -2705,6 +2726,201 @@ package body Fusa.Cli is
    end Cmd_Hooks;
 
    ----------------------------------------------------------------------
+   --  standards gap-report commands (do178/iso26262/iso21434/iec61508/
+   --  iec62443/unece/slsa) -- spec section 9.2/9.3.
+   --
+   --  ada-FuSa has no way to automatically determine whether a project
+   --  actually satisfies a given safety/security standard's objectives --
+   --  that is a human assessor's judgement call backed by real evidence.
+   --  These commands therefore follow the same input-file-driven pattern
+   --  as hara/tara: scaffold a starter template on first run, then on
+   --  subsequent runs load/validate/render whatever assessment a human
+   --  has recorded in `.fusa-<standard>-objectives.json`. They gate ONLY
+   --  on structural validation errors (a missing "id"), never on the
+   --  presence of "gap"-status objectives -- a standards gap report is a
+   --  normal, expected artifact of in-progress compliance work, not a
+   --  pass/fail check in itself.
+   ----------------------------------------------------------------------
+
+   --  fusa:req REQ-097
+   function Cmd_Gap_Report
+     (Args : String_List; Cmd_Name, Standard_Id : String;
+      Starter : Fusa.Config.Gap_Objective_List) return Integer
+   is
+      Dir    : constant String := Dir_Of (Args);
+      Format : constant String := Flag_Value (Args, "--format", "text");
+   begin
+      if Format /= "text" and then Format /= "json" then
+         Ada.Text_IO.Put_Line
+           (Ada.Text_IO.Standard_Error,
+            "ada-FuSa: " & Cmd_Name & ": unsupported --format '" & Format &
+            "' (supported: text, json)");
+         return Exit_Usage;
+      end if;
+
+      if not Fusa.Config.Gap_Objectives_Exist (Dir, Standard_Id) then
+         Fusa.Config.Scaffold_Gap_Objectives (Dir, Standard_Id, Starter);
+         Ada.Text_IO.Put_Line
+           ("created " & Fusa.Files.Join (Dir, Fusa.Config.Gap_Objectives_File (Standard_Id)) &
+              " (template) -- record your " & Standard_Id &
+              " objective assessment and re-run");
+         return Exit_Ok;
+      end if;
+
+      declare
+         Findings   : Finding_List;
+         Objectives : constant Fusa.Config.Gap_Objective_List :=
+           Fusa.Config.Load_Gap_Objectives (Dir, Standard_Id, Findings);
+         Satisfied, Partial, Gaps : Natural := 0;
+      begin
+         for O of Objectives loop
+            declare
+               S : constant String := To_String (O.Status);
+            begin
+               if S = "satisfied" then
+                  Satisfied := Satisfied + 1;
+               elsif S = "partial" then
+                  Partial := Partial + 1;
+               elsif S = "gap" then
+                  Gaps := Gaps + 1;
+               end if;
+            end;
+         end loop;
+
+         if Format = "json" then
+            declare
+               W : Fusa.Json.Writer.Instance;
+            begin
+               W.Object_Start;
+               Fusa.Report.Write_Header (W, Standard_Id & "-gap-report");
+               W.Field ("standard", Standard_Id);
+               W.Key ("objectives");
+               W.Array_Start;
+               for O of Objectives loop
+                  W.Object_Start;
+                  W.Field ("id", To_String (O.Id));
+                  W.Field_If_Non_Blank ("title", To_String (O.Title));
+                  W.Field_If_Non_Blank ("clause", To_String (O.Clause));
+                  W.Field ("status", To_String (O.Status));
+                  W.Key ("evidence");
+                  W.Array_Start;
+                  for E of O.Evidence loop
+                     W.Value (E);
+                  end loop;
+                  W.Array_End;
+                  W.Key ("findings");
+                  W.Array_Start;
+                  for F of O.Findings loop
+                     W.Value (F);
+                  end loop;
+                  W.Array_End;
+                  W.Object_End;
+               end loop;
+               W.Array_End;
+               W.Key ("objectiveSummary");
+               W.Object_Start;
+               W.Field ("total", Natural (Objectives.Length));
+               W.Field ("satisfied", Satisfied);
+               W.Field ("partial", Partial);
+               W.Field ("gaps", Gaps);
+               W.Object_End;
+               Fusa.Report.Write_Findings_Array (W, Findings);
+               Fusa.Report.Write_Summary (W, Findings);
+               W.Object_End;
+               Emit (Args, Fusa.Json.Writer.To_String (W));
+            end;
+         else
+            declare
+               Buf : Unbounded_String := Null_Unbounded_String;
+            begin
+               for O of Objectives loop
+                  Append (Buf, To_String (O.Id) & ": " & To_String (O.Title) &
+                            " (" & To_String (O.Status) & ")" & ASCII.LF);
+               end loop;
+               Append (Buf, Trim_Img (Natural (Objectives.Length)) & " objectives (" &
+                         Trim_Img (Satisfied) & " satisfied, " & Trim_Img (Partial) &
+                         " partial, " & Trim_Img (Gaps) & " gaps), " &
+                         Trim_Img (Natural (Findings.Length)) & " validation findings");
+               Emit (Args, To_String (Buf));
+            end;
+         end if;
+
+         if Fusa.Report.Has_Gate_Failure (Findings, False) then
+            return Exit_Gate_Fail;
+         end if;
+         return Exit_Ok;
+      end;
+   end Cmd_Gap_Report;
+
+   function Empty_Objective_Starter return Fusa.Config.Gap_Objective_List is
+      Empty : Fusa.Config.Gap_Objective_List;
+   begin
+      return Empty;
+   end Empty_Objective_Starter;
+
+   --  A small, non-authoritative starter reference for DO-178C: it uses
+   --  ada-FuSa's OWN id scheme ("DO178-<AREA>-<N>") rather than RTCA's
+   --  official Annex A table/objective numbers, since this tool has not
+   --  verified those exact ids/wording against the official DO-178C text
+   --  and must not present a fabricated transcription as authoritative.
+   --  Treat this strictly as a checklist starting point -- replace/extend
+   --  it with your project's actual PSAC/SOI-derived objectives.
+   function Do178_Starter return Fusa.Config.Gap_Objective_List is
+      L : Fusa.Config.Gap_Objective_List;
+
+      procedure Add (Id, Title, Clause : String) is
+         O : Fusa.Config.Gap_Objective;
+      begin
+         O.Id     := To_Unbounded_String (Id);
+         O.Title  := To_Unbounded_String (Title);
+         O.Clause := To_Unbounded_String (Clause);
+         O.Status := To_Unbounded_String ("gap");
+         L.Append (O);
+      end Add;
+   begin
+      Add ("DO178-PLAN-1", "Software planning process documented (PSAC/SDP/SVP/SCMP/SQAP)",
+           "DO-178C Section 4 (non-authoritative reference)");
+      Add ("DO178-REQ-1", "High-level requirements developed and traced to system requirements",
+           "DO-178C Section 5.1 (non-authoritative reference)");
+      Add ("DO178-DES-1", "Software design (low-level requirements/architecture) developed and traced",
+           "DO-178C Section 5.2 (non-authoritative reference)");
+      Add ("DO178-CODE-1", "Source code developed per coding standards and traced to design",
+           "DO-178C Section 5.3 (non-authoritative reference)");
+      Add ("DO178-VER-1", "Reviews and analyses performed on requirements, design, and code",
+           "DO-178C Section 6.3 (non-authoritative reference)");
+      Add ("DO178-TEST-1", "Requirements-based test cases developed and executed",
+           "DO-178C Section 6.4 (non-authoritative reference)");
+      Add ("DO178-COV-1", "Structural coverage analysis performed on the test suite",
+           "DO-178C Section 6.4.4 (non-authoritative reference)");
+      Add ("DO178-CM-1", "Configuration management process controls all life-cycle data",
+           "DO-178C Section 7 (non-authoritative reference)");
+      Add ("DO178-QA-1", "Software quality assurance process conducted",
+           "DO-178C Section 8 (non-authoritative reference)");
+      return L;
+   end Do178_Starter;
+
+   function Cmd_Do178 (Args : String_List) return Integer is
+     (Cmd_Gap_Report (Args, "do178", "do178c", Do178_Starter));
+
+   function Cmd_Iso26262 (Args : String_List) return Integer is
+     (Cmd_Gap_Report (Args, "iso26262", "iso26262", Empty_Objective_Starter));
+
+   function Cmd_Iso21434 (Args : String_List) return Integer is
+     (Cmd_Gap_Report (Args, "iso21434", "iso21434", Empty_Objective_Starter));
+
+   function Cmd_Iec61508 (Args : String_List) return Integer is
+     (Cmd_Gap_Report (Args, "iec61508", "iec61508", Empty_Objective_Starter));
+
+   function Cmd_Iec62443 (Args : String_List) return Integer is
+     (Cmd_Gap_Report (Args, "iec62443", "iec62443-4-1", Empty_Objective_Starter));
+
+   function Cmd_Unece (Args : String_List) return Integer is
+     (Cmd_Gap_Report (Args, "unece", "unece-r155", Empty_Objective_Starter));
+
+   function Cmd_Slsa (Args : String_List) return Integer is
+     (Cmd_Gap_Report (Args, "slsa", "slsa", Empty_Objective_Starter));
+
+   ----------------------------------------------------------------------
    --  Usage / dispatch
    ----------------------------------------------------------------------
 
@@ -2713,7 +2929,8 @@ package body Fusa.Cli is
       Ada.Text_IO.Put_Line (Ada.Text_IO.Standard_Error,
         "usage: adafusa <command> [options]" & ASCII.LF &
         "commands: version capabilities init check trace qualify release audit-pack " &
-        "report comp hara tara vuln req disposition pr metrics sign hooks");
+        "report comp hara tara vuln req disposition pr metrics sign hooks " &
+        "do178 iso26262 iso21434 iec61508 iec62443 unece slsa");
    end Print_Usage;
 
    function Run (Args : String_List) return Integer is
@@ -2768,6 +2985,20 @@ package body Fusa.Cli is
             return Cmd_Sign (Rest);
          elsif Cmd = "hooks" then
             return Cmd_Hooks (Rest);
+         elsif Cmd = "do178" then
+            return Cmd_Do178 (Rest);
+         elsif Cmd = "iso26262" then
+            return Cmd_Iso26262 (Rest);
+         elsif Cmd = "iso21434" then
+            return Cmd_Iso21434 (Rest);
+         elsif Cmd = "iec61508" then
+            return Cmd_Iec61508 (Rest);
+         elsif Cmd = "iec62443" then
+            return Cmd_Iec62443 (Rest);
+         elsif Cmd = "unece" then
+            return Cmd_Unece (Rest);
+         elsif Cmd = "slsa" then
+            return Cmd_Slsa (Rest);
          elsif Cmd = "--help" or else Cmd = "-h" or else Cmd = "help" then
             Print_Usage;
             return Exit_Ok;

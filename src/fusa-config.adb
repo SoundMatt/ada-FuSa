@@ -828,4 +828,145 @@ package body Fusa.Config is
         (Fusa.Files.Join (Project_Root, Metrics_File), Fusa.Json.Writer.To_String (W) & ASCII.LF);
    end Save_Metrics;
 
+   ----------------------------------------------------------------------
+   --  .fusa-<standard>-objectives.json
+   ----------------------------------------------------------------------
+
+   function Gap_Objectives_File (Standard_Id : String) return String is
+     (".fusa-" & Standard_Id & "-objectives.json");
+
+   function Gap_Objectives_Exist (Project_Root, Standard_Id : String) return Boolean is
+     (Fusa.Files.Exists
+        (Fusa.Files.Join (Project_Root, Gap_Objectives_File (Standard_Id))));
+
+   function Load_Gap_Objectives
+     (Project_Root, Standard_Id : String;
+      Findings                  : in out Finding_List) return Gap_Objective_List
+   is
+      Result : Gap_Objective_List;
+      Path   : constant String :=
+        Fusa.Files.Join (Project_Root, Gap_Objectives_File (Standard_Id));
+   begin
+      if not Fusa.Files.Exists (Path) then
+         return Result;
+      end if;
+
+      declare
+         Content : constant String := Fusa.Files.Read_File (Path);
+         Root    : Fusa.Json.Value_Access;
+      begin
+         begin
+            Root := Fusa.Json.Parse (Content);
+         exception
+            when Fusa.Json.Json_Error =>
+               raise Invalid_Config_Error with "parse error in " & Path;
+         end;
+
+         declare
+            Items : constant Fusa.Json.Value_Access :=
+              Fusa.Json.Get_Array (Root, "objectives");
+         begin
+            for I in 1 .. Fusa.Json.Array_Length (Items) loop
+               declare
+                  Item   : constant Fusa.Json.Value_Access := Fusa.Json.Array_Item (Items, I);
+                  Id     : constant String := Fusa.Json.Get_String (Item, "id");
+                  Status : constant String := Fusa.Json.Get_String (Item, "status", "gap");
+                  O      : Gap_Objective;
+               begin
+                  if Id'Length = 0 then
+                     Findings.Append
+                       (Make_Finding
+                          (Rule_Id     => "GAP001",
+                           Severity    => Error,
+                           Message     =>
+                             "objective at index" & Integer'Image (I) &
+                             " has a missing, empty, or non-string id in " &
+                             Gap_Objectives_File (Standard_Id),
+                           Loc         => Make_Location (Gap_Objectives_File (Standard_Id)),
+                           Category    => Fusa.Requirement,
+                           Remediation => "give this objective a non-empty string ""id"""));
+                  else
+                     O.Id     := To_Unbounded_String (Id);
+                     O.Title  := To_Unbounded_String (Fusa.Json.Get_String (Item, "title"));
+                     O.Clause := To_Unbounded_String (Fusa.Json.Get_String (Item, "clause"));
+                     O.Status := To_Unbounded_String (Status);
+                     if Status /= "satisfied" and then Status /= "partial"
+                       and then Status /= "gap"
+                     then
+                        Findings.Append
+                          (Make_Finding
+                             (Rule_Id     => "GAP002",
+                              Severity    => Warning,
+                              Message     =>
+                                "objective """ & Id & """ has status """ & Status &
+                                """, expected satisfied|partial|gap, in " &
+                                Gap_Objectives_File (Standard_Id),
+                              Loc         => Make_Location (Gap_Objectives_File (Standard_Id)),
+                              Category    => Fusa.Requirement,
+                              Remediation =>
+                                "set status to one of satisfied, partial, or gap"));
+                     end if;
+                     declare
+                        Ev : constant Fusa.Json.Value_Access :=
+                          Fusa.Json.Get_Array (Item, "evidence");
+                     begin
+                        for J in 1 .. Fusa.Json.Array_Length (Ev) loop
+                           O.Evidence.Append (Fusa.Json.As_String (Fusa.Json.Array_Item (Ev, J)));
+                        end loop;
+                     end;
+                     declare
+                        Fd : constant Fusa.Json.Value_Access :=
+                          Fusa.Json.Get_Array (Item, "findings");
+                     begin
+                        for J in 1 .. Fusa.Json.Array_Length (Fd) loop
+                           O.Findings.Append (Fusa.Json.As_String (Fusa.Json.Array_Item (Fd, J)));
+                        end loop;
+                     end;
+                     Result.Append (O);
+                  end if;
+               end;
+            end loop;
+         end;
+      end;
+      return Result;
+   end Load_Gap_Objectives;
+
+   procedure Scaffold_Gap_Objectives
+     (Project_Root, Standard_Id : String; Starter : Gap_Objective_List)
+   is
+      W : Fusa.Json.Writer.Instance;
+   begin
+      if Gap_Objectives_Exist (Project_Root, Standard_Id) then
+         return;
+      end if;
+      W.Object_Start;
+      W.Key ("objectives");
+      W.Array_Start;
+      for O of Starter loop
+         W.Object_Start;
+         W.Field ("id", To_String (O.Id));
+         W.Field_If_Non_Blank ("title", To_String (O.Title));
+         W.Field_If_Non_Blank ("clause", To_String (O.Clause));
+         W.Field ("status", To_String (O.Status));
+         W.Key ("evidence");
+         W.Array_Start;
+         for E of O.Evidence loop
+            W.Value (E);
+         end loop;
+         W.Array_End;
+         W.Key ("findings");
+         W.Array_Start;
+         for F of O.Findings loop
+            W.Value (F);
+         end loop;
+         W.Array_End;
+         W.Object_End;
+      end loop;
+      W.Array_End;
+      W.Object_End;
+      Fusa.Files.Write_File
+        (Fusa.Files.Join (Project_Root, Gap_Objectives_File (Standard_Id)),
+         Fusa.Json.Writer.To_String (W) & ASCII.LF);
+   end Scaffold_Gap_Objectives;
+
 end Fusa.Config;

@@ -95,6 +95,7 @@ the simplest route, since GNAT is not distributed via Homebrew.
 | `adafusa metrics [record]` | Append-only safety-metrics history (`.fusa-metrics.json`) | text, json |
 | `adafusa sign sign\|verify <file> --key <key>` | HMAC-SHA256 evidence-file signing | text |
 | `adafusa hooks install\|remove` | Git pre-commit hook running `check --strict` | text |
+| `adafusa do178\|iso26262\|iso21434\|iec61508\|iec62443\|unece\|slsa [--dir]` | Standards gap-report: load/validate `.fusa-<standard>-objectives.json`; scaffolds a template if absent | text, json |
 
 **Shared flags:** `--dir <path>` (project root, default `.`), `--output <file>` (write instead of
 stdout), `--no-color` (accepted; ada-FuSa does not currently emit ANSI colour), `--format <fmt>`.
@@ -198,8 +199,8 @@ each entry's `status` to matching findings before gating:
 - An `accepted`/`deferred` entry that matches no finding in the current run (e.g. stale after a
   refactor) surfaces a `DISP001` WARNING (category `config`); an orphaned `rejected` entry is
   silent, since a denied waiver with no matching finding just means the issue was fixed.
-- Managing this file via a `disposition` CLI verb (`list`/`add`) is not yet implemented — edit it
-  directly for now (tracked in #29).
+- Manage this file from the CLI with `adafusa disposition list|add <fp-or-ruleId> <status> [rationale]`,
+  or edit it directly.
 
 ## Rule Reference
 
@@ -254,6 +255,39 @@ loop headers, `exit when`, and `and then`/`or else`. An unconditional `loop ... 
 enclosing subprogram rather than reported as a separate result — Ada style guides for
 safety-critical code generally discourage deep local nesting, so this is a reasonable
 approximation, but it means a nested subprogram's own complexity is never shown standalone.
+
+## Standards Gap Reports
+
+`do178`, `iso26262`, `iso21434`, `iec61508`, `iec62443`, `unece`, and `slsa` each load/validate a
+`.fusa-<standard-id>-objectives.json` file at the project root (canonical standard ids:
+`do178c`, `iso26262`, `iso21434`, `iec61508`, `iec62443-4-1`, `unece-r155`, `slsa`), scaffolding a
+starter template on first run:
+
+```jsonc
+{
+  "objectives": [
+    { "id": "DO178-REQ-1", "title": "…", "clause": "…", "status": "gap",
+      "evidence": [], "findings": [] }
+  ]
+}
+```
+
+**ada-FuSa cannot determine whether your project actually satisfies a standard's objectives** —
+that is a human assessor's judgement call backed by real evidence, so these commands never fabricate
+a compliance determination. They follow the same input-file-driven pattern as `hara`/`tara`: a human
+records each objective's `status` (`satisfied`/`partial`/`gap`) and supporting `evidence`/`findings`,
+and the tool validates structure (a missing `id` is an ERROR that gates; an unrecognised `status` is
+a WARNING) and renders an `objectiveSummary` count. **The mere presence of `gap`-status objectives
+never gates** — that is the normal, expected state of in-progress compliance work.
+
+`do178`'s starter template ships a small, explicitly non-authoritative checklist (ids like
+`DO178-PLAN-1`, `DO178-REQ-1`, …) covering the well-known DO-178C process areas (planning,
+requirements, design, code, verification, testing, structural coverage, configuration management,
+quality assurance) — it is **not** a transcription of RTCA's official Annex A objective table, and
+uses ada-FuSa's own id scheme rather than claiming to replicate DO-178C's exact numbering. Treat it
+strictly as a starting checklist; replace/extend it with your project's actual PSAC/SOI-derived
+objectives. The other six standards' commands scaffold an empty template and rely entirely on your
+own objective list.
 
 ## Evidence Artifacts
 

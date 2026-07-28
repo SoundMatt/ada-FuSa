@@ -249,5 +249,75 @@ begin
              "a threat with no id produces exactly one ERROR finding");
    end;
 
+   --  fusa:test REQ-096
+   Check (not Fusa.Config.Gap_Objectives_Exist (Root, "do178c"),
+          "no .fusa-do178c-objectives.json initially");
+   declare
+      Starter : Fusa.Config.Gap_Objective_List;
+      O       : Fusa.Config.Gap_Objective;
+   begin
+      O.Id     := To_Unbounded_String ("DO178-PLAN-1");
+      O.Status := To_Unbounded_String ("gap");
+      Starter.Append (O);
+      Fusa.Config.Scaffold_Gap_Objectives (Root, "do178c", Starter);
+   end;
+   Check (Fusa.Config.Gap_Objectives_Exist (Root, "do178c"),
+          ".fusa-do178c-objectives.json exists after Scaffold_Gap_Objectives");
+   declare
+      Findings   : Finding_List;
+      Objectives : constant Fusa.Config.Gap_Objective_List :=
+        Fusa.Config.Load_Gap_Objectives (Root, "do178c", Findings);
+   begin
+      Check (Natural (Objectives.Length) = 1, "the scaffolded starter objective round-trips");
+      Check (To_String (Objectives.Element (1).Id) = "DO178-PLAN-1",
+             "the starter objective's id round-trips");
+      Check (Findings.Is_Empty, "no validation findings against a well-formed template");
+   end;
+
+   --  Scaffolding again once the file already exists is a no-op.
+   Fusa.Config.Scaffold_Gap_Objectives (Root, "do178c", Fusa.Config.Gap_Objective_List'(
+     Fusa.Config.Gap_Objective_Vectors.Empty_Vector));
+   declare
+      Findings   : Finding_List;
+      Objectives : constant Fusa.Config.Gap_Objective_List :=
+        Fusa.Config.Load_Gap_Objectives (Root, "do178c", Findings);
+   begin
+      Check (Natural (Objectives.Length) = 1,
+             "re-scaffolding an existing objectives file does not overwrite it");
+   end;
+
+   Fusa.Files.Write_File
+     (Root & "/" & Fusa.Config.Gap_Objectives_File ("iso26262"),
+      "{""objectives"":[" &
+      "{""id"":""ISO-1"",""title"":""t"",""clause"":""c"",""status"":""satisfied""," &
+      """evidence"":[""e1""],""findings"":[""ADA001""]}," &
+      "{""id"":""ISO-2"",""status"":""not-a-real-status""}," &
+      "{""title"":""no id at all""}" &
+      "]}");
+   declare
+      Findings   : Finding_List;
+      Objectives : constant Fusa.Config.Gap_Objective_List :=
+        Fusa.Config.Load_Gap_Objectives (Root, "iso26262", Findings);
+      Errors, Warnings : Natural := 0;
+   begin
+      Check (Natural (Objectives.Length) = 2,
+             "only the two objectives with a non-empty id are returned "
+             & "(the one with no id at all is excluded, not just flagged)");
+      Check (Natural (Objectives.Element (1).Evidence.Length) = 1
+             and then Natural (Objectives.Element (1).Findings.Length) = 1,
+             "evidence and findings arrays round-trip on a well-formed objective");
+      for F of Findings loop
+         case F.Severity is
+            when Error   => Errors := Errors + 1;
+            when Warning => Warnings := Warnings + 1;
+            when Info    => null;
+         end case;
+      end loop;
+      Check (Errors = 1, "an objective with no id produces exactly one ERROR finding");
+      Check (Warnings = 1,
+             "an objective with an id but an unrecognised status "
+             & "produces exactly one WARNING finding, and is still returned");
+   end;
+
    Ada.Directories.Delete_Tree (Root);
 end Test_Config;
