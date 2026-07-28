@@ -141,6 +141,44 @@ begin
              "a duplicate object key resolves to the last value, not the first");
    end;
 
+   --  Regression: a syntactically well-formed number that overflows
+   --  Long_Float's range (GNAT converts it to IEEE +/-Infinity rather
+   --  than raising) used to be accepted silently, propagating a
+   --  non-finite value into every downstream consumer with no error at
+   --  the point of parsing.
+   Check (Raises_Json_Error ("{""n"":1e400}"),
+          "a number that overflows to +Infinity raises Json_Error");
+   Check (Raises_Json_Error ("{""n"":-1e400}"),
+          "a number that overflows to -Infinity raises Json_Error");
+   Check (not Raises_Json_Error ("{""n"":1e300}"),
+          "a large but in-range number still parses fine");
+
+   --  Regression: RFC 8259 section 7 requires control characters
+   --  (U+0000-U+001F) inside a string literal to be escaped; a literal
+   --  one used to be accepted and copied straight into the result.
+   Check (Raises_Json_Error ("{""s"":""a" & ASCII.LF & "b""}"),
+          "a literal, unescaped newline inside a string raises Json_Error");
+   Check (Raises_Json_Error ("{""s"":""a" & ASCII.HT & "b""}"),
+          "a literal, unescaped tab inside a string raises Json_Error");
+   Check (not Raises_Json_Error ("{""s"":""a\nb""}"),
+          "a properly-escaped \\n still parses fine");
+
+   --  Regression: duplicate-key handling used to rescan every
+   --  previously-parsed member on each new key (O(n^2) on n keys);
+   --  the hashed-map-backed version must still produce the same
+   --  last-value-wins result across more than one duplicate.
+   declare
+      V : constant Fusa.Json.Value_Access :=
+        Fusa.Json.Parse ("{""a"":1,""b"":2,""a"":3,""c"":4,""a"":5}");
+   begin
+      Check (Fusa.Json.Get_Member (V, "a").Num_Val = 5.0,
+             "the last of three repeated keys wins");
+      Check (Fusa.Json.Get_Member (V, "b").Num_Val = 2.0,
+             "a key that was never duplicated is unaffected");
+      Check (Fusa.Json.Get_Member (V, "c").Num_Val = 4.0,
+             "a key duplicated after it, not before, is unaffected");
+   end;
+
    --  Writer: object/array/nesting/empty-object round trip
    --  fusa:test REQ-025
    --  fusa:test REQ-026

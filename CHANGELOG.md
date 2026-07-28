@@ -5,6 +5,33 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+### Fixed (deep-audit PR2/11 -- JSON parser hardening)
+
+Continuing the multi-agent audit fix series. `Fusa.Json` is the parser behind every config and
+evidence file this tool reads (`.fusa.json`, `.fusa-reqs.json`, `.fusa-dispositions.json`,
+`.fusa-metrics.json`, `.fusa-fmea.json`, ...), so a bug here can affect every command. Three
+issues found:
+
+- **Silent overflow to Infinity**: `Parse_Number` already validated the RFC 8259 grammar (leading
+  zeros, bare exponents, etc. were rejected), but a syntactically valid number that overflows
+  `Long_Float`'s range -- e.g. `1e400` -- was still handed to `Long_Float'Value`, which GNAT
+  converts to IEEE +/-Infinity rather than raising. Verified directly: `Long_Float'Value("1e400")`
+  returns `+Inf` with no exception. That non-finite value then propagated silently into every
+  downstream consumer (RPN scores, coverage percentages, metrics) with no error at the point of
+  parsing. Fixed by comparing the parsed value against `Long_Float'Last`/`-Long_Float'Last` and
+  raising `Json_Error` if it's out of range.
+- **Unescaped control characters accepted**: RFC 8259 section 7 requires control characters
+  (U+0000-U+001F) inside a string literal to be escaped (e.g. as `\n`); `Parse_String_Literal`
+  copied any character that wasn't `"` or `\` straight into the result with no check, silently
+  accepting invalid JSON. Fixed by rejecting any literal character below `16#20#`.
+- **O(n^2) duplicate-key scan**: `Parse_Object` rescanned every previously-parsed member on each
+  new key to detect duplicates (needed for the documented last-value-wins behavior), an O(n^2)
+  cost on an object with n keys -- a CPU-exhaustion risk on adversarial input. Fixed by tracking
+  each key's index in a hashed map alongside the existing order-preserving `Members` vector, so a
+  duplicate is found in O(1) without changing iteration order or the public API.
+
+9 new regression tests; 588/588 checks passing (was 579).
+
 ### Fixed (deep-audit PR1/11 -- critical security)
 
 A full multi-agent audit (8 independent dimensions, every finding adversarially verified by 3

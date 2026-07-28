@@ -1,6 +1,20 @@
 with Ada.Strings.Unbounded; use Ada.Strings.Unbounded;
+with Ada.Strings.Unbounded.Hash;
+with Ada.Containers.Hashed_Maps;
 
 package body Fusa.Json is
+
+   --  Maps an object's member key to its index in Members, so a duplicate
+   --  key during parsing can be found in O(1) rather than by rescanning
+   --  every previously-parsed member -- an adversarial input with N
+   --  identical (or merely unique-but-numerous) keys would otherwise cost
+   --  O(N^2), a CPU-exhaustion DoS on any tool that feeds this parser
+   --  untrusted JSON.
+   package Key_Index_Maps is new Ada.Containers.Hashed_Maps
+     (Key_Type        => Unbounded_String,
+      Element_Type    => Positive,
+      Hash            => Ada.Strings.Unbounded.Hash,
+      Equivalent_Keys => "=");
 
    --  Recursion-depth bound: .fusa.json/.fusa-reqs.json are external files
    --  this tool reads, so a malformed or adversarial deeply-nested input
@@ -173,6 +187,13 @@ package body Fusa.Json is
                   when others =>
                      raise Json_Error with "invalid escape character";
                end case;
+            elsif Character'Pos (C) < 16#20# then
+               --  RFC 8259 §7: control characters (U+0000-U+001F) MUST be
+               --  escaped (e.g. as "\n") -- a literal, unescaped one
+               --  is invalid JSON, not merely unusual input.
+               raise Json_Error with
+                 "unescaped control character in string literal at position"
+                 & Positive'Image (Pos);
             else
                Append (Result, C);
                Pos := Pos + 1;
@@ -242,6 +263,17 @@ package body Fusa.Json is
          V : constant Value_Access := new Value (Json_Number);
       begin
          V.Num_Val := Long_Float'Value (S (Start .. Pos - 1));
+         --  The grammar above rejects syntactically malformed numbers, but
+         --  a syntactically valid one (e.g. "1e400") can still overflow
+         --  Long_Float'Value's range -- GNAT returns IEEE +/-Infinity
+         --  silently rather than raising, which would otherwise propagate
+         --  a non-finite value into every downstream consumer (metrics,
+         --  RPN scoring, coverage percentages) with no error at the point
+         --  of parsing.
+         if V.Num_Val > Long_Float'Last or else V.Num_Val < -Long_Float'Last then
+            raise Json_Error with
+              "number out of range at position" & Positive'Image (Start);
+         end if;
          return V;
       end;
    end Parse_Number;
@@ -249,7 +281,8 @@ package body Fusa.Json is
    function Parse_Object
      (S : String; Pos : in out Positive; Depth : Natural) return Value_Access
    is
-      V : constant Value_Access := new Value (Json_Object);
+      V         : constant Value_Access := new Value (Json_Object);
+      Key_Index : Key_Index_Maps.Map;
    begin
       if Depth > Max_Nesting_Depth then
          raise Json_Error with "maximum nesting depth exceeded";
@@ -269,21 +302,17 @@ package body Fusa.Json is
             Expect (S, Pos, ':');
             Skip_Ws (S, Pos);
             declare
-               Val   : constant Value_Access := Parse_Value (S, Pos, Depth + 1);
-               Found : Boolean := False;
+               Val : constant Value_Access := Parse_Value (S, Pos, Depth + 1);
             begin
                --  Last-value-wins on a duplicate key, matching common JSON
                --  tooling (JS JSON.parse, Python json, jq) rather than
                --  silently keeping both members.
-               for I in 1 .. Natural (V.Members.Length) loop
-                  if V.Members.Element (I).Key = Key then
-                     V.Members.Replace_Element (I, Member'(Key => Key, Val => Val));
-                     Found := True;
-                     exit;
-                  end if;
-               end loop;
-               if not Found then
+               if Key_Index.Contains (Key) then
+                  V.Members.Replace_Element
+                    (Key_Index (Key), Member'(Key => Key, Val => Val));
+               else
                   V.Members.Append (Member'(Key => Key, Val => Val));
+                  Key_Index.Insert (Key, Natural (V.Members.Length));
                end if;
             end;
          end;
