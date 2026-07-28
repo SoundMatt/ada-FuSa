@@ -509,6 +509,78 @@ begin
       Ada.Directories.Delete_Tree (Diff_Root);
    end;
 
+   --  fusa:test REQ-103
+   --  fusa:test REQ-104
+   declare
+      Deps_Root : constant String := "tmp_test_cli_deps";
+   begin
+      if Ada.Directories.Exists (Deps_Root) then
+         Ada.Directories.Delete_Tree (Deps_Root);
+      end if;
+      Ada.Directories.Create_Path (Deps_Root & "/src");
+      Fusa.Files.Write_File
+        (Deps_Root & "/.fusa.json", "{""project"":{""name"":""depsproj""},""standard"":""generic""}");
+      Fusa.Files.Write_File (Deps_Root & "/.fusa-reqs.json", "{""requirements"":[]}");
+      Fusa.Files.Write_File
+        (Deps_Root & "/src/pkg_a.ads", "package Pkg_A is" & ASCII.LF &
+           "   procedure Do_It;" & ASCII.LF & "end Pkg_A;" & ASCII.LF);
+      Fusa.Files.Write_File
+        (Deps_Root & "/src/pkg_b.ads", "with Pkg_A;" & ASCII.LF & "package Pkg_B is" & ASCII.LF &
+           "   procedure Do_It;" & ASCII.LF & "end Pkg_B;" & ASCII.LF);
+
+      Check (Fusa.Cli.Run (Args ("boundary", "--dir", Deps_Root, "--format", "bogus"))
+             = Exit_Usage, "boundary --format bogus exits 2");
+      declare
+         Exit_Code : Integer;
+         Out_Dot   : constant String :=
+           Run_Capturing_Stdout (Args ("boundary", "--dir", Deps_Root), Exit_Code);
+      begin
+         Check (Exit_Code = Exit_Ok, "boundary exits 0");
+         Check (Ada.Strings.Fixed.Index (Out_Dot, "digraph Boundary") > 0
+                and then Ada.Strings.Fixed.Index (Out_Dot, """Pkg_B"" -> ""Pkg_A""") > 0,
+                "boundary's default DOT output includes the Pkg_B -> Pkg_A edge");
+      end;
+      declare
+         Exit_Code : Integer;
+         Out_Mmd   : constant String :=
+           Run_Capturing_Stdout
+             (Args ("boundary", "--dir", Deps_Root, "--format", "mermaid"), Exit_Code);
+      begin
+         Check (Ada.Strings.Fixed.Index (Out_Mmd, "graph TD") = 1,
+                "boundary --format mermaid emits a Mermaid graph");
+         Check (Ada.Strings.Fixed.Index (Out_Mmd, "Pkg_B --> Pkg_A") > 0,
+                "boundary --format mermaid's node ids have '.' replaced with '_' "
+                & "and still show the Pkg_B -> Pkg_A edge");
+      end;
+
+      Check (Fusa.Cli.Run (Args ("impact", "--dir", Deps_Root)) = Exit_Usage,
+             "impact with no changed files exits 2");
+      declare
+         Exit_Code : Integer;
+         Out_Text  : constant String :=
+           Run_Capturing_Stdout
+             (Args ("impact", "--dir", Deps_Root, "src/pkg_a.ads"), Exit_Code);
+      begin
+         Check (Exit_Code = Exit_Ok, "impact exits 0");
+         Check (Ada.Strings.Fixed.Index (Out_Text, "Pkg_A") > 0
+                and then Ada.Strings.Fixed.Index (Out_Text, "Pkg_B") > 0,
+                "impact on pkg_a.ads reports Pkg_B as an impacted unit "
+                & "(Pkg_B directly depends on Pkg_A)");
+      end;
+      declare
+         Exit_Code : Integer;
+         Out_Text  : constant String :=
+           Run_Capturing_Stdout
+             (Args ("impact", "--dir", Deps_Root, "not-a-project-file.txt"), Exit_Code);
+      begin
+         Check (Exit_Code = Exit_Ok,
+                "impact on a file that isn't a recognised project unit still exits 0");
+         Check (Ada.Strings.Fixed.Index (Out_Text, "not a recognised project unit") > 0,
+                "impact reports the unresolved file rather than silently ignoring it");
+      end;
+      Ada.Directories.Delete_Tree (Deps_Root);
+   end;
+
    --  fusa:test REQ-090
    Check (Fusa.Cli.Run (Args ("req")) = Exit_Usage, "req with no subcommand exits 2");
    Check (Fusa.Cli.Run (Args ("req", "bogus")) = Exit_Usage,

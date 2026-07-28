@@ -99,6 +99,8 @@ the simplest route, since GNAT is not distributed via Homebrew.
 | `adafusa verify [--dir]` | Evidence manifest: presence/SHA-256/size of known evidence artifacts; always exits 0 | text, json |
 | `adafusa diff <report-a> <report-b> [--strict]` | Compare two `check`-style report documents by finding fingerprint | text, json |
 | `adafusa badge [--dir] [--label] [--message] [--color]` | SVG status badge (red/yellow/green from `check`, or a custom `--message`/`--color`); always exits 0 | svg |
+| `adafusa boundary [--dir] [--format dot\|mermaid]` | Package/unit dependency graph from `with`-clause scanning; always exits 0 | dot, mermaid |
+| `adafusa impact <file...> [--dir]` | Which project units are (transitively) affected by changing the given files; always exits 0 | text, json |
 
 **Shared flags:** `--dir <path>` (project root, default `.`), `--output <file>` (write instead of
 stdout), `--no-color` (accepted; ada-FuSa does not currently emit ANSI colour), `--format <fmt>`.
@@ -309,6 +311,18 @@ own objective list.
   red/`N errors`, yellow/`N warnings`, or green/`passing`; `--message`/`--color` bypass that entirely
   to render an arbitrary custom badge (e.g. a version badge) without analysing the project at all.
   Always exits `0` — a badge's job is to *display* a failing status, not to fail itself.
+- **`boundary`**/**`impact`** share a new `Fusa.Deps` module: a text-based `with`-clause scanner
+  (like `comp`, no full Ada parser) that builds a directed graph of intra-project unit dependencies.
+  A unit's `.ads`/`.adb` merge into one graph node; only context-clause `with`/`private with` are
+  counted — an Ada 2012+ aspect-specification `with` (e.g. `... with Convention => C;`), which can
+  only appear *after* a unit's own declaration has started, is correctly excluded; dependencies
+  outside the project (e.g. `Ada.Text_IO`) are filtered out. `boundary` renders the whole graph as
+  Graphviz DOT or Mermaid. `impact <file...>` resolves each given file to its unit and reports every
+  other unit that (directly or transitively) depends on it — **this is deliberately conservative**:
+  since most files `with` the project's own root package, a change to almost anything can show a
+  broad transitive impact set through that shared root, the same way a real Ada compiler would
+  reconsider all of those units' dependencies. Both always exit `0` (purely descriptive; a file that
+  isn't a recognised project unit is reported as such, not treated as an error).
 
 ## Evidence Artifacts
 
@@ -322,6 +336,7 @@ own objective list.
 | `comp-report.json` | `adafusa comp --format json` | Per-function cyclomatic complexity (consumed by FuSaOps v1.70.0+) |
 | `vuln.json` | `adafusa vuln --format json` / `release --full` | Dependency vulnerability finding-list (always clean — see limitations) |
 | `badge.svg` | `adafusa badge --output badge.svg` | Status badge for READMEs/dashboards |
+| `boundary.dot`/`boundary.mermaid` | `adafusa boundary --output` | Package/unit dependency graph |
 
 ## Docker
 

@@ -214,9 +214,8 @@ repro steps and rationale on each.
   - `sas`/`sci` (a differently-shaped follow-up per the issue's own phasing) deferred.
   - 2 new requirements (REQ-096/REQ-097).
 - **Evidence & verification utilities** (#26, partial — `verify`/`diff`/`badge` per the issue's own
-  recommended starter scope; `safety-case`/`fmea`/`boundary`/`coupling`/`impact` deferred to
-  follow-ups since they need real design work, e.g. what Ada-specific evidence a GSN safety-case
-  argument node should point to):
+  recommended starter scope; `safety-case`/`fmea`/`coupling` deferred to follow-ups since they need
+  real design work, e.g. what Ada-specific evidence a GSN safety-case argument node should point to):
   - `verify`: an evidence manifest listing every known artifact filename's presence, SHA-256 digest,
     and byte size. Always exits 0 — it documents current evidence state rather than gating on it.
   - `diff <a> <b>`: compares two report documents by finding fingerprint (§4.2), reporting
@@ -227,6 +226,15 @@ repro steps and rationale on each.
     estimate) driven by the same rule+disposition pipeline as `check`, or an explicit
     `--message`/`--color` override that skips analysis entirely. Always exits 0.
   - 4 new requirements (REQ-098–REQ-101).
+- **`boundary`/`impact` commands** (#26, continued): new `Fusa.Deps` module, a text-based
+  `with`-clause scanner (like `Fusa.Comp`, no full Ada parser) that builds an intra-project unit
+  dependency graph — a unit's `.ads`/`.adb` merge into one node; only context-clause `with`/`private
+  with` count (an Ada 2012+ aspect-specification `with`, which can only appear after the unit's own
+  declaration starts, is correctly excluded by stopping the scan there); dependencies outside the
+  project are filtered out. `boundary` renders the graph as Graphviz DOT or Mermaid. `impact
+  <file...>` resolves each file to its unit and reverse-BFS's the graph for every unit that
+  (directly or transitively) depends on it — deliberately conservative, since most files transitively
+  reach the shared root package. Both always exit 0. 3 new requirements (REQ-102–REQ-104).
 
 ## v0.1.0 — 2026-07-27
 

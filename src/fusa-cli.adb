@@ -14,6 +14,7 @@ with Fusa.Annotations; use Fusa.Annotations;
 with Fusa.Func_Scan;
 with Fusa.Comp;
 with Fusa.Badge;
+with Fusa.Deps;
 with Fusa.Report;
 with Fusa.Json.Writer;
 with Fusa.Sha256;
@@ -189,6 +190,8 @@ package body Fusa.Cli is
       W.Value ("verify");
       W.Value ("diff");
       W.Value ("badge");
+      W.Value ("boundary");
+      W.Value ("impact");
       W.Array_End;
 
       W.Key ("formats");
@@ -222,6 +225,8 @@ package body Fusa.Cli is
       W.Key ("verify");       W.Array_Start; W.Value ("text"); W.Value ("json"); W.Array_End;
       W.Key ("diff");         W.Array_Start; W.Value ("text"); W.Value ("json"); W.Array_End;
       W.Key ("badge");        W.Array_Start; W.Value ("svg"); W.Array_End;
+      W.Key ("boundary");     W.Array_Start; W.Value ("dot"); W.Value ("mermaid"); W.Array_End;
+      W.Key ("impact");       W.Array_Start; W.Value ("text"); W.Value ("json"); W.Array_End;
       W.Object_End;
 
       W.Key ("standards");
@@ -3305,6 +3310,231 @@ package body Fusa.Cli is
    end Cmd_Badge;
 
    ----------------------------------------------------------------------
+   --  boundary -- package/unit dependency graph (#26)
+   ----------------------------------------------------------------------
+
+   function Mermaid_Id (Name : String) return String is
+      Result : String (Name'Range);
+   begin
+      for I in Name'Range loop
+         Result (I) := (if Name (I) = '.' then '_' else Name (I));
+      end loop;
+      return Result;
+   end Mermaid_Id;
+
+   --  fusa:req REQ-103
+   function Cmd_Boundary (Args : String_List) return Integer is
+      Dir    : constant String := Dir_Of (Args);
+      Format : constant String := Flag_Value (Args, "--format", "dot");
+   begin
+      if Format /= "dot" and then Format /= "mermaid" then
+         Ada.Text_IO.Put_Line
+           (Ada.Text_IO.Standard_Error,
+            "ada-FuSa: boundary: unsupported --format '" & Format &
+            "' (supported: dot, mermaid)");
+         return Exit_Usage;
+      end if;
+
+      declare
+         Cfg : Fusa.Config.Project_Config;
+      begin
+         begin
+            Cfg := Fusa.Config.Load (Dir);
+         exception
+            when Fusa.Config.No_Config_Error =>
+               return Emit_Runtime_Error
+                 (Args, "boundary", "no-config", "no .fusa.json found in " & Dir);
+            when Fusa.Config.Invalid_Config_Error =>
+               return Emit_Runtime_Error
+                 (Args, "boundary", "invalid-config", "invalid .fusa.json in " & Dir);
+         end;
+
+         declare
+            Files : constant String_List := Fusa.Source_Scan.Find_Source_Files (Dir, Cfg);
+            Nodes : constant Fusa.Deps.Dep_Node_List := Fusa.Deps.Analyze (Dir, Files);
+            Buf   : Unbounded_String := Null_Unbounded_String;
+         begin
+            if Format = "mermaid" then
+               Append (Buf, "graph TD" & ASCII.LF);
+               for N of Nodes loop
+                  Append (Buf, "  " & Mermaid_Id (To_String (N.Name)) & "[""" &
+                            To_String (N.Name) & """]" & ASCII.LF);
+               end loop;
+               for N of Nodes loop
+                  for D of N.Deps loop
+                     Append (Buf, "  " & Mermaid_Id (To_String (N.Name)) & " --> " &
+                               Mermaid_Id (D) & ASCII.LF);
+                  end loop;
+               end loop;
+            else
+               Append (Buf, "digraph Boundary {" & ASCII.LF);
+               for N of Nodes loop
+                  Append (Buf, "  """ & To_String (N.Name) & """;" & ASCII.LF);
+               end loop;
+               for N of Nodes loop
+                  for D of N.Deps loop
+                     Append (Buf, "  """ & To_String (N.Name) & """ -> """ & D & """;" & ASCII.LF);
+                  end loop;
+               end loop;
+               Append (Buf, "}" & ASCII.LF);
+            end if;
+            Emit (Args, To_String (Buf));
+            return Exit_Ok;
+         end;
+      end;
+   end Cmd_Boundary;
+
+   ----------------------------------------------------------------------
+   --  impact -- change-impact analysis given a file list (#26)
+   ----------------------------------------------------------------------
+
+   --  fusa:req REQ-104
+   function Cmd_Impact (Args : String_List) return Integer is
+      Dir     : constant String := Dir_Of (Args);
+      Format  : constant String := Flag_Value (Args, "--format", "text");
+      Changed : String_List;
+   begin
+      if Format /= "text" and then Format /= "json" then
+         Ada.Text_IO.Put_Line
+           (Ada.Text_IO.Standard_Error,
+            "ada-FuSa: impact: unsupported --format '" & Format &
+            "' (supported: text, json)");
+         return Exit_Usage;
+      end if;
+
+      declare
+         I : Positive := 1;
+      begin
+         while I <= Natural (Args.Length) loop
+            declare
+               A : constant String := Args.Element (I);
+            begin
+               if A = "--dir" or else A = "--format" or else A = "--output" then
+                  I := I + 2;
+               elsif A'Length > 0 and then A (A'First) /= '-' then
+                  Changed.Append (A);
+                  I := I + 1;
+               else
+                  I := I + 1;
+               end if;
+            end;
+         end loop;
+      end;
+
+      if Changed.Is_Empty then
+         Ada.Text_IO.Put_Line
+           (Ada.Text_IO.Standard_Error, "ada-FuSa: impact: requires at least one changed file");
+         return Exit_Usage;
+      end if;
+
+      declare
+         Cfg : Fusa.Config.Project_Config;
+      begin
+         begin
+            Cfg := Fusa.Config.Load (Dir);
+         exception
+            when Fusa.Config.No_Config_Error =>
+               return Emit_Runtime_Error
+                 (Args, "impact", "no-config", "no .fusa.json found in " & Dir);
+            when Fusa.Config.Invalid_Config_Error =>
+               return Emit_Runtime_Error
+                 (Args, "impact", "invalid-config", "invalid .fusa.json in " & Dir);
+         end;
+
+         declare
+            Files    : constant String_List := Fusa.Source_Scan.Find_Source_Files (Dir, Cfg);
+            Nodes    : constant Fusa.Deps.Dep_Node_List := Fusa.Deps.Analyze (Dir, Files);
+            Impacted : Fusa.Deps.Dep_Node_List;
+         begin
+            for C of Changed loop
+               declare
+                  Unit : constant Fusa.Deps.Dep_Node := Fusa.Deps.Find_By_File (Nodes, C);
+               begin
+                  if Length (Unit.Name) > 0 then
+                     for R of Fusa.Deps.Reverse_Reachable (Nodes, To_String (Unit.Name)) loop
+                        declare
+                           Already : Boolean := False;
+                        begin
+                           for Ex of Impacted loop
+                              if To_String (Ex.Name) = To_String (R.Name) then
+                                 Already := True;
+                                 exit;
+                              end if;
+                           end loop;
+                           if not Already then
+                              Impacted.Append (R);
+                           end if;
+                        end;
+                     end loop;
+                  end if;
+               end;
+            end loop;
+
+            if Format = "json" then
+               declare
+                  W : Fusa.Json.Writer.Instance;
+               begin
+                  W.Object_Start;
+                  Fusa.Report.Write_Header (W, "impact-report");
+                  W.Key ("changed");
+                  W.Array_Start;
+                  for C of Changed loop
+                     declare
+                        Unit : constant Fusa.Deps.Dep_Node := Fusa.Deps.Find_By_File (Nodes, C);
+                     begin
+                        W.Object_Start;
+                        W.Field ("file", C);
+                        W.Field_If_Non_Blank ("unit", To_String (Unit.Name));
+                        W.Object_End;
+                     end;
+                  end loop;
+                  W.Array_End;
+                  W.Key ("impacted");
+                  W.Array_Start;
+                  for N of Impacted loop
+                     W.Object_Start;
+                     W.Field ("name", To_String (N.Name));
+                     W.Key ("files");
+                     W.Array_Start;
+                     for F of N.Files loop
+                        W.Value (F);
+                     end loop;
+                     W.Array_End;
+                     W.Object_End;
+                  end loop;
+                  W.Array_End;
+                  W.Object_End;
+                  Emit (Args, Fusa.Json.Writer.To_String (W));
+               end;
+            else
+               declare
+                  Buf : Unbounded_String := Null_Unbounded_String;
+               begin
+                  for C of Changed loop
+                     declare
+                        Unit : constant Fusa.Deps.Dep_Node := Fusa.Deps.Find_By_File (Nodes, C);
+                     begin
+                        if Length (Unit.Name) > 0 then
+                           Append (Buf, C & " -> " & To_String (Unit.Name) & ASCII.LF);
+                        else
+                           Append (Buf, C & " -> (not a recognised project unit)" & ASCII.LF);
+                        end if;
+                     end;
+                  end loop;
+                  Append (Buf, Trim_Img (Natural (Impacted.Length)) & " impacted unit(s):" &
+                            ASCII.LF);
+                  for N of Impacted loop
+                     Append (Buf, "  " & To_String (N.Name) & ASCII.LF);
+                  end loop;
+                  Emit (Args, To_String (Buf));
+               end;
+            end if;
+            return Exit_Ok;
+         end;
+      end;
+   end Cmd_Impact;
+
+   ----------------------------------------------------------------------
    --  Usage / dispatch
    ----------------------------------------------------------------------
 
@@ -3315,7 +3545,7 @@ package body Fusa.Cli is
         "commands: version capabilities init check trace qualify release audit-pack " &
         "report comp hara tara vuln req disposition pr metrics sign hooks " &
         "do178 iso26262 iso21434 iec61508 iec62443 unece slsa " &
-        "verify diff badge");
+        "verify diff badge boundary impact");
    end Print_Usage;
 
    function Run (Args : String_List) return Integer is
@@ -3390,6 +3620,10 @@ package body Fusa.Cli is
             return Cmd_Diff (Rest);
          elsif Cmd = "badge" then
             return Cmd_Badge (Rest);
+         elsif Cmd = "boundary" then
+            return Cmd_Boundary (Rest);
+         elsif Cmd = "impact" then
+            return Cmd_Impact (Rest);
          elsif Cmd = "--help" or else Cmd = "-h" or else Cmd = "help" then
             Print_Usage;
             return Exit_Ok;
