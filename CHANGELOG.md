@@ -61,6 +61,26 @@ repro steps and rationale on each.
 
 - Line coverage: 85.1% → 88.3%.
 
+### Fixed (CI self-check hardening)
+
+- **[HIGH]** `ADA002` (blanket exception handler) matched `case ... when others =>` — an ordinary
+  Ada default-case branch — as if it were a real `exception ... when others =>` catch-all, firing
+  4 false positives in ada-FuSa's own source. It now requires a bare `EXCEPTION` keyword within a
+  short backward lookback before classifying a match as a genuine handler.
+- **[MEDIUM]** The starter lint rules (`Scan_Substring`) had no string-literal awareness, so
+  ada-FuSa's own fixtures and rule needle-strings (which necessarily contain each rule's trigger
+  text) tripped their own rules; they now use the same quote-parity heuristic already used by the
+  annotation scanner.
+- **[LOW]** `-- fusa:unsafe` suppression comments only matched when placed *after* the flagged
+  line; a comment placed before it (the natural Ada convention) was ignored. Suppression lookback
+  is now bidirectional.
+
+### Changed (CI)
+
+- `check` and `trace --req-coverage 100` are now real, enforced gates in CI (previously
+  `continue-on-error: true`) — a regression in either ada-FuSa's own lint cleanliness or its
+  requirement traceability now fails the build.
+
 ## v0.1.0 — 2026-07-27
 
 Initial release. Implements the x-FuSa spec v1.11 §9.1 MUST command set end to end.
