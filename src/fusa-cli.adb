@@ -11,6 +11,7 @@ with Fusa.Source_Scan;
 with Fusa.Engine;
 with Fusa.Annotations; use Fusa.Annotations;
 with Fusa.Func_Scan;
+with Fusa.Comp;
 with Fusa.Report;
 with Fusa.Json.Writer;
 with Fusa.Sha256;
@@ -165,6 +166,7 @@ package body Fusa.Cli is
       W.Value ("release");
       W.Value ("audit-pack");
       W.Value ("report");
+      W.Value ("comp");
       W.Array_End;
 
       W.Key ("formats");
@@ -178,6 +180,7 @@ package body Fusa.Cli is
       W.Key ("release");      W.Array_Start; W.Value ("json"); W.Array_End;
       W.Key ("audit-pack");   W.Array_Start; W.Value ("json"); W.Array_End;
       W.Key ("report");       W.Array_Start; W.Value ("text"); W.Value ("json"); W.Value ("sarif"); W.Value ("html"); W.Value ("md"); W.Array_End;
+      W.Key ("comp");         W.Array_Start; W.Value ("text"); W.Value ("json"); W.Array_End;
       W.Object_End;
 
       W.Key ("standards");
@@ -1400,6 +1403,144 @@ package body Fusa.Cli is
    end Cmd_Report;
 
    ----------------------------------------------------------------------
+   --  comp
+   ----------------------------------------------------------------------
+
+   --  fusa:req REQ-081
+   function Cmd_Comp (Args : String_List) return Integer is
+      Dir           : constant String := Dir_Of (Args);
+      Format        : constant String := Flag_Value (Args, "--format", "text");
+      Threshold_Str : constant String := Flag_Value (Args, "--threshold", "");
+      Dal           : constant String := Flag_Value (Args, "--dal", "");
+      Dal_Given     : constant Boolean := Has_Flag (Args, "--dal");
+   begin
+      if Format /= "text" and then Format /= "json" then
+         Ada.Text_IO.Put_Line
+           (Ada.Text_IO.Standard_Error,
+            "ada-FuSa: comp: unsupported --format '" & Format &
+            "' (supported: text, json)");
+         return Exit_Usage;
+      end if;
+
+      if Dal_Given and then Dal /= "DAL-A" and then Dal /= "DAL-B"
+        and then Dal /= "DAL-C" and then Dal /= "DAL-D"
+      then
+         Ada.Text_IO.Put_Line
+           (Ada.Text_IO.Standard_Error,
+            "ada-FuSa: comp: --dal must be one of DAL-A, DAL-B, DAL-C, DAL-D");
+         return Exit_Usage;
+      end if;
+
+      declare
+         --  §9.2: A<=4, B<=10 (default), C<=15, D<=20; --dal overrides an
+         --  explicit --threshold when both are given.
+         Threshold : Natural := 10;
+      begin
+         if Dal_Given then
+            Threshold :=
+              (if Dal = "DAL-A" then 4
+               elsif Dal = "DAL-B" then 10
+               elsif Dal = "DAL-C" then 15
+               else 20);
+         elsif Threshold_Str'Length > 0 then
+            begin
+               Threshold := Natural'Value (Threshold_Str);
+            exception
+               when Constraint_Error =>
+                  Ada.Text_IO.Put_Line
+                    (Ada.Text_IO.Standard_Error,
+                     "ada-FuSa: comp: --threshold must be a non-negative integer");
+                  return Exit_Usage;
+            end;
+         end if;
+
+         if Threshold = 0 then
+            Ada.Text_IO.Put_Line
+              (Ada.Text_IO.Standard_Error,
+               "ada-FuSa: comp: --threshold must be at least 1");
+            return Exit_Usage;
+         end if;
+
+         declare
+            Cfg : Fusa.Config.Project_Config;
+         begin
+            begin
+               Cfg := Fusa.Config.Load (Dir);
+            exception
+               when Fusa.Config.No_Config_Error =>
+                  return Emit_Runtime_Error
+                    (Args, "comp-report", "no-config", "no .fusa.json found in " & Dir);
+               when Fusa.Config.Invalid_Config_Error =>
+                  return Emit_Runtime_Error
+                    (Args, "comp-report", "invalid-config", "invalid .fusa.json in " & Dir);
+            end;
+
+            declare
+               Files      : constant String_List :=
+                 Fusa.Source_Scan.Find_Source_Files (Dir, Cfg);
+               Results    : constant Fusa.Comp.Comp_Result_List :=
+                 Fusa.Comp.Analyze (Dir, Files, Threshold);
+               Violations : Natural := 0;
+            begin
+               for R of Results loop
+                  if R.Exceeds_Threshold then
+                     Violations := Violations + 1;
+                  end if;
+               end loop;
+
+               if Format = "json" then
+                  declare
+                     W : Fusa.Json.Writer.Instance;
+                  begin
+                     W.Object_Start;
+                     Fusa.Report.Write_Header (W, "comp-report");
+                     W.Field ("threshold", Threshold);
+                     if Dal_Given then
+                        W.Field ("dal", Dal);
+                     end if;
+                     W.Field ("totalFunctions", Natural (Results.Length));
+                     W.Field ("violations", Violations);
+                     W.Key ("results");
+                     W.Array_Start;
+                     for R of Results loop
+                        W.Object_Start;
+                        W.Field ("file", To_String (R.File));
+                        W.Field ("line", R.Line);
+                        W.Field ("name", To_String (R.Name));
+                        W.Field ("complexity", R.Complexity);
+                        W.Field ("exceedsThreshold", R.Exceeds_Threshold);
+                        W.Object_End;
+                     end loop;
+                     W.Array_End;
+                     W.Object_End;
+                     Emit (Args, Fusa.Json.Writer.To_String (W));
+                  end;
+               else
+                  declare
+                     Buf : Unbounded_String := Null_Unbounded_String;
+                  begin
+                     for R of Results loop
+                        Append (Buf, To_String (R.File) & ":" & Trim_Img (R.Line) & " " &
+                                  To_String (R.Name) & " complexity=" & Trim_Img (R.Complexity) &
+                                  (if R.Exceeds_Threshold then " [EXCEEDS]" else "") & ASCII.LF);
+                     end loop;
+                     Append (Buf, Trim_Img (Natural (Results.Length)) & " functions, " &
+                               Trim_Img (Violations) & " exceeding threshold " &
+                               Trim_Img (Threshold));
+                     Emit (Args, To_String (Buf));
+                  end;
+               end if;
+
+               if Violations > 0 then
+                  return Exit_Gate_Fail;
+               end if;
+               return Exit_Ok;
+            end;
+         end;
+      end;
+   end Cmd_Comp;
+
+   ----------------------------------------------------------------------
    --  Usage / dispatch
    ----------------------------------------------------------------------
 
@@ -1407,7 +1548,8 @@ package body Fusa.Cli is
    begin
       Ada.Text_IO.Put_Line (Ada.Text_IO.Standard_Error,
         "usage: adafusa <command> [options]" & ASCII.LF &
-        "commands: version capabilities init check trace qualify release audit-pack report");
+        "commands: version capabilities init check trace qualify release audit-pack " &
+        "report comp");
    end Print_Usage;
 
    function Run (Args : String_List) return Integer is
@@ -1442,6 +1584,8 @@ package body Fusa.Cli is
             return Cmd_Audit_Pack (Rest);
          elsif Cmd = "report" then
             return Cmd_Report (Rest);
+         elsif Cmd = "comp" then
+            return Cmd_Comp (Rest);
          elsif Cmd = "--help" or else Cmd = "-h" or else Cmd = "help" then
             Print_Usage;
             return Exit_Ok;
