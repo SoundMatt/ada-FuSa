@@ -1667,7 +1667,9 @@ package body Fusa.Cli is
                W : Fusa.Json.Writer.Instance;
             begin
                W.Object_Start;
-               Fusa.Report.Write_Header (W, "hara");
+               --  §1.2.5/§9.2: kind is "hara-report", not the bare
+               --  command name.
+               Fusa.Report.Write_Header (W, "hara-report");
                W.Key ("hazards");
                W.Array_Start;
                for H of Hazards loop
@@ -1742,7 +1744,9 @@ package body Fusa.Cli is
                W : Fusa.Json.Writer.Instance;
             begin
                W.Object_Start;
-               Fusa.Report.Write_Header (W, "tara");
+               --  §1.2.5/§9.2: kind is "tara-report", not the bare
+               --  command name.
+               Fusa.Report.Write_Header (W, "tara-report");
                W.Key ("threats");
                W.Array_Start;
                for T of Threats loop
@@ -2827,7 +2831,11 @@ package body Fusa.Cli is
                W : Fusa.Json.Writer.Instance;
             begin
                W.Object_Start;
-               Fusa.Report.Write_Header (W, Standard_Id & "-gap-report");
+               --  §3.1: the closed `kind` enum's gap-report value is the
+               --  literal string "gap-report" for every standard, NOT
+               --  "<standard>-gap-report" -- py-FuSa shipped this exact
+               --  mistake and had to fix it (spec change history, issue #1).
+               Fusa.Report.Write_Header (W, "gap-report");
                W.Field ("standard", Standard_Id);
                W.Key ("objectives");
                W.Array_Start;
@@ -2852,7 +2860,14 @@ package body Fusa.Cli is
                   W.Object_End;
                end loop;
                W.Array_End;
-               W.Key ("objectiveSummary");
+               --  §9.3 canonical schema: "summary" is the objectives
+               --  tally (total/satisfied/partial/gaps), NOT the generic
+               --  errors/warnings/infos tally every other JSON report
+               --  uses -- Write_Summary's default Key would collide with
+               --  it, so the config-validation findings below (GAP001/
+               --  GAP002 etc., e.g. a malformed objectives file) get a
+               --  distinctly-named "findingsSummary" instead.
+               W.Key ("summary");
                W.Object_Start;
                W.Field ("total", Natural (Objectives.Length));
                W.Field ("satisfied", Satisfied);
@@ -2860,7 +2875,7 @@ package body Fusa.Cli is
                W.Field ("gaps", Gaps);
                W.Object_End;
                Fusa.Report.Write_Findings_Array (W, Findings);
-               Fusa.Report.Write_Summary (W, Findings);
+               Fusa.Report.Write_Summary (W, Findings, "findingsSummary");
                W.Object_End;
                Emit (Args, Fusa.Json.Writer.To_String (W));
             end;

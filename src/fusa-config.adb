@@ -904,10 +904,18 @@ package body Fusa.Config is
                      O.Id     := To_Unbounded_String (Id);
                      O.Title  := To_Unbounded_String (Fusa.Json.Get_String (Item, "title"));
                      O.Clause := To_Unbounded_String (Fusa.Json.Get_String (Item, "clause"));
-                     O.Status := To_Unbounded_String (Status);
                      if Status /= "satisfied" and then Status /= "partial"
                        and then Status /= "gap"
                      then
+                        --  §9.3: "a consumer MUST map any unrecognised
+                        --  status to gap (fail-safe)" -- O.Status must
+                        --  actually be normalised, not just warned about,
+                        --  or the gap-report summary's
+                        --  satisfied+partial+gaps=total invariant breaks
+                        --  for every malformed-but-loadable objectives
+                        --  file (an unrecognised status matched none of
+                        --  the three tally branches).
+                        O.Status := To_Unbounded_String ("gap");
                         Findings.Append
                           (Make_Finding
                              (Rule_Id     => "GAP002",
@@ -920,6 +928,8 @@ package body Fusa.Config is
                               Category    => Fusa.Requirement,
                               Remediation =>
                                 "set status to one of satisfied, partial, or gap"));
+                     else
+                        O.Status := To_Unbounded_String (Status);
                      end if;
                      declare
                         Ev : constant Fusa.Json.Value_Access :=
