@@ -31,7 +31,26 @@ begin
       declare
          Text : constant String := Fusa.Report.Render_Text (Findings);
       begin
-         Check (Text'Length > 0, "Render_Text produces non-empty output for findings");
+         --  Regression: this used to only check Text'Length > 0, which
+         --  would still pass even if the implementation dropped findings,
+         --  mislabeled severities, or omitted rule ids -- unlike the
+         --  Render_Html/Render_Md checks just below, which explicitly
+         --  assert rule ids and message content are present. Render_Text
+         --  is the default, most-used human-readable output format (the
+         --  one every command prints with no --format flag), so a
+         --  regression here would ship undetected through the primary
+         --  output path.
+         Check (Ada.Strings.Fixed.Index (Text, "[ERROR] ADA001 a.adb:1 e1") > 0,
+                "Render_Text formats the ERROR finding as "
+                & "[SEVERITY] RULE_ID file:line message");
+         Check (Ada.Strings.Fixed.Index (Text, "[WARNING] ADA002 b.adb w1") > 0,
+                "Render_Text formats the WARNING finding, omitting the "
+                & "line number since Make_Location's default (0) means unset");
+         Check (Ada.Strings.Fixed.Index (Text, "[INFO] ADA007 c.adb i1") > 0,
+                "Render_Text formats the INFO finding");
+         Check (Ada.Strings.Fixed.Index (Text, "3 findings (1 errors, 1 warnings, 1 infos)") > 0,
+                "Render_Text's trailing summary line correctly tallies "
+                & "each severity, not just a raw count");
       end;
    end;
 

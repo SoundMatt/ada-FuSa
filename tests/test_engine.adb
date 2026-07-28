@@ -122,6 +122,81 @@ begin
       Check (Hits_Y = 0, "ADA001 is suppressed by a trailing -- fusa:unsafe comment");
    end;
 
+   --  Regression: the "-- fusa:unsafe" suppression window (5 lines back,
+   --  2 lines ahead) had no negative-path test proving a justification
+   --  comment OUTSIDE that window fails to suppress -- only the trivial
+   --  same-line case (Y.adb above) was covered, so a boundary-arithmetic
+   --  bug (off-by-one, or an accidentally unbounded window) could have
+   --  shipped undetected in either direction.
+   Fusa.Files.Write_File
+     (Root & "/src/lookback_in.adb",
+      "procedure Lookback_In is" & ASCII.LF &
+      "   -- fusa:unsafe justified" & ASCII.LF &
+      "   null;" & ASCII.LF & "   null;" & ASCII.LF &
+      "   null;" & ASCII.LF & "   null;" & ASCII.LF &
+      "   pragma Suppress (All_Checks);" & ASCII.LF &
+      "begin" & ASCII.LF & "   null;" & ASCII.LF & "end Lookback_In;" & ASCII.LF);
+   Fusa.Files.Write_File
+     (Root & "/src/lookback_out.adb",
+      "procedure Lookback_Out is" & ASCII.LF &
+      "   -- fusa:unsafe justified" & ASCII.LF &
+      "   null;" & ASCII.LF & "   null;" & ASCII.LF &
+      "   null;" & ASCII.LF & "   null;" & ASCII.LF & "   null;" & ASCII.LF &
+      "   pragma Suppress (All_Checks);" & ASCII.LF &
+      "begin" & ASCII.LF & "   null;" & ASCII.LF & "end Lookback_Out;" & ASCII.LF);
+   Fusa.Files.Write_File
+     (Root & "/src/lookahead_in.adb",
+      "procedure Lookahead_In is" & ASCII.LF &
+      "   pragma Suppress (All_Checks);" & ASCII.LF &
+      "   null;" & ASCII.LF &
+      "   -- fusa:unsafe justified" & ASCII.LF &
+      "begin" & ASCII.LF & "   null;" & ASCII.LF & "end Lookahead_In;" & ASCII.LF);
+   Fusa.Files.Write_File
+     (Root & "/src/lookahead_out.adb",
+      "procedure Lookahead_Out is" & ASCII.LF &
+      "   pragma Suppress (All_Checks);" & ASCII.LF &
+      "   null;" & ASCII.LF & "   null;" & ASCII.LF &
+      "   -- fusa:unsafe justified" & ASCII.LF &
+      "begin" & ASCII.LF & "   null;" & ASCII.LF & "end Lookahead_Out;" & ASCII.LF);
+   declare
+      Files    : String_List;
+      Findings : Finding_List;
+      Hits_Back_In, Hits_Back_Out, Hits_Ahead_In, Hits_Ahead_Out : Natural := 0;
+   begin
+      Files.Append ("src/lookback_in.adb");
+      Files.Append ("src/lookback_out.adb");
+      Files.Append ("src/lookahead_in.adb");
+      Files.Append ("src/lookahead_out.adb");
+      Findings := Fusa.Engine.Run_All (Root, Files);
+      for F of Findings loop
+         if To_String (F.Rule_Id) = "ADA001" then
+            if To_String (F.Loc.File) = "src/lookback_in.adb" then
+               Hits_Back_In := Hits_Back_In + 1;
+            elsif To_String (F.Loc.File) = "src/lookback_out.adb" then
+               Hits_Back_Out := Hits_Back_Out + 1;
+            elsif To_String (F.Loc.File) = "src/lookahead_in.adb" then
+               Hits_Ahead_In := Hits_Ahead_In + 1;
+            elsif To_String (F.Loc.File) = "src/lookahead_out.adb" then
+               Hits_Ahead_Out := Hits_Ahead_Out + 1;
+            end if;
+         end if;
+      end loop;
+      Check (Hits_Back_In = 0,
+             "a justification exactly 5 lines above the flagged line (the "
+             & "edge of the lookback window) still suppresses");
+      Check (Hits_Back_Out = 1,
+             "a justification 6 lines above the flagged line (just outside "
+             & "the lookback window) does NOT suppress -- the finding "
+             & "still fires");
+      Check (Hits_Ahead_In = 0,
+             "a justification exactly 2 lines below the flagged line (the "
+             & "edge of the lookahead window) still suppresses");
+      Check (Hits_Ahead_Out = 1,
+             "a justification 3 lines below the flagged line (just outside "
+             & "the lookahead window) does NOT suppress -- the finding "
+             & "still fires");
+   end;
+
    --  Regression (critical security): a sourceDirs entry of "../..." used
    --  to escape the project root entirely -- Find_Source_Files would
    --  scan (and, downstream via `fix --apply`, could overwrite) files

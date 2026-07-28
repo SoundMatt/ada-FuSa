@@ -91,5 +91,94 @@ begin
       end;
    end;
 
+   --  Regression: Write_Zip's central-directory offset bookkeeping
+   --  (Offsets array indexed by entry position) was only ever exercised
+   --  with single-entry archives, even though production usage always
+   --  writes 5-8 entries -- an accumulation bug (e.g. using the wrong
+   --  running total, or a name/data-length miscount) would silently
+   --  corrupt every offset after the first without any test catching it.
+   --  This walks the actual central directory and, for every entry,
+   --  follows its recorded local-file-header offset and verifies a real
+   --  local header with the matching name sits there -- proving the
+   --  offsets are correct, not just that the file is non-empty.
+   declare
+      function Read_U16 (S : String; At_Pos : Positive) return Natural is
+        (Character'Pos (S (At_Pos)) + Character'Pos (S (At_Pos + 1)) * 256);
+      function Read_U32 (S : String; At_Pos : Positive) return Natural is
+        (Character'Pos (S (At_Pos))
+         + Character'Pos (S (At_Pos + 1)) * 256
+         + Character'Pos (S (At_Pos + 2)) * 65536
+         + Character'Pos (S (At_Pos + 3)) * 16_777_216);
+
+      Entries : Fusa.Zip.Entry_List;
+      Path    : constant String := Root & "/multi.zip";
+      Names   : constant array (1 .. 6) of Unbounded_String :=
+        (To_Unbounded_String ("a.json"), To_Unbounded_String ("bb/report.json"),
+         To_Unbounded_String ("ccc.txt"), To_Unbounded_String ("d.md"),
+         To_Unbounded_String ("eeeee-evidence.json"), To_Unbounded_String ("f.zip.manifest"));
+      Datas   : constant array (1 .. 6) of Unbounded_String :=
+        (To_Unbounded_String ("{}"), To_Unbounded_String ("a longer body of report content"),
+         To_Unbounded_String ("x"), To_Unbounded_String ("# heading" & ASCII.LF & "text"),
+         To_Unbounded_String ("evidence payload, somewhat longer than the others"),
+         To_Unbounded_String (""));
+   begin
+      for I in Names'Range loop
+         Entries.Append (Fusa.Zip.Zip_Entry'(Name => Names (I), Data => Datas (I)));
+      end loop;
+      Fusa.Zip.Write_Zip (Path, Entries);
+
+      declare
+         Content : constant String := Fusa.Files.Read_File (Path);
+         --  The EOCD record is the fixed 22 bytes at the very end (none
+         --  of these entries use a zip comment).
+         Eocd    : constant Positive := Content'Last - 21;
+         Total_Entries : constant Natural := Read_U16 (Content, Eocd + 10);
+         Cd_Offset     : constant Natural := Read_U32 (Content, Eocd + 16);
+         Cd_Pos        : Natural := Content'First + Cd_Offset;
+         All_Verified  : Boolean := True;
+      begin
+         Check (Content (Eocd) = Character'Val (16#50#)
+                and then Content (Eocd + 1) = Character'Val (16#4B#)
+                and then Content (Eocd + 2) = Character'Val (16#05#)
+                and then Content (Eocd + 3) = Character'Val (16#06#),
+                "the end-of-central-directory record is where expected "
+                & "(22 bytes before end of file, no comment)");
+         Check (Total_Entries = 6,
+                "the EOCD's total-entries field reflects all 6 written entries");
+
+         for I in 1 .. Total_Entries loop
+            --  Central directory fixed header is 46 bytes; name-length
+            --  is at offset 28, local-header-offset at offset 42.
+            declare
+               Name_Len    : constant Natural := Read_U16 (Content, Cd_Pos + 28);
+               Local_Off   : constant Natural := Read_U32 (Content, Cd_Pos + 42);
+               Cd_Name     : constant String := Content (Cd_Pos + 46 .. Cd_Pos + 45 + Name_Len);
+               Local_Pos   : constant Natural := Content'First + Local_Off;
+               --  Local file header fixed portion is 30 bytes;
+               --  name-length is at offset 26.
+               Local_Name_Len : constant Natural := Read_U16 (Content, Local_Pos + 26);
+               Local_Name     : constant String :=
+                 Content (Local_Pos + 30 .. Local_Pos + 29 + Local_Name_Len);
+            begin
+               if Content (Local_Pos) /= Character'Val (16#50#)
+                 or else Content (Local_Pos + 1) /= Character'Val (16#4B#)
+                 or else Content (Local_Pos + 2) /= Character'Val (16#03#)
+                 or else Content (Local_Pos + 3) /= Character'Val (16#04#)
+                 or else Local_Name /= Cd_Name
+               then
+                  All_Verified := False;
+               end if;
+               Cd_Pos := Cd_Pos + 46 + Name_Len;
+            end;
+         end loop;
+         Check (All_Verified,
+                "every one of the 6 entries' central-directory "
+                & "local-header-offset actually points to a local file "
+                & "header whose name matches -- proving the offset "
+                & "bookkeeping accumulates correctly across multiple "
+                & "entries, not just the first");
+      end;
+   end;
+
    Ada.Directories.Delete_Tree (Root);
 end Test_Zip;
