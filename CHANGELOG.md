@@ -5,6 +5,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+### Added (deep-audit PR10/11 -- test-quality gaps)
+
+Continuing the multi-agent audit fix series. No production code changed in this PR -- three tests
+that were too weak to actually catch the regressions they were nominally guarding against:
+
+- **`-- fusa:unsafe` suppression window had no negative-path test**: the 5-line-back/2-line-ahead
+  window (ADA002's exception lookback is now unbounded, per PR8) was only ever exercised by the
+  trivial same-line case, so a boundary-arithmetic bug (off-by-one, or an accidentally unbounded
+  window) could have shipped in either direction undetected. Added four fixtures pinning the exact
+  edges: a justification exactly 5/2 lines back/ahead still suppresses, one line further does not.
+- **`Fusa.Zip.Write_Zip`'s central-directory offset bookkeeping was only tested with single-entry
+  archives**, even though production usage always writes 5-8 entries. An accumulation bug in the
+  running `Offsets` total would have silently corrupted every offset after the first. Added a
+  6-entry archive test with a pure-Ada byte-level parser that walks the actual central directory
+  and, for every entry, follows its recorded local-file-header offset and verifies a real local
+  header with the matching name sits there.
+- **`Render_Text` was only checked for non-empty length**: unlike its sibling `Render_Html`/
+  `Render_Md` tests in the same file, which explicitly assert rule ids and escaped message content,
+  a regression in `Render_Text`'s per-finding formatting could ship undetected through the default,
+  most-used human-readable output path. Added assertions for the exact
+  `[SEVERITY] RULE_ID file:line message` format and the trailing summary tally.
+
+10 new checks; 660/660 passing (was 650).
+
 ### Fixed (deep-audit PR9/11 -- cross-command consistency)
 
 Continuing the multi-agent audit fix series. Four consistency gaps across commands:
