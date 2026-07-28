@@ -437,4 +437,209 @@ package body Fusa.Config is
       end loop;
    end Apply_Dispositions;
 
+   ----------------------------------------------------------------------
+   --  .fusa-hara.json
+   ----------------------------------------------------------------------
+
+   function Hara_Exists (Project_Root : String) return Boolean is
+     (Fusa.Files.Exists (Fusa.Files.Join (Project_Root, Hara_File)));
+
+   function Load_Hara
+     (Project_Root : String;
+      Findings     : in out Finding_List) return Hazard_List
+   is
+      Result : Hazard_List;
+      Path   : constant String := Fusa.Files.Join (Project_Root, Hara_File);
+   begin
+      if not Fusa.Files.Exists (Path) then
+         return Result;
+      end if;
+
+      declare
+         Content : constant String := Fusa.Files.Read_File (Path);
+         Root    : Fusa.Json.Value_Access;
+      begin
+         begin
+            Root := Fusa.Json.Parse (Content);
+         exception
+            when Fusa.Json.Json_Error =>
+               raise Invalid_Config_Error with "parse error in " & Path;
+         end;
+
+         declare
+            Items : constant Fusa.Json.Value_Access :=
+              Fusa.Json.Get_Array (Root, "hazards");
+         begin
+            for I in 1 .. Fusa.Json.Array_Length (Items) loop
+               declare
+                  Item : constant Fusa.Json.Value_Access :=
+                    Fusa.Json.Array_Item (Items, I);
+                  Id   : constant String := Fusa.Json.Get_String (Item, "id");
+                  H    : Hazard;
+               begin
+                  H.Id              := To_Unbounded_String (Id);
+                  H.Description     := To_Unbounded_String (Fusa.Json.Get_String (Item, "hazard"));
+                  H.Severity        := To_Unbounded_String (Fusa.Json.Get_String (Item, "severity"));
+                  H.Exposure        := To_Unbounded_String (Fusa.Json.Get_String (Item, "exposure"));
+                  H.Controllability :=
+                    To_Unbounded_String (Fusa.Json.Get_String (Item, "controllability"));
+                  H.Asil            := To_Unbounded_String (Fusa.Json.Get_String (Item, "asil"));
+                  H.Safety_Goal     :=
+                    To_Unbounded_String (Fusa.Json.Get_String (Item, "safetyGoal"));
+
+                  if Id'Length = 0 then
+                     Findings.Append
+                       (Make_Finding
+                          (Rule_Id     => "HARA001",
+                           Severity    => Error,
+                           Message     =>
+                             "hazard at index" & Integer'Image (I) &
+                             " has a missing, empty, or non-string id in " & Hara_File,
+                           Loc         => Make_Location (Hara_File),
+                           Category    => Fusa.Safety,
+                           Remediation => "give this hazard a non-empty string ""id"""));
+                  else
+                     if Length (H.Description) = 0 or else Length (H.Severity) = 0
+                       or else Length (H.Exposure) = 0 or else Length (H.Controllability) = 0
+                       or else Length (H.Asil) = 0 or else Length (H.Safety_Goal) = 0
+                     then
+                        Findings.Append
+                          (Make_Finding
+                             (Rule_Id     => "HARA002",
+                              Severity    => Warning,
+                              Message     =>
+                                "hazard """ & Id & """ is missing one or more of hazard/" &
+                                "severity/exposure/controllability/asil/safetyGoal in " &
+                                Hara_File,
+                              Loc         => Make_Location (Hara_File),
+                              Category    => Fusa.Safety,
+                              Remediation =>
+                                "fill in all fields for a complete ISO 26262-3 hazard entry"));
+                     end if;
+                     Result.Append (H);
+                  end if;
+               end;
+            end loop;
+         end;
+      end;
+      return Result;
+   end Load_Hara;
+
+   procedure Scaffold_Hara (Project_Root : String) is
+   begin
+      if not Hara_Exists (Project_Root) then
+         Fusa.Files.Write_File
+           (Fusa.Files.Join (Project_Root, Hara_File), "{" & ASCII.LF &
+              "  ""hazards"": []" & ASCII.LF & "}" & ASCII.LF);
+      end if;
+   end Scaffold_Hara;
+
+   ----------------------------------------------------------------------
+   --  .fusa-tara.json
+   ----------------------------------------------------------------------
+
+   function Tara_Exists (Project_Root : String) return Boolean is
+     (Fusa.Files.Exists (Fusa.Files.Join (Project_Root, Tara_File)));
+
+   function Load_Tara
+     (Project_Root : String;
+      Findings     : in out Finding_List) return Threat_List
+   is
+      Result : Threat_List;
+      Path   : constant String := Fusa.Files.Join (Project_Root, Tara_File);
+   begin
+      if not Fusa.Files.Exists (Path) then
+         return Result;
+      end if;
+
+      declare
+         Content : constant String := Fusa.Files.Read_File (Path);
+         Root    : Fusa.Json.Value_Access;
+      begin
+         begin
+            Root := Fusa.Json.Parse (Content);
+         exception
+            when Fusa.Json.Json_Error =>
+               raise Invalid_Config_Error with "parse error in " & Path;
+         end;
+
+         declare
+            Items : constant Fusa.Json.Value_Access :=
+              Fusa.Json.Get_Array (Root, "threats");
+         begin
+            for I in 1 .. Fusa.Json.Array_Length (Items) loop
+               declare
+                  Item : constant Fusa.Json.Value_Access :=
+                    Fusa.Json.Array_Item (Items, I);
+                  Id   : constant String := Fusa.Json.Get_String (Item, "id");
+                  T    : Threat;
+               begin
+                  T.Id            := To_Unbounded_String (Id);
+                  T.Asset         := To_Unbounded_String (Fusa.Json.Get_String (Item, "asset"));
+                  T.Description   := To_Unbounded_String (Fusa.Json.Get_String (Item, "threat"));
+                  T.Attack_Vector :=
+                    To_Unbounded_String (Fusa.Json.Get_String (Item, "attackVector"));
+                  T.Impact        := To_Unbounded_String (Fusa.Json.Get_String (Item, "impact"));
+                  T.Likelihood    :=
+                    To_Unbounded_String (Fusa.Json.Get_String (Item, "likelihood"));
+                  T.Risk          := To_Unbounded_String (Fusa.Json.Get_String (Item, "risk"));
+                  T.Treatment     :=
+                    To_Unbounded_String (Fusa.Json.Get_String (Item, "treatment"));
+                  declare
+                     Mits : constant Fusa.Json.Value_Access :=
+                       Fusa.Json.Get_Array (Item, "mitigations");
+                  begin
+                     for J in 1 .. Fusa.Json.Array_Length (Mits) loop
+                        T.Mitigations.Append (Fusa.Json.As_String (Fusa.Json.Array_Item (Mits, J)));
+                     end loop;
+                  end;
+
+                  if Id'Length = 0 then
+                     Findings.Append
+                       (Make_Finding
+                          (Rule_Id     => "TARA001",
+                           Severity    => Error,
+                           Message     =>
+                             "threat at index" & Integer'Image (I) &
+                             " has a missing, empty, or non-string id in " & Tara_File,
+                           Loc         => Make_Location (Tara_File),
+                           Category    => Fusa.Security,
+                           Remediation => "give this threat a non-empty string ""id"""));
+                  else
+                     if Length (T.Asset) = 0 or else Length (T.Description) = 0
+                       or else Length (T.Attack_Vector) = 0 or else Length (T.Impact) = 0
+                       or else Length (T.Likelihood) = 0 or else Length (T.Risk) = 0
+                       or else Length (T.Treatment) = 0
+                     then
+                        Findings.Append
+                          (Make_Finding
+                             (Rule_Id     => "TARA002",
+                              Severity    => Warning,
+                              Message     =>
+                                "threat """ & Id & """ is missing one or more of asset/" &
+                                "threat/attackVector/impact/likelihood/risk/treatment in " &
+                                Tara_File,
+                              Loc         => Make_Location (Tara_File),
+                              Category    => Fusa.Security,
+                              Remediation =>
+                                "fill in all fields for a complete ISO 21434 ch.9 threat entry"));
+                     end if;
+                     Result.Append (T);
+                  end if;
+               end;
+            end loop;
+         end;
+      end;
+      return Result;
+   end Load_Tara;
+
+   procedure Scaffold_Tara (Project_Root : String) is
+   begin
+      if not Tara_Exists (Project_Root) then
+         Fusa.Files.Write_File
+           (Fusa.Files.Join (Project_Root, Tara_File), "{" & ASCII.LF &
+              "  ""threats"": []" & ASCII.LF & "}" & ASCII.LF);
+      end if;
+   end Scaffold_Tara;
+
 end Fusa.Config;

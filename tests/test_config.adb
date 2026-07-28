@@ -5,6 +5,7 @@ with Ada.Strings.Fixed;
 with Ada.Strings.Unbounded; use Ada.Strings.Unbounded;
 with Fusa; use Fusa;
 with Fusa.Config;
+with Fusa.Files;
 with Test_Framework; use Test_Framework;
 
 procedure Test_Config is
@@ -179,6 +180,73 @@ begin
       Check (Msg_Ok,
              "the error message distinguishes wrong-type from absent, "
              & "rather than misleadingly saying 'missing'");
+   end;
+
+   --  fusa:test REQ-082
+   Check (not Fusa.Config.Hara_Exists (Root), "no .fusa-hara.json initially");
+   Fusa.Config.Scaffold_Hara (Root);
+   Check (Fusa.Config.Hara_Exists (Root), ".fusa-hara.json exists after Scaffold_Hara");
+   declare
+      Findings : Finding_List;
+      Empty    : constant Fusa.Config.Hazard_List := Fusa.Config.Load_Hara (Root, Findings);
+   begin
+      Check (Natural (Empty.Length) = 0, "a freshly scaffolded hara template has no hazards");
+      Check (Natural (Findings.Length) = 0, "no validation findings against an empty template");
+   end;
+
+   Fusa.Files.Write_File
+     (Root & "/" & Fusa.Config.Hara_File,
+      "{""hazards"":[" &
+      "{""id"":""HAZ-001"",""hazard"":""h"",""severity"":""S3""," &
+      """exposure"":""E4"",""controllability"":""C3"",""asil"":""ASIL-D""," &
+      """safetyGoal"":""g""}," &
+      "{""id"":""HAZ-002"",""hazard"":""incomplete""}," &
+      "{""hazard"":""no id at all""}" &
+      "]}");
+   declare
+      Findings : Finding_List;
+      Hazards  : constant Fusa.Config.Hazard_List := Fusa.Config.Load_Hara (Root, Findings);
+      Errors, Warnings : Natural := 0;
+   begin
+      Check (Natural (Hazards.Length) = 2,
+             "only the two hazards with a non-empty id are returned "
+             & "(the one with no id at all is excluded, not just flagged)");
+      for F of Findings loop
+         case F.Severity is
+            when Error   => Errors := Errors + 1;
+            when Warning => Warnings := Warnings + 1;
+            when Info    => null;
+         end case;
+      end loop;
+      Check (Errors = 1, "a hazard with no id produces exactly one ERROR finding");
+      Check (Warnings = 1,
+             "a hazard with an id but missing other required fields "
+             & "produces exactly one WARNING finding");
+   end;
+
+   --  fusa:test REQ-083
+   Check (not Fusa.Config.Tara_Exists (Root), "no .fusa-tara.json initially");
+   Fusa.Config.Scaffold_Tara (Root);
+   Check (Fusa.Config.Tara_Exists (Root), ".fusa-tara.json exists after Scaffold_Tara");
+
+   Fusa.Files.Write_File
+     (Root & "/" & Fusa.Config.Tara_File,
+      "{""threats"":[" &
+      "{""id"":""THR-001"",""asset"":""a"",""threat"":""t""," &
+      """attackVector"":""av"",""impact"":""i"",""likelihood"":""l""," &
+      """risk"":""r"",""treatment"":""tr"",""mitigations"":[""m1"",""m2""]}," &
+      "{""threat"":""no id at all""}" &
+      "]}");
+   declare
+      Findings : Finding_List;
+      Threats  : constant Fusa.Config.Threat_List := Fusa.Config.Load_Tara (Root, Findings);
+   begin
+      Check (Natural (Threats.Length) = 1, "only the threat with a non-empty id is returned");
+      Check (Natural (Threats.Element (1).Mitigations.Length) = 2,
+             "the mitigations array round-trips with both entries");
+      Check (Natural (Findings.Length) = 1
+             and then Findings.Element (1).Severity = Error,
+             "a threat with no id produces exactly one ERROR finding");
    end;
 
    Ada.Directories.Delete_Tree (Root);
