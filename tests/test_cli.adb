@@ -110,6 +110,27 @@ begin
           "check exits 0 for a WARNING-only finding without --strict");
    Check (Fusa.Cli.Run (Args ("check", "--dir", Root, "--strict")) = Exit_Gate_Fail,
           "check --strict exits 1 (gate fail) once a WARNING is present");
+
+   --  fusa:test REQ-072
+   --  End-to-end: check reads .fusa-dispositions.json (ruleId+file+line
+   --  fallback match, since no fingerprint is computed by hand here) and
+   --  an "accepted" waiver suppresses the --strict gate; "rejected" does not.
+   Fusa.Files.Write_File
+     (Root & "/.fusa-dispositions.json",
+      "{""dispositions"":[{""ruleId"":""ADA002"",""file"":""src/bad.adb""," &
+      """line"":5,""status"":""accepted""}]}");
+   Check (Fusa.Cli.Run (Args ("check", "--dir", Root, "--strict")) = Exit_Ok,
+          "check --strict exits 0 once the only WARNING is 'accepted' "
+          & "via .fusa-dispositions.json");
+   Fusa.Files.Write_File
+     (Root & "/.fusa-dispositions.json",
+      "{""dispositions"":[{""ruleId"":""ADA002"",""file"":""src/bad.adb""," &
+      """line"":5,""status"":""rejected""}]}");
+   Check (Fusa.Cli.Run (Args ("check", "--dir", Root, "--strict")) = Exit_Gate_Fail,
+          "check --strict still exits 1 when the disposition is 'rejected' "
+          & "(a denied waiver, not a dismissal)");
+   Ada.Directories.Delete_File (Root & "/.fusa-dispositions.json");
+
    --  fusa:test REQ-015
    Check (Fusa.Cli.Run (Args ("report", "--dir", Root)) = Exit_Ok,
           "report always exits 0, even with findings present");

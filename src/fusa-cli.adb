@@ -340,6 +340,20 @@ package body Fusa.Cli is
                Findings.Append (F);
             end loop;
 
+            --  fusa:req REQ-072
+            if Fusa.Config.Dispositions_Exist (Dir) then
+               declare
+                  Disps          : constant Fusa.Config.Disposition_List :=
+                    Fusa.Config.Load_Dispositions (Dir);
+                  Orphan_Findings : Finding_List;
+               begin
+                  Fusa.Config.Apply_Dispositions (Findings, Disps, Orphan_Findings);
+                  for F of Orphan_Findings loop
+                     Findings.Append (F);
+                  end loop;
+               end;
+            end if;
+
             if Format = "json" then
                declare
                   W : Fusa.Json.Writer.Instance;
@@ -986,8 +1000,22 @@ package body Fusa.Cli is
 
          declare
             Files    : constant String_List := Fusa.Source_Scan.Find_Source_Files (Dir, Cfg);
-            Findings : constant Finding_List := Fusa.Engine.Run_All (Dir, Files);
+            Findings : Finding_List := Fusa.Engine.Run_All (Dir, Files);
          begin
+            --  fusa:req REQ-072
+            if Fusa.Config.Dispositions_Exist (Dir) then
+               declare
+                  Disps          : constant Fusa.Config.Disposition_List :=
+                    Fusa.Config.Load_Dispositions (Dir);
+                  Orphan_Findings : Finding_List;
+               begin
+                  Fusa.Config.Apply_Dispositions (Findings, Disps, Orphan_Findings);
+                  for F of Orphan_Findings loop
+                     Findings.Append (F);
+                  end loop;
+               end;
+            end if;
+
             if Format = "json" then
                declare
                   W : Fusa.Json.Writer.Instance;

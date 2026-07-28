@@ -161,6 +161,34 @@ comment block immediately above, i.e. a multi-line doc comment). The counting ru
 - `--func-coverage` is **not** implied by `--strict` (unlike `--req-coverage`/`--sec-tested`) — it
   is a distinct axis that must be requested explicitly, since it is still a phased/SHOULD provision.
 
+### Dispositions / waivers (spec §4.1, SHOULD)
+
+`check` and `report` read a `.fusa-dispositions.json` at the project root, if present, and apply
+each entry's `status` to matching findings before gating:
+
+```jsonc
+{
+  "dispositions": [
+    { "fingerprint": "sha256:…",  "status": "accepted", "note": "reviewed in SC-42" },
+    { "ruleId": "ADA002", "file": "src/x.adb", "line": 42, "status": "deferred" },
+    { "ruleId": "ADA005", "status": "rejected" }
+  ]
+}
+```
+
+- **Matching** — `fingerprint` (primary; matches when both the finding and the entry carry one) →
+  `ruleId` + `file` + `line` (fallback) → `ruleId` only (rule-level fallback, suppresses every
+  finding for that rule project-wide).
+- **`accepted`/`deferred`** are waivers: the finding stays in the output (marked via its
+  `disposition` field) but does not by itself cause `check` to exit `1`.
+- **`rejected`** is *not* a waiver — it records that a proposed waiver was denied, so the finding
+  remains fully open and still gates.
+- An `accepted`/`deferred` entry that matches no finding in the current run (e.g. stale after a
+  refactor) surfaces a `DISP001` WARNING (category `config`); an orphaned `rejected` entry is
+  silent, since a denied waiver with no matching finding just means the issue was fixed.
+- Managing this file via a `disposition` CLI verb (`list`/`add`) is not yet implemented — edit it
+  directly for now (tracked in #29).
+
 ## Rule Reference
 
 ### ADA — Ada Quality and Style Guide
@@ -208,8 +236,6 @@ with the other six x-FuSa tools:
 - Only 8 starter rules ship, versus 40+ in the more mature sibling tools.
 - `html`/`md` output formats are not implemented for any command; `capabilities` accurately reports
   only the formats each command actually supports.
-- Finding **dispositions** (`.fusa-dispositions.json`, waiver workflow) are not implemented — per
-  spec §4.1 this is a SHOULD, and every finding is treated as open.
 - `init`'s interactive TTY prompting only asks for name/standard; ASIL/SIL/DAL must be passed as
   flags even when run interactively.
 - CI currently targets **Linux only**. macOS and Windows GNAT toolchain availability has not been

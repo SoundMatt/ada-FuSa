@@ -413,6 +413,24 @@
       "title": "Strict-mode gate failure determination",
       "text": "Has_Gate_Failure reports whether a findings list should fail a strict-mode gate: any ERROR always gates, a WARNING only gates under --strict.",
       "level": "SW"
+    },
+    {
+      "id": "REQ-070",
+      "title": "Dispositions file presence check",
+      "text": "Dispositions_Exist reports whether a .fusa-dispositions.json file is present under a project root.",
+      "level": "SW"
+    },
+    {
+      "id": "REQ-071",
+      "title": "Dispositions file loading",
+      "text": "Load_Dispositions parses .fusa-dispositions.json into a Disposition_List, returning an empty list when absent and treating an entry with a missing or unrecognised status as never-applicable.",
+      "level": "SW"
+    },
+    {
+      "id": "REQ-072",
+      "title": "Disposition matching and orphan detection",
+      "text": "Apply_Dispositions matches each finding to a disposition entry per spec section 4.1 (fingerprint primary key; ruleId+file+line or ruleId-only rule-level fallback) and sets its disposition accordingly; an accepted or deferred entry matching no finding surfaces a DISP001 WARNING (category config), while an orphaned rejected entry is silent.",
+      "level": "SW"
     }
   ]
 }
