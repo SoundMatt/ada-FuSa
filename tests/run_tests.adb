@@ -15,6 +15,7 @@ with Test_Disposition;
 with Test_Comp;
 with Test_Hmac;
 with Test_Badge;
+with Test_Deps;
 with Test_Cli;
 
 procedure Run_Tests is
@@ -34,6 +35,7 @@ begin
    Test_Comp;
    Test_Hmac;
    Test_Badge;
+   Test_Deps;
    Test_Cli;
 
    if Test_Framework.Report then

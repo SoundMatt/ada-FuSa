@@ -605,6 +605,24 @@
       "title": "badge command (SVG status badge)",
       "text": "badge runs the same check pipeline as check (rules + dispositions) and renders a red/yellow/green SVG status badge via Fusa.Badge based on error/warning counts; --label/--message/--color let it render an arbitrary custom badge without running check at all. Always exits 0.",
       "level": "SW"
+    },
+    {
+      "id": "REQ-102",
+      "title": "package/unit dependency graph module",
+      "text": "Fusa.Deps.Analyze extracts each Ada source file's package name and its context-clause with/private-with dependencies via text scanning (Fusa.Files.Split_Lines), merging a unit's .ads and .adb into one node and filtering to intra-project dependencies only. A with appearing after the unit's own package/procedure/function line (e.g. an aspect-specification with) is correctly excluded, since scanning stops there. Find_By_File resolves a changed file to its unit; Reverse_Reachable does a breadth-first search for every unit that (directly or transitively) depends on a given unit.",
+      "level": "SW"
+    },
+    {
+      "id": "REQ-103",
+      "title": "boundary command (dependency graph)",
+      "text": "boundary renders Fusa.Deps.Analyze's dependency graph as Graphviz DOT or Mermaid. Purely descriptive -- always exits 0, no gating threshold.",
+      "level": "SW"
+    },
+    {
+      "id": "REQ-104",
+      "title": "impact command (change-impact analysis)",
+      "text": "impact <file...> resolves each given file to its unit via Fusa.Deps.Find_By_File, then unions Reverse_Reachable across all resolved units to report which other units would be affected. A file that isn't a recognised project unit is reported as such rather than erroring, since not every changed file is Ada source. Always exits 0.",
+      "level": "SW"
     }
   ]
 }
