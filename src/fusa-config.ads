@@ -337,7 +337,7 @@ package Fusa.Config is
       Occurrence   : Natural := 0;
       Detection    : Natural := 0;
       Rpn          : Natural := 0; --  Severity * Occurrence * Detection when all three are set
-      Mitigation   : Unbounded_String;
+      Mitigations  : String_List;
    end record;
 
    package Fmea_Entry_Vectors is new
@@ -406,5 +406,55 @@ package Fusa.Config is
 
    --  fusa:req REQ-107
    procedure Scaffold_Safety_Case (Project_Root : String);
+
+   ------------------------------------------------------------------
+   --  .fusa-verify.json (`verify` command, #26/spec §13 canonical
+   --  direction: `{ passed, failed, suites:[{name,passed,failed,
+   --  tests:[{name,result}]}] }`, "result" per spec section 6's
+   --  PASS|FAIL|SKIP|ERROR enum). Same input-file-driven pattern as
+   --  hara/tara/fmea -- ada-FuSa cannot itself determine whether a
+   --  project's verification activities passed; a human or a CI pipeline
+   --  records each test's outcome, and this command only aggregates and
+   --  validates the counts, never fabricates a result.
+   ------------------------------------------------------------------
+
+   Verify_File : constant String := ".fusa-verify.json";
+
+   type Verify_Test is record
+      Name   : Unbounded_String;
+      Result : Unbounded_String; --  PASS | FAIL | SKIP | ERROR
+   end record;
+
+   package Verify_Test_Vectors is new
+     Ada.Containers.Indefinite_Vectors (Positive, Verify_Test);
+   subtype Verify_Test_List is Verify_Test_Vectors.Vector;
+
+   type Verify_Suite is record
+      Name  : Unbounded_String;
+      Tests : Verify_Test_List;
+   end record;
+
+   package Verify_Suite_Vectors is new
+     Ada.Containers.Indefinite_Vectors (Positive, Verify_Suite);
+   subtype Verify_Suite_List is Verify_Suite_Vectors.Vector;
+
+   --  fusa:req REQ-099
+   function Verify_Exists (Project_Root : String) return Boolean;
+
+   --  Loads .fusa-verify.json. Returns an empty list if absent. A suite
+   --  missing "name" is an ERROR (excluded, along with all its tests); a
+   --  test missing "name" is an ERROR (excluded); a test with a missing
+   --  or unrecognised "result" is a WARNING (kept, but counted toward
+   --  neither Passed nor Failed). Passed/Failed are always COMPUTED from
+   --  the individual tests[], never trusted from redundant input fields,
+   --  the same way fmea's rpn is computed rather than blindly accepted.
+   --  fusa:req REQ-099
+   function Load_Verify
+     (Project_Root : String;
+      Findings     : in out Finding_List;
+      Passed, Failed : out Natural) return Verify_Suite_List;
+
+   --  fusa:req REQ-099
+   procedure Scaffold_Verify (Project_Root : String);
 
 end Fusa.Config;

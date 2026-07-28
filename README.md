@@ -96,8 +96,8 @@ the simplest route, since GNAT is not distributed via Homebrew.
 | `adafusa sign sign\|verify <file> --key <key>` | HMAC-SHA256 evidence-file signing | text |
 | `adafusa hooks install\|remove` | Git pre-commit hook running `check --strict` | text |
 | `adafusa do178\|iso26262\|iso21434\|iec61508\|iec62443\|unece\|slsa [--dir]` | Standards gap-report: load/validate `.fusa-<standard>-objectives.json`; scaffolds a template if absent | text, json |
-| `adafusa verify [--dir]` | Evidence manifest: presence/SHA-256/size of known evidence artifacts; always exits 0 | text, json |
-| `adafusa diff <report-a> <report-b> [--strict]` | Compare two `check`-style report documents by finding fingerprint | text, json |
+| `adafusa verify [--dir]` | Load/validate `.fusa-verify.json` test-suite results; scaffolds a template if absent | text, json |
+| `adafusa diff --baseline <file> [--dir] [--strict]` | Compare a live `check` run against a prior `check --format json` baseline, by finding fingerprint | text, json |
 | `adafusa badge [--dir] [--label] [--message] [--color]` | SVG status badge (red/yellow/green from `check`, or a custom `--message`/`--color`); always exits 0 | svg |
 | `adafusa boundary [--dir] [--format dot\|mermaid]` | Package/unit dependency graph from `with`-clause scanning; always exits 0 | dot, mermaid |
 | `adafusa impact <file...> [--dir]` | Which project units are (transitively) affected by changing the given files; always exits 0 | text, json |
@@ -299,15 +299,19 @@ own objective list.
 
 ## Evidence & Verification Utilities
 
-- **`verify`** enumerates ada-FuSa's known evidence-artifact filenames (`.fusa.json`,
-  `.fusa-reqs.json`, `qualify-report.json`, `sbom.json`, `comp-report.json`, `vuln.json`, …) and
-  reports, for each, whether it's present and — if so — its SHA-256 digest and byte size. It always
-  exits `0`: it documents the current evidence state, it doesn't gate on it.
-- **`diff <report-a> <report-b>`** compares two `check`/`report`-style JSON documents by each
-  finding's `fingerprint` (§4.2), reporting which findings were added, removed, or unchanged.
-  Gate-fails if any *added* finding is `ERROR` severity, or (with `--strict`) if anything was added
-  at all; a finding that was *removed* never gates — fixing something is never a failure. Useful in
-  CI to fail a PR that introduces new findings without re-running the full rule suite from scratch.
+- **`verify`** loads/validates `.fusa-verify.json` — a test-suite results file (`{ suites: [{
+  name, tests: [{name, result}] }] }`, `result` one of `PASS`/`FAIL`/`SKIP`/`ERROR`) — following the
+  same input-file-driven pattern as `hara`/`tara`: ada-FuSa cannot itself determine whether your
+  project's verification activities passed, so a human or a CI pipeline records each test's outcome
+  and `verify` only aggregates (`passed`/`failed` are always *computed* from the individual tests,
+  never trusted from redundant input) and validates structure. Gate-fails on a missing suite/test
+  name, or when any test's `result` is `FAIL`.
+- **`diff --baseline <file>`** compares a **live** `check` run against a prior `check --format json`
+  snapshot, by finding `fingerprint` (§4.2) — like `report`, the "current" side is always freshly
+  analysed, never read from a second file. Gate-fails if any *added* finding is `ERROR` severity, or
+  (with `--strict`) if anything was added at all; a finding that was *removed* never gates — fixing
+  something is never a failure. Useful in CI to fail a PR that introduces new findings against a
+  saved baseline.
 - **`badge`** renders a self-contained shields.io-style SVG status badge (new `Fusa.Badge` module,
   zero external dependencies — no real font metrics, so text width is estimated from character
   count). By default it runs the same rule + disposition pipeline as `check` and picks
@@ -326,24 +330,30 @@ own objective list.
   broad transitive impact set through that shared root, the same way a real Ada compiler would
   reconsider all of those units' dependencies. Both always exit `0` (purely descriptive; a file that
   isn't a recognised project unit is reported as such, not treated as an error).
-- **`coupling`** reuses the same `Fusa.Deps` graph to report each unit's fan-in (units that depend
-  on it), fan-out (units it depends on), and total, sorted with the most-coupled units first. This
-  is an honest **structural proxy** via the `with`-clause graph — it is explicitly *not* a full
+- **`coupling`** reuses the same `Fusa.Deps` graph, emitted as `--format json`'s `{ modules:
+  [{name, fanIn, fanOut}], edges: [{from, to, weight}], metrics: {...} }` — the spec's documented
+  canonical direction for this command (a graph, not a flat finding-list-shaped array; an earlier
+  revision of this command used the latter, which the spec explicitly warns against deepening
+  investment in). `--format text` lists units sorted by total coupling, most-coupled first. This is
+  an honest **structural proxy** via the `with`-clause graph — it is explicitly *not* a full
   DO-178C §6.4.4.3 data/control coupling analysis, which requires source-level parameter and
   global-data flow analysis this tool does not perform. Treat high-coupling units as a starting
   point for manual review, not a certification artifact on its own. Always exits `0`.
 - **`fmea`**/**`safety-case`** are, like `hara`/`tara`, input-file-driven validators — a Design
   FMEA's failure modes and severity/occurrence/detection ratings, and a GSN safety-case argument's
   soundness, are a human safety/certification engineer's judgement calls that ada-FuSa has no way to
-  generate or verify. `fmea` loads/validates `.fusa-fmea.json`; the one thing it *does* compute is
-  RPN = severity × occurrence × detection when not explicitly given, flagging (never silently
-  overwriting) an explicit `rpn` that disagrees. `safety-case` loads/validates
-  `.fusa-safety-case.json` (GSN goal/strategy/context/solution/assumption/justification nodes with
-  `supportedBy`/`inContextOf` edges), checking only *structural* well-formedness — every id unique,
-  every edge resolving to a real node — and renders the argument as a text/Markdown outline or a
-  Mermaid diagram; it never claims the argument itself is valid or complete. Both scaffold an empty
-  template on first run and gate only on structural errors (missing id; for `safety-case`, also a
-  dangling `supportedBy`/`inContextOf` reference).
+  generate or verify. `fmea` loads/validates `.fusa-fmea.json`; entries carry a `mitigations[]`
+  array (not a single string); the one thing this command *does* compute is RPN = severity ×
+  occurrence × detection when not explicitly given, flagging (never silently overwriting) an
+  explicit `rpn` that disagrees. `safety-case` loads/validates `.fusa-safety-case.json` (GSN
+  goal/strategy/context/solution/assumption/justification nodes, with `supportedBy`/`inContextOf`
+  relationships given per-node in the *input* file), checking only *structural* well-formedness —
+  every id unique, every reference resolving to a real node — and renders the argument as a
+  text/Markdown outline, a Mermaid diagram, or (in `--format json`) the spec's canonical `{ nodes:
+  [{id,type,text}], edges: [{from,to,type}] }` shape, with `supportedBy`/`inContextOf` promoted to a
+  top-level `edges[]` array rather than embedded per-node. It never claims the argument itself is
+  valid or complete. Both scaffold an empty template on first run and gate only on structural
+  errors (missing id; for `safety-case`, also a dangling reference).
 
 ## Evidence Artifacts
 

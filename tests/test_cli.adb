@@ -358,29 +358,48 @@ begin
          Ada.Directories.Delete_Tree (Verify_Root);
       end if;
       Ada.Directories.Create_Path (Verify_Root);
+      Check (not Fusa.Files.Exists (Verify_Root & "/.fusa-verify.json"),
+             "no .fusa-verify.json initially");
       Check (Fusa.Cli.Run (Args ("verify", "--dir", Verify_Root)) = Exit_Ok,
-             "verify exits 0 even when no evidence artifacts exist at all");
+             "verify with no .fusa-verify.json scaffolds a template and exits 0");
+      Check (Fusa.Files.Exists (Verify_Root & "/.fusa-verify.json"),
+             "verify created .fusa-verify.json");
+
+      Fusa.Files.Write_File
+        (Verify_Root & "/.fusa-verify.json",
+         "{""suites"":[{""name"":""unit-tests"",""tests"":[" &
+         "{""name"":""t1"",""result"":""PASS""}," &
+         "{""name"":""t2"",""result"":""PASS""}," &
+         "{""name"":""t3"",""result"":""FAIL""}]}]}");
       declare
          Exit_Code : Integer;
-         Out_Empty : constant String :=
+         Out_Text  : constant String :=
            Run_Capturing_Stdout (Args ("verify", "--dir", Verify_Root), Exit_Code);
       begin
-         Check (Ada.Strings.Fixed.Index (Out_Empty, "0/") > 0,
-                "verify reports 0 present artifacts against an empty project");
+         Check (Exit_Code = Exit_Gate_Fail,
+                "verify gate-fails once any test in the suite has result FAIL");
+         Check (Ada.Strings.Fixed.Index (Out_Text, "2 passed, 1 failed") > 0,
+                "verify's text output reports the computed passed/failed counts "
+                & "(2 PASS + 1 FAIL among the three tests)");
       end;
-      Fusa.Files.Write_File (Verify_Root & "/.fusa.json", "{""project"":{""name"":""t""}}");
       declare
          Exit_Code : Integer;
          Out_Json  : constant String :=
            Run_Capturing_Stdout
              (Args ("verify", "--dir", Verify_Root, "--format", "json"), Exit_Code);
       begin
-         Check (Exit_Code = Exit_Ok, "verify --format json still exits 0");
-         Check (Ada.Strings.Fixed.Index (Out_Json, """present"": true") > 0
-                and then Ada.Strings.Fixed.Index (Out_Json, """sha256"":") > 0,
-                "verify --format json reports present=true and a sha256 digest for "
-                & "an artifact that now exists");
+         Check (Ada.Strings.Fixed.Index (Out_Json, """passed"": 2") > 0
+                and then Ada.Strings.Fixed.Index (Out_Json, """failed"": 1") > 0,
+                "verify --format json reports the canonical top-level passed/failed fields");
+         Check (Ada.Strings.Fixed.Index (Out_Json, """suites"":") > 0
+                and then Ada.Strings.Fixed.Index (Out_Json, """tests"":") > 0,
+                "verify --format json nests suites[].tests[] per the spec canonical shape");
       end;
+
+      Fusa.Files.Write_File
+        (Verify_Root & "/.fusa-verify.json", "{""suites"":[{""tests"":[]}]}");
+      Check (Fusa.Cli.Run (Args ("verify", "--dir", Verify_Root)) = Exit_Gate_Fail,
+             "verify gate-fails once a suite with no name is present (ERROR finding)");
       Ada.Directories.Delete_Tree (Verify_Root);
    end;
 
@@ -450,41 +469,45 @@ begin
         (Diff_Root & "/.fusa.json", "{""project"":{""name"":""diffproj""},""standard"":""generic""}");
       Fusa.Files.Write_File (Diff_Root & "/.fusa-reqs.json", "{""requirements"":[]}");
 
-      Check (Fusa.Cli.Run (Args ("diff", Diff_Root & "/a.json")) = Exit_Usage,
-             "diff with only one report path exits 2 (usage)");
+      Check (Fusa.Cli.Run (Args ("diff", "--dir", Diff_Root)) = Exit_Usage,
+             "diff with no --baseline exits 2 (usage)");
+      Check (Fusa.Cli.Run
+               (Args ("diff", "--dir", Diff_Root, "--baseline", Diff_Root & "/nope.json"))
+             = Exit_Runtime,
+             "diff against a nonexistent baseline file exits 3 (runtime error)");
 
+      --  Snapshot the clean state as the baseline.
       declare
          Exit_Code_A : Integer;
       begin
          Fusa.Files.Write_File
-           (Diff_Root & "/a.json",
+           (Diff_Root & "/baseline.json",
             Run_Capturing_Stdout
               (Args ("check", "--dir", Diff_Root, "--format", "json"), Exit_Code_A));
       end;
+
+      Check (Fusa.Cli.Run
+               (Args ("diff", "--dir", Diff_Root, "--baseline", Diff_Root & "/baseline.json"))
+             = Exit_Ok,
+             "diff against a baseline matching the current (live) state exits 0 "
+             & "(nothing added)");
+
+      --  Introduce a new ERROR finding; diff's "current" side is always a
+      --  live check run, never a second saved file.
       Fusa.Files.Write_File
         (Diff_Root & "/src/bad.adb",
          "procedure Bad is begin pragma Suppress (All_Checks); end Bad;" & ASCII.LF);
-      declare
-         Exit_Code_B : Integer;
-      begin
-         Fusa.Files.Write_File
-           (Diff_Root & "/b.json",
-            Run_Capturing_Stdout
-              (Args ("check", "--dir", Diff_Root, "--format", "json"), Exit_Code_B));
-      end;
-
       Check (Fusa.Cli.Run
-               (Args ("diff", Diff_Root & "/a.json", Diff_Root & "/a.json")) = Exit_Ok,
-             "diffing a report against itself exits 0 (nothing added)");
-      Check (Fusa.Cli.Run
-               (Args ("diff", Diff_Root & "/a.json", Diff_Root & "/b.json")) = Exit_Gate_Fail,
-             "diff gate-fails once the second report has a new ERROR finding the first "
+               (Args ("diff", "--dir", Diff_Root, "--baseline", Diff_Root & "/baseline.json"))
+             = Exit_Gate_Fail,
+             "diff gate-fails once the live project has a new ERROR finding the baseline "
              & "did not have");
       declare
          Exit_Code : Integer;
          Out_Text  : constant String :=
            Run_Capturing_Stdout
-             (Args ("diff", Diff_Root & "/a.json", Diff_Root & "/b.json"), Exit_Code);
+             (Args ("diff", "--dir", Diff_Root, "--baseline", Diff_Root & "/baseline.json"),
+              Exit_Code);
       begin
          Check (Ada.Strings.Fixed.Index (Out_Text, "+ [ERROR] ADA001") > 0,
                 "diff's text output marks the newly-added ADA001 finding with a leading '+'");
@@ -493,19 +516,34 @@ begin
          Exit_Code : Integer;
          Out_Json  : constant String :=
            Run_Capturing_Stdout
-             (Args ("diff", Diff_Root & "/a.json", Diff_Root & "/b.json", "--format", "json"),
+             (Args ("diff", "--dir", Diff_Root, "--baseline", Diff_Root & "/baseline.json",
+                    "--format", "json"),
               Exit_Code);
       begin
-         Check (Ada.Strings.Fixed.Index (Out_Json, """added"": 1") > 0,
-                "diff --format json reports exactly one added finding");
+         Check (Ada.Strings.Fixed.Index (Out_Json, """unchanged"":") > 0,
+                "diff --format json reports the unchanged count");
+         Check (Ada.Strings.Fixed.Index (Out_Json, """ruleId""") = 0,
+                "diff --format json's added/removed are bare fingerprint strings, "
+                & "not full finding objects with a ruleId field, per the spec canonical shape");
       end;
+
+      --  Snapshot again with bad.adb present, then remove it: the ERROR
+      --  finding disappears from the live side (a "removed" case), which
+      --  must never gate -- fixing something is never a failure.
+      declare
+         Exit_Code_B : Integer;
+      begin
+         Fusa.Files.Write_File
+           (Diff_Root & "/baseline2.json",
+            Run_Capturing_Stdout
+              (Args ("check", "--dir", Diff_Root, "--format", "json"), Exit_Code_B));
+      end;
+      Ada.Directories.Delete_File (Diff_Root & "/src/bad.adb");
       Check (Fusa.Cli.Run
-               (Args ("diff", Diff_Root & "/b.json", Diff_Root & "/a.json")) = Exit_Ok,
-             "diffing in the other direction (an ERROR finding REMOVED, not added) does not "
-             & "gate -- fixing something is never a failure");
-      Check (Fusa.Cli.Run
-               (Args ("diff", Diff_Root & "/a.json", Diff_Root & "/nope.json")) = Exit_Runtime,
-             "diff against a nonexistent report file exits 3 (runtime error)");
+               (Args ("diff", "--dir", Diff_Root, "--baseline", Diff_Root & "/baseline2.json"))
+             = Exit_Ok,
+             "diff does not gate when a finding disappeared (removed), only when one "
+             & "was added");
       Ada.Directories.Delete_Tree (Diff_Root);
    end;
 
@@ -659,6 +697,20 @@ begin
              "safety-case --format mermaid emits a Mermaid graph");
       Check (Ada.Strings.Fixed.Index (Out_Mmd, "G1 --> Sn1") > 0,
              "safety-case --format mermaid shows the supportedBy edge");
+   end;
+   declare
+      Exit_Code : Integer;
+      Out_Json  : constant String :=
+        Run_Capturing_Stdout
+          (Args ("safety-case", "--dir", Root, "--format", "json"), Exit_Code);
+   begin
+      Check (Ada.Strings.Fixed.Index (Out_Json, """edges"":") > 0
+             and then Ada.Strings.Fixed.Index (Out_Json, """from"": ""G1""") > 0
+             and then Ada.Strings.Fixed.Index (Out_Json, """to"": ""Sn1""") > 0,
+             "safety-case --format json puts supportedBy in a top-level edges[] array "
+             & "(from/to/type), per the spec canonical shape, not embedded per-node");
+      Check (Ada.Strings.Fixed.Index (Out_Json, """supportedBy"":") = 0,
+             "safety-case --format json no longer embeds supportedBy directly on each node");
    end;
    Fusa.Files.Write_File
      (Root & "/.fusa-safety-case.json",

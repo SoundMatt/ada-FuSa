@@ -5,6 +5,37 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+### Changed (BREAKING — §13 schema realignment)
+
+Per spec §16 step 8 ("Evidence (SHOULD): the §9.2/§9.3 commands, following the §13 canonical
+directions so the new tool doesn't recreate the existing divergences"), a self-audit found five
+already-shipped commands had drifted from the spec's documented canonical direction. All five are
+corrected here — a breaking change to each command's JSON shape (and, for `diff`, its CLI flags):
+
+- **`verify`** was an auto-generated evidence-artifact-presence manifest; the spec's canonical
+  shape is a test-suite-results structure. Redesigned as an input-file-driven validator (like
+  `hara`/`tara`) for `.fusa-verify.json` (`{suites:[{name,tests:[{name,result}]}]}`,
+  `result` one of `PASS`/`FAIL`/`SKIP`/`ERROR`, per spec §6's enum). `passed`/`failed` are always
+  computed from the individual tests, never trusted from redundant input. Gates on a missing
+  suite/test name or any `FAIL`.
+- **`diff`** took two positional report-file paths; the canonical interface is `--baseline <file>`
+  against a **live** `check` run (the "current" side is never a second saved file, mirroring how
+  `report` always re-analyses rather than reading a cached file). Output narrowed from full finding
+  objects to the canonical `{added:[fingerprint], removed:[fingerprint], unchanged:N}` — bare
+  fingerprint strings. Severity is still used internally to decide the exit code; it's just no
+  longer repeated in the output.
+- **`fmea`** entries carried a single `mitigation` string; the canonical field is `mitigations[]`
+  (an array).
+- **`coupling`** emitted a flat array of `{name,fanIn,fanOut,total}` (finding-list-shaped, which
+  the spec explicitly warns against deepening investment in); now emits the canonical graph
+  `{modules:[{name,fanIn,fanOut}], edges:[{from,to,weight}], metrics:{...}}`.
+- **`safety-case`** embedded `supportedBy`/`inContextOf` directly on each node in `--format json`
+  output; the canonical shape promotes them to a top-level `edges:[{from,to,type}]` array
+  (`.fusa-safety-case.json`'s *input* shape is unaffected — it still records them per-node, since
+  that's the more natural authoring format; only the rendered JSON output moved).
+
+No change to `hara`/`tara`/the standards gap-report commands, which were already conformant.
+
 A deep post-release audit (four independent code-review passes, each finding verified by direct
 execution before being filed) turned up 19 bugs, all fixed here. See issues #2–#20 for full
 repro steps and rationale on each.
