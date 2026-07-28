@@ -56,29 +56,39 @@ package Fusa.Json is
    --  All accessors treat a null V, a V of the wrong Kind, or a missing Key
    --  as "absent" and return the supplied default rather than raising.
 
+   --  fusa:req REQ-032
    function Is_Object (V : Value_Access) return Boolean;
+   --  fusa:req REQ-032
    function Is_Array  (V : Value_Access) return Boolean;
 
+   --  fusa:req REQ-033
    function Has_Key (V : Value_Access; Key : String) return Boolean;
 
    --  Returns the member's value, or null if V is not an object or Key is
    --  absent.
+   --  fusa:req REQ-034
    function Get_Member (V : Value_Access; Key : String) return Value_Access;
 
+   --  fusa:req REQ-035
    function Get_String
      (V : Value_Access; Key : String; Default : String := "") return String;
 
+   --  fusa:req REQ-035
    function Get_Bool
      (V : Value_Access; Key : String; Default : Boolean := False) return Boolean;
 
    --  Returns the array member for Key, or null if absent / not an array.
+   --  fusa:req REQ-036
    function Get_Array (V : Value_Access; Key : String) return Value_Access;
 
+   --  fusa:req REQ-036
    function Array_Length (V : Value_Access) return Natural;
    --  V must be a non-null Json_Array value (see Get_Array).
+   --  fusa:req REQ-036
    function Array_Item (V : Value_Access; Index : Positive) return Value_Access;
 
    --  Direct (non-Key-mediated) string extraction, e.g. for array elements.
+   --  fusa:req REQ-035
    function As_String (V : Value_Access; Default : String := "") return String;
 
 end Fusa.Json;

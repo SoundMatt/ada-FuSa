@@ -10,6 +10,7 @@ with Fusa.Files;
 with Fusa.Source_Scan;
 with Fusa.Engine;
 with Fusa.Annotations; use Fusa.Annotations;
+with Fusa.Func_Scan;
 with Fusa.Report;
 with Fusa.Json.Writer;
 with Fusa.Sha256;
@@ -380,6 +381,7 @@ package body Fusa.Cli is
       Strict : constant Boolean := Has_Flag (Args, "--strict");
       Req_Cov_Str    : constant String := Flag_Value (Args, "--req-coverage", "");
       Sec_Tested_Str : constant String := Flag_Value (Args, "--sec-tested", "");
+      Func_Cov_Str   : constant String := Flag_Value (Args, "--func-coverage", "");
    begin
       if Format /= "text" and then Format /= "json" then
          Ada.Text_IO.Put_Line
@@ -412,6 +414,11 @@ package body Fusa.Cli is
             Tags  : constant Fusa.Annotations.Tag_List :=
               Fusa.Annotations.Scan (Dir, Files, Ann_Findings);
             Total : constant Natural := Natural (Reqs.Length);
+
+            --  fusa:req REQ-024
+            Funcs : constant Fusa.Func_Scan.Func_List :=
+              Fusa.Func_Scan.Scan_Public_Functions (Dir, Files);
+            Func_Total, Func_Tagged_Count : Natural := 0;
 
             type Req_Status is record
                Traced, Tested, Sec_Tested : Boolean := False;
@@ -468,13 +475,24 @@ package body Fusa.Cli is
                end if;
             end loop;
 
+            Func_Total := Natural (Funcs.Length);
+            for Fn of Funcs loop
+               if Fn.Has_Tag then
+                  Func_Tagged_Count := Func_Tagged_Count + 1;
+               end if;
+            end loop;
+
             declare
                Req_Cov_Pct    : constant Natural :=
                  (if Total = 0 then 100 else Traced_Count * 100 / Total);
                Sec_Tested_Pct : constant Natural :=
                  (if Total = 0 then 100 else Sec_Tested_Count * 100 / Total);
+               Func_Cov_Pct   : constant Natural :=
+                 (if Func_Total = 0 then 100
+                  else Func_Tagged_Count * 100 / Func_Total);
                Req_Threshold  : Natural := 0;
                Sec_Threshold  : Natural := 0;
+               Func_Threshold : Natural := 0;
                Gate_Fail      : Boolean := False;
             begin
                --  Each threshold is parsed (and, under --strict, defaulted
@@ -511,10 +529,29 @@ package body Fusa.Cli is
                   Sec_Threshold := 100;
                end if;
 
+               --  §1.4.1: --func-coverage is SHOULD/phased and NOT implied
+               --  by --strict (unlike --req-coverage/--sec-tested) -- only
+               --  an explicit --func-coverage N applies this gate.
+               if Func_Cov_Str'Length > 0 then
+                  begin
+                     Func_Threshold := Natural'Value (Func_Cov_Str);
+                  exception
+                     when Constraint_Error =>
+                        Ada.Text_IO.Put_Line
+                          (Ada.Text_IO.Standard_Error,
+                           "ada-FuSa: trace: --func-coverage must be a " &
+                           "non-negative integer");
+                        return Exit_Usage;
+                  end;
+               end if;
+
                if Req_Threshold > 0 and then Req_Cov_Pct < Req_Threshold then
                   Gate_Fail := True;
                end if;
                if Sec_Threshold > 0 and then Sec_Tested_Pct < Sec_Threshold then
+                  Gate_Fail := True;
+               end if;
+               if Func_Threshold > 0 and then Func_Cov_Pct < Func_Threshold then
                   Gate_Fail := True;
                end if;
 
@@ -577,6 +614,8 @@ package body Fusa.Cli is
                      W.Field ("tracedRequirements", Traced_Count);
                      W.Field ("testedRequirements", Tested_Count);
                      W.Field ("secTestedRequirements", Sec_Tested_Count);
+                     W.Field ("totalFunctions", Func_Total);
+                     W.Field ("taggedFunctions", Func_Tagged_Count);
                      W.Object_End;
 
                      W.Object_End;
@@ -590,6 +629,8 @@ package body Fusa.Cli is
                                " traced:" & Trim_Img (Traced_Count) &
                                " tested:" & Trim_Img (Tested_Count) &
                                " sec-tested:" & Trim_Img (Sec_Tested_Count) & ASCII.LF);
+                     Append (Buf, "functions:" & Trim_Img (Func_Total) &
+                               " tagged:" & Trim_Img (Func_Tagged_Count) & ASCII.LF);
                      for I in 1 .. Total loop
                         if not Gaps or else not Statuses (I).Tested then
                            Append (Buf, "  " & To_String (Reqs.Element (I).Id) &

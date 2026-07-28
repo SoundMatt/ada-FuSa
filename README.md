@@ -78,7 +78,7 @@ the simplest route, since GNAT is not distributed via Homebrew.
 | `adafusa capabilities [--format json]` | Machine-readable command/format inventory | json |
 | `adafusa init [name] [--name] [--standard] [--asil\|--sil\|--dal] [--force]` | Create `.fusa.json` + `.fusa-reqs.json` | text |
 | `adafusa check [--dir] [--strict]` | Run all rules and report findings | text, json, sarif |
-| `adafusa trace [--dir] [--gaps] [--req-coverage N] [--sec-tested N]` | Requirement ↔ code traceability matrix | text, json |
+| `adafusa trace [--dir] [--gaps] [--req-coverage N] [--sec-tested N] [--func-coverage N]` | Requirement ↔ code traceability matrix | text, json |
 | `adafusa qualify [--dir]` | Run the tool-qualification known-answer suite | text, json |
 | `adafusa release [--dir] [--output-dir] [--full]` | Generate `sbom.json` (+ full evidence pipeline) | json |
 | `adafusa audit-pack [--dir] [--output]` | Bundle all evidence artifacts into a ZIP | json |
@@ -141,6 +141,25 @@ end Checksum_Test;
 One requirement id per `fusa:req` / `fusa:test` / `fusa:sec-test` line; trailing free-text
 description after the id is fine, but a second id on the same line is reported as a malformed
 annotation (WARNING).
+
+### Function-level tagging and `--func-coverage` (spec §1.4.1, SHOULD/phased)
+
+`trace --func-coverage N` gates on the percentage of a project's **public** function/procedure
+declarations that carry a `fusa:req` tag directly above them (or anywhere in the contiguous
+comment block immediately above, i.e. a multi-line doc comment). The counting rule:
+
+- Only declarations in a `.ads` file's visible (public) part count — anything after a bare
+  `private` line, and anything in a `.adb` body that isn't also declared in the matching `.ads`,
+  is excluded (a `.adb`-only helper isn't part of the package's public API).
+- `.ads` files under a `tests/`/`test/` directory are excluded — §1.4.1 targets a tool's own
+  safety-relevant implementation, not test scaffolding, even though the same directory is
+  otherwise in-scope for `fusa:req`/`fusa:test` annotation scanning.
+- Generic formal subprogram parameters (`with function`/`with procedure`) are not counted.
+- Each overload is counted separately — three overloads of the same name need three tags (which
+  may reference the same requirement id; nothing requires distinct ids for closely-related
+  overloads).
+- `--func-coverage` is **not** implied by `--strict` (unlike `--req-coverage`/`--sec-tested`) — it
+  is a distinct axis that must be requested explicitly, since it is still a phased/SHOULD provision.
 
 ## Rule Reference
 

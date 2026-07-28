@@ -21,30 +21,44 @@ package Fusa.Json.Writer is
 
    type Instance is tagged limited private;
 
+   --  fusa:req REQ-025
    procedure Object_Start (W : in out Instance);
+   --  fusa:req REQ-025
    procedure Object_End   (W : in out Instance);
+   --  fusa:req REQ-025
    procedure Array_Start  (W : in out Instance);
+   --  fusa:req REQ-025
    procedure Array_End    (W : in out Instance);
 
    --  Writes `"key": ` inside the currently-open object; the next call
    --  (Value/Object_Start/Array_Start/Null_Value) supplies the value.
+   --  fusa:req REQ-026
    procedure Key (W : in out Instance; K : String);
 
+   --  fusa:req REQ-027
    procedure Value      (W : in out Instance; S : String);
+   --  fusa:req REQ-027
    procedure Value      (W : in out Instance; N : Integer);
+   --  fusa:req REQ-027
    procedure Value      (W : in out Instance; B : Boolean);
+   --  fusa:req REQ-028
    procedure Null_Value  (W : in out Instance);
 
    --  Convenience: Key (W, K); Value (W, V);
+   --  fusa:req REQ-029
    procedure Field (W : in out Instance; K, V : String);
+   --  fusa:req REQ-029
    procedure Field (W : in out Instance; K : String; V : Integer);
+   --  fusa:req REQ-029
    procedure Field (W : in out Instance; K : String; V : Boolean);
 
    --  Field (W, K, V) is skipped entirely (no key/value written) when V
    --  is blank -- used for MAY string fields the spec says to omit rather
    --  than emit empty (e.g. asil/sil/dal, clause, standard).
+   --  fusa:req REQ-030
    procedure Field_If_Non_Blank (W : in out Instance; K, V : String);
 
+   --  fusa:req REQ-031
    function To_String (W : Instance) return String;
 
 private

@@ -72,8 +72,8 @@ jobs:
           bin/adafusa init --name ada-fusa --standard generic
           bin/adafusa check --format json --output fusa-report.json
 
-      - name: Requirement traceability gate (100% req + test coverage)
-        run: bin/adafusa trace --req-coverage 100
+      - name: Requirement traceability gate (100% req + function coverage)
+        run: bin/adafusa trace --req-coverage 100 --func-coverage 100
 
       - name: Generate evidence artifacts
         run: |

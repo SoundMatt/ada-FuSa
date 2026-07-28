@@ -2,67 +2,67 @@
   "requirements": [
     {
       "id": "REQ-001",
-      "title": "x-FuSa spec §2.3 exit codes",
+      "title": "x-FuSa spec \u00a72.3 exit codes",
       "text": "Every command returns exactly one of: 0 (ok), 1 (gate failure), 2 (usage error), 3 (runtime error).",
       "level": "SW"
     },
     {
       "id": "REQ-002",
-      "title": "x-FuSa spec §2.4 severity enum",
+      "title": "x-FuSa spec \u00a72.4 severity enum",
       "text": "Finding severity is exactly one of ERROR, WARNING, INFO (uppercase).",
       "level": "SW"
     },
     {
       "id": "REQ-003",
-      "title": "x-FuSa spec §2.8 distinct version keys",
+      "title": "x-FuSa spec \u00a72.8 distinct version keys",
       "text": "schemaVersion (report envelopes, MAJOR.MINOR) and specVersion (version/capabilities, full spec release) are never conflated into a single constant.",
       "level": "SW"
     },
     {
       "id": "REQ-004",
-      "title": "x-FuSa spec §4.2 fingerprint algorithm",
+      "title": "x-FuSa spec \u00a74.2 fingerprint algorithm",
       "text": "Finding.fingerprint = sha256:hex(ruleId US location.file US normalizedMessage), with digit runs folded to '#' and whitespace collapsed.",
       "level": "SW"
     },
     {
       "id": "REQ-005",
-      "title": "x-FuSa spec §1.2 .fusa.json load",
+      "title": "x-FuSa spec \u00a71.2 .fusa.json load",
       "text": "project.name and standard are read (MUST); at most one of asil/sil/dal is read; the legacy flat project string form is accepted and normalised.",
       "level": "SW"
     },
     {
       "id": "REQ-006",
-      "title": "x-FuSa spec §1.2 .fusa-reqs.json integrity",
+      "title": "x-FuSa spec \u00a71.2 .fusa-reqs.json integrity",
       "text": "A duplicate or missing/empty/non-string requirement id surfaces as an ERROR finding rather than being silently merged or dropped.",
       "level": "SW"
     },
     {
       "id": "REQ-007",
-      "title": "x-FuSa spec §9.1 version command",
+      "title": "x-FuSa spec \u00a79.1 version command",
       "text": "adafusa version prints '<tool> <version>' and, under --format json, {tool, version, specVersion} with no envelope.",
       "level": "SW"
     },
     {
       "id": "REQ-008",
-      "title": "x-FuSa spec §9.1 capabilities command",
+      "title": "x-FuSa spec \u00a79.1 capabilities command",
       "text": "adafusa capabilities reports the commands, per-command formats, and standards this build actually supports.",
       "level": "SW"
     },
     {
       "id": "REQ-009",
-      "title": "x-FuSa spec §9.1 init command",
+      "title": "x-FuSa spec \u00a79.1 init command",
       "text": "adafusa init creates .fusa.json and .fusa-reqs.json; --force overwrites; a missing required value with no TTY exits 2, never a placeholder.",
       "level": "SW"
     },
     {
       "id": "REQ-010",
-      "title": "x-FuSa spec §4 check command",
+      "title": "x-FuSa spec \u00a74 check command",
       "text": "adafusa check runs every registered rule, emits a findings[] + summary, and gates (exit 1) on any open ERROR (or WARNING under --strict).",
       "level": "SW"
     },
     {
       "id": "REQ-011",
-      "title": "x-FuSa spec §5 trace command",
+      "title": "x-FuSa spec \u00a75 trace command",
       "text": "adafusa trace computes tracedRequirements/testedRequirements/secTestedRequirements and gates on --req-coverage/--sec-tested/--strict thresholds.",
       "level": "SW"
     },
@@ -86,13 +86,13 @@
     },
     {
       "id": "REQ-015",
-      "title": "x-FuSa spec §9.1 report command",
+      "title": "x-FuSa spec \u00a79.1 report command",
       "text": "adafusa report re-runs analysis fresh and always exits 0 regardless of findings (only usage/runtime errors apply).",
       "level": "SW"
     },
     {
       "id": "REQ-016",
-      "title": "x-FuSa spec §1.4 annotation scanning",
+      "title": "x-FuSa spec \u00a71.4 annotation scanning",
       "text": "-- fusa:req / -- fusa:test / -- fusa:sec-test comments are scanned for exactly one requirement id per line, without false-positiving on prose or string-literal content that merely mentions the marker.",
       "level": "SW"
     },
@@ -136,6 +136,282 @@
       "id": "REQ-023",
       "title": "Style-only starter rules report category 'style', not 'safety'",
       "text": "ADA005 (line length), ADA006 (tab character), and ADA008 (Warnings suppression) report category 'style' rather than the blanket ADA-prefix 'safety' mapping, so a consumer filtering by category does not see style nits bundled in with safety-relevant findings.",
+      "level": "SW"
+    },
+    {
+      "id": "REQ-024",
+      "title": "Function-level tag scanner",
+      "text": "Scans a project's .ads files for public function/procedure declarations and determines which carry a directly-preceding fusa:req tag, for trace's --func-coverage gate (spec section 1.4.1).",
+      "level": "SW"
+    },
+    {
+      "id": "REQ-025",
+      "title": "JSON writer container start/end",
+      "text": "Object_Start/Object_End/Array_Start/Array_End open and close a JSON object or array, validating balanced nesting and raising Writer_Error on protocol misuse.",
+      "level": "SW"
+    },
+    {
+      "id": "REQ-026",
+      "title": "JSON writer object key emission",
+      "text": "Key emits an object member's key, validating it is only called where an object key is expected.",
+      "level": "SW"
+    },
+    {
+      "id": "REQ-027",
+      "title": "JSON writer scalar value emission",
+      "text": "Value emits a String, Integer, or Boolean scalar as the next array element or object value.",
+      "level": "SW"
+    },
+    {
+      "id": "REQ-028",
+      "title": "JSON writer null value emission",
+      "text": "Null_Value emits a JSON null as the next array element or object value.",
+      "level": "SW"
+    },
+    {
+      "id": "REQ-029",
+      "title": "JSON writer key+value field shorthand",
+      "text": "Field emits a String, Integer, or Boolean key/value pair in a single call, equivalent to Key followed by Value.",
+      "level": "SW"
+    },
+    {
+      "id": "REQ-030",
+      "title": "JSON writer conditional field emission",
+      "text": "Field_If_Non_Blank emits a key/value pair only when the value is non-empty, used for optional report fields.",
+      "level": "SW"
+    },
+    {
+      "id": "REQ-031",
+      "title": "JSON writer buffer materialization",
+      "text": "To_String returns the accumulated JSON document text, independent of whether all containers have been closed.",
+      "level": "SW"
+    },
+    {
+      "id": "REQ-032",
+      "title": "JSON value kind predicates",
+      "text": "Is_Object/Is_Array report whether a parsed JSON value is an object or array, used to validate document shape before further access.",
+      "level": "SW"
+    },
+    {
+      "id": "REQ-033",
+      "title": "JSON object key presence check",
+      "text": "Has_Key reports whether an object value has a given member key, without raising on a missing key.",
+      "level": "SW"
+    },
+    {
+      "id": "REQ-034",
+      "title": "JSON object member access",
+      "text": "Get_Member returns the value of an object member by key, or null if absent, for structural navigation.",
+      "level": "SW"
+    },
+    {
+      "id": "REQ-035",
+      "title": "JSON scalar value accessors",
+      "text": "Get_String/Get_Bool/As_String read a typed scalar value from a parsed JSON value or object member, with a caller-supplied default when absent.",
+      "level": "SW"
+    },
+    {
+      "id": "REQ-036",
+      "title": "JSON array accessors",
+      "text": "Get_Array/Array_Length/Array_Item navigate a parsed JSON array member by key, length, and 1-indexed element.",
+      "level": "SW"
+    },
+    {
+      "id": "REQ-037",
+      "title": "CLI command dispatch",
+      "text": "Run dispatches argv (excluding argv[0]) to the matching section 9.1 command handler and returns its process exit code.",
+      "level": "SW"
+    },
+    {
+      "id": "REQ-038",
+      "title": "Rule interface identity contract",
+      "text": "Id/Description are the dispatching operations every concrete rule implements to report its stable rule id and human-readable description.",
+      "level": "SW"
+    },
+    {
+      "id": "REQ-039",
+      "title": "Rule interface execution contract",
+      "text": "Run is the dispatching operation every concrete rule implements to scan a project's source files and return its findings.",
+      "level": "SW"
+    },
+    {
+      "id": "REQ-040",
+      "title": "Rule registration",
+      "text": "Register adds a rule to the process-lifetime registry in ascending rule-id order, raising Duplicate_Rule_Error on a colliding id.",
+      "level": "SW"
+    },
+    {
+      "id": "REQ-041",
+      "title": "Rule registry enumeration",
+      "text": "Rule_Count/Get_Rule expose the registered rule set by count and 1-indexed position, in ascending rule-id order.",
+      "level": "SW"
+    },
+    {
+      "id": "REQ-042",
+      "title": "Rule engine execution over all registered rules",
+      "text": "Run_All runs every registered rule over a project's source files and concatenates their findings in rule-id order.",
+      "level": "SW"
+    },
+    {
+      "id": "REQ-043",
+      "title": "Enum-to-string Image rendering",
+      "text": "Image renders a Severity_Kind, Category_Kind, or Disposition_Kind enum value to its canonical lowercase JSON string form.",
+      "level": "SW"
+    },
+    {
+      "id": "REQ-044",
+      "title": "Location record construction",
+      "text": "Make_Location builds a Location record from a project-relative file path and optional line/column/end-line/end-column fields.",
+      "level": "SW"
+    },
+    {
+      "id": "REQ-045",
+      "title": "Finding record construction with fingerprint",
+      "text": "Make_Finding builds a Finding record and computes its section 4.2 fingerprint automatically, so every constructed Finding is fingerprint-consistent.",
+      "level": "SW"
+    },
+    {
+      "id": "REQ-046",
+      "title": "Rule-id prefix to category mapping",
+      "text": "Derive_Category maps a rule id's leading token to a Category_Kind per the shared section 1.5.1 prefix registry, defaulting unrecognised prefixes to Other.",
+      "level": "SW"
+    },
+    {
+      "id": "REQ-047",
+      "title": "Message normalization for fingerprinting",
+      "text": "Normalize_Message collapses digit runs and whitespace per section 4.2, the message form used as fingerprint input.",
+      "level": "SW"
+    },
+    {
+      "id": "REQ-048",
+      "title": "Glob pattern matching",
+      "text": "Match reports whether a glob pattern (supporting * and ?) matches a given text, used for exclude-pattern evaluation.",
+      "level": "SW"
+    },
+    {
+      "id": "REQ-049",
+      "title": "Exclude-pattern matching for source scan",
+      "text": "Is_Excluded reports whether a project-relative path matches any configured exclude pattern, used by source file discovery.",
+      "level": "SW"
+    },
+    {
+      "id": "REQ-050",
+      "title": "Default project configuration",
+      "text": "Default_Config builds a Project_Config with the standard default field values for a given project name.",
+      "level": "SW"
+    },
+    {
+      "id": "REQ-051",
+      "title": "Config file presence check",
+      "text": "Exists reports whether a canonical or legacy .fusa.json config file is present under a project root.",
+      "level": "SW"
+    },
+    {
+      "id": "REQ-052",
+      "title": "Config file persistence",
+      "text": "Save writes a Project_Config to .fusa.json in the canonical nested-project-object shape.",
+      "level": "SW"
+    },
+    {
+      "id": "REQ-053",
+      "title": "Requirements file presence check",
+      "text": "Requirements_Exist reports whether a canonical or legacy .fusa-reqs.json requirements file is present under a project root.",
+      "level": "SW"
+    },
+    {
+      "id": "REQ-054",
+      "title": "Requirements file persistence",
+      "text": "Save_Requirements writes a Requirement_List to .fusa-reqs.json.",
+      "level": "SW"
+    },
+    {
+      "id": "REQ-055",
+      "title": "CRC-32 checksum computation",
+      "text": "Compute implements the IEEE 802.3 CRC-32 algorithm over a String, used for ZIP archive entry checksums.",
+      "level": "SW"
+    },
+    {
+      "id": "REQ-056",
+      "title": "Source file discovery over configured source dirs",
+      "text": "Find_Source_Files walks the configured sourceDirs (or the whole project root if unset) and returns every .ads/.adb path not matching an exclude pattern.",
+      "level": "SW"
+    },
+    {
+      "id": "REQ-057",
+      "title": "Filesystem existence/kind predicates",
+      "text": "Exists/Is_Directory report whether a path exists and, if so, whether it is a directory.",
+      "level": "SW"
+    },
+    {
+      "id": "REQ-058",
+      "title": "Whole-file read into a String",
+      "text": "Read_File reads a file's full contents into a String, raising Read_Error uniformly regardless of the underlying I/O failure.",
+      "level": "SW"
+    },
+    {
+      "id": "REQ-059",
+      "title": "Whole-file write from a String",
+      "text": "Write_File writes a String's full contents to a file, creating or overwriting it.",
+      "level": "SW"
+    },
+    {
+      "id": "REQ-060",
+      "title": "Path join with dot-segment normalisation",
+      "text": "Join concatenates a directory and name with a single '/' separator and strips '.' path segments from the result.",
+      "level": "SW"
+    },
+    {
+      "id": "REQ-061",
+      "title": "Project-relative path derivation",
+      "text": "Relative_To strips a project root prefix from an absolute path at an exact '/' boundary, returning the path unchanged if it is not actually under the root.",
+      "level": "SW"
+    },
+    {
+      "id": "REQ-062",
+      "title": "Line splitting for source scanning",
+      "text": "Split_Lines splits file content into a list of lines, tolerating both LF and CRLF line endings.",
+      "level": "SW"
+    },
+    {
+      "id": "REQ-063",
+      "title": "RFC3339 timestamp generation",
+      "text": "Now_Rfc3339 renders the current UTC time as an RFC3339 timestamp, used for the report envelope's generatedAt field.",
+      "level": "SW"
+    },
+    {
+      "id": "REQ-064",
+      "title": "Common report envelope header emission",
+      "text": "Write_Header emits the section 3.1 common JSON header fields shared by every report document kind.",
+      "level": "SW"
+    },
+    {
+      "id": "REQ-065",
+      "title": "Report-document extension fields emission",
+      "text": "Write_Report_Extension emits the section 3.2 report-document extension fields (projectRoot, project, standard, asil, sil, dal).",
+      "level": "SW"
+    },
+    {
+      "id": "REQ-066",
+      "title": "Findings array emission",
+      "text": "Write_Findings_Array emits a findings array in the common JSON finding shape (section 4).",
+      "level": "SW"
+    },
+    {
+      "id": "REQ-067",
+      "title": "Findings summary emission",
+      "text": "Write_Summary emits a findings-count-by-severity summary object.",
+      "level": "SW"
+    },
+    {
+      "id": "REQ-068",
+      "title": "Text-format findings rendering",
+      "text": "Render_Text renders a findings list as a human-readable text report with a trailing summary line.",
+      "level": "SW"
+    },
+    {
+      "id": "REQ-069",
+      "title": "Strict-mode gate failure determination",
+      "text": "Has_Gate_Failure reports whether a findings list should fail a strict-mode gate: any ERROR always gates, a WARNING only gates under --strict.",
       "level": "SW"
     }
   ]

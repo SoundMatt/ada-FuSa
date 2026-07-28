@@ -185,6 +185,80 @@ begin
             (Args ("trace", "--dir", Root, "--sec-tested", "10")) = Exit_Gate_Fail,
           "trace --sec-tested 10 gate-fails since no sec-test tags exist");
 
+   --  fusa:test REQ-024
+   --  spec section 1.4.1: --func-coverage gates on the percentage of public
+   --  .ads function/procedure declarations carrying a directly-preceding
+   --  fusa:req tag -- distinct from (and NOT implied by --strict, unlike)
+   --  the requirement-level --req-coverage/--sec-tested axes.
+   Fusa.Files.Write_File
+     (Root & "/src/api.ads",
+      "package Api is" & ASCII.LF &
+      "   -- fusa:req REQ-001" & ASCII.LF &
+      "   procedure Tagged_One;" & ASCII.LF &
+      "   procedure Untagged_One;" & ASCII.LF &
+      "end Api;" & ASCII.LF);
+
+   Check (Fusa.Cli.Run (Args ("trace", "--dir", Root, "--func-coverage", "50")) = Exit_Ok,
+          "trace --func-coverage 50 passes at 50% tagged (1 of 2 functions)");
+   Check (Fusa.Cli.Run (Args ("trace", "--dir", Root, "--func-coverage", "100")) = Exit_Gate_Fail,
+          "trace --func-coverage 100 gate-fails while Untagged_One has no tag");
+   Check (Fusa.Cli.Run (Args ("trace", "--dir", Root, "--func-coverage", "abc")) = Exit_Usage,
+          "trace --func-coverage abc exits 2 (usage), not a crash");
+
+   declare
+      Func_Strict_Root : constant String := "tmp_test_cli_func_strict";
+   begin
+      if Fusa.Files.Exists (Func_Strict_Root) then
+         Ada.Directories.Delete_Tree (Func_Strict_Root);
+      end if;
+      Ada.Directories.Create_Path (Func_Strict_Root & "/src");
+      Check (Fusa.Cli.Run
+               (Args ("init", "--dir", Func_Strict_Root, "--name", "t")) = Exit_Ok,
+             "func-strict fixture: init exits 0");
+      declare
+         Reqs : Fusa.Config.Requirement_List;
+         R1   : Fusa.Config.Requirement;
+      begin
+         R1.Id := To_Unbounded_String ("REQ-001");
+         Reqs.Append (R1);
+         Fusa.Config.Save_Requirements (Func_Strict_Root, Reqs);
+      end;
+      Fusa.Files.Write_File
+        (Func_Strict_Root & "/src/fully_traced.adb",
+         "procedure Fully_Traced is" & ASCII.LF &
+         "   -- fusa:req REQ-001" & ASCII.LF &
+         "   -- fusa:sec-test REQ-001" & ASCII.LF &
+         "begin" & ASCII.LF & "   null;" & ASCII.LF & "end Fully_Traced;" & ASCII.LF);
+      Fusa.Files.Write_File
+        (Func_Strict_Root & "/src/api.ads",
+         "package Api is" & ASCII.LF &
+         "   procedure Untagged_One;" & ASCII.LF &
+         "end Api;" & ASCII.LF);
+
+      Check (Fusa.Cli.Run (Args ("trace", "--dir", Func_Strict_Root, "--strict")) = Exit_Ok,
+             "trace --strict passes at 100% req/sec-tested coverage even "
+             & "though func-coverage is 0% -- --strict does not imply "
+             & "--func-coverage 100");
+      Check (Fusa.Cli.Run
+               (Args ("trace", "--dir", Func_Strict_Root, "--strict",
+                      "--func-coverage", "100")) = Exit_Gate_Fail,
+             "an explicit --func-coverage 100 alongside --strict does gate-fail");
+
+      declare
+         Exit_Code : Integer;
+         Out_Text  : constant String :=
+           Run_Capturing_Stdout
+             (Args ("trace", "--dir", Func_Strict_Root, "--format", "json"), Exit_Code);
+      begin
+         Check (Ada.Strings.Fixed.Index (Out_Text, """totalFunctions"": 1") > 0
+                and then Ada.Strings.Fixed.Index (Out_Text, """taggedFunctions"": 0") > 0,
+                "trace --format json coverage object reports totalFunctions/"
+                & "taggedFunctions");
+      end;
+
+      Ada.Directories.Delete_Tree (Func_Strict_Root);
+   end;
+
    --  Regression: a non-numeric threshold used to crash with an unhandled
    --  CONSTRAINT_ERROR and exit 1 (colliding with Exit_Gate_Fail) instead
    --  of a clean Exit_Usage.

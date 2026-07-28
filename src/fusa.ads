@@ -36,16 +36,19 @@ package Fusa is
    --  §2.4 severity enum
    --  fusa:req REQ-002
    type Severity_Kind is (Info, Warning, Error);
+   --  fusa:req REQ-043
    function Image (S : Severity_Kind) return String;
 
    --  §4 finding category (closed enum)
    type Category_Kind is
      (Lint, Style, Safety, Security, Coverage, Requirement,
       Concurrency, Supply_Chain, Config_Category, Other);
+   --  fusa:req REQ-043
    function Image (C : Category_Kind) return String;
 
    --  §4.1 disposition (open findings gate; accepted/deferred suppress)
    type Disposition_Kind is (Open, Accepted, Deferred, Rejected);
+   --  fusa:req REQ-043
    function Image (D : Disposition_Kind) return String;
 
    type Location is record
@@ -56,6 +59,7 @@ package Fusa is
       End_Column : Natural := 0;
    end record;
 
+   --  fusa:req REQ-044
    function Make_Location
      (File       : String;
       Line       : Natural := 0;
@@ -80,6 +84,7 @@ package Fusa is
    subtype Finding_List is Finding_Vectors.Vector;
 
    --  Builds a Finding and computes its §4.2 fingerprint automatically.
+   --  fusa:req REQ-045
    function Make_Finding
      (Rule_Id     : String;
       Severity    : Severity_Kind;
@@ -92,11 +97,13 @@ package Fusa is
       Disposition : Disposition_Kind := Open) return Finding;
 
    --  §1.5.1 prefix -> category registry. Unrecognised prefixes map to Other.
+   --  fusa:req REQ-046
    function Derive_Category (Rule_Id : String) return Category_Kind;
 
    --  §4.2 message normalisation: digit runs -> '#', whitespace collapsed,
    --  trimmed. (Unicode NFC normalisation for non-ASCII input is not
    --  applied -- see README "Known limitations".)
+   --  fusa:req REQ-047
    function Normalize_Message (Msg : String) return String;
 
    --  §4.2 canonical fingerprint: "sha256:" & lowercase_hex(SHA-256(

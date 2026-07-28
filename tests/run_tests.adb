@@ -10,6 +10,7 @@ with Test_Glob;
 with Test_Engine;
 with Test_Annotations;
 with Test_Zip;
+with Test_Func_Scan;
 with Test_Cli;
 
 procedure Run_Tests is
@@ -24,6 +25,7 @@ begin
    Test_Engine;
    Test_Annotations;
    Test_Zip;
+   Test_Func_Scan;
    Test_Cli;
 
    if Test_Framework.Report then
