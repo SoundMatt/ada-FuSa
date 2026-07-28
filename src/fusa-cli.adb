@@ -575,6 +575,11 @@ package body Fusa.Cli is
          end;
 
          declare
+            --  .fusa.json's "strict" only used to be honoured by check/
+            --  cyber -- --req-coverage/--sec-tested's implicit 100%
+            --  default under --strict must also trigger from a
+            --  project-wide strict config, not just the CLI flag.
+            Effective_Strict : constant Boolean := Strict or else Cfg.Strict;
             Dup_Findings : Finding_List;
             Reqs  : constant Fusa.Config.Requirement_List :=
               Fusa.Config.Load_Requirements (Dir, Dup_Findings);
@@ -679,7 +684,7 @@ package body Fusa.Cli is
                            "non-negative integer");
                         return Exit_Usage;
                   end;
-               elsif Strict then
+               elsif Effective_Strict then
                   Req_Threshold := 100;
                end if;
 
@@ -694,7 +699,7 @@ package body Fusa.Cli is
                            "non-negative integer");
                         return Exit_Usage;
                   end;
-               elsif Strict then
+               elsif Effective_Strict then
                   Sec_Threshold := 100;
                end if;
 
@@ -2203,6 +2208,13 @@ package body Fusa.Cli is
                Reqs   : constant Fusa.Config.Requirement_List :=
                  Fusa.Config.Load_Requirements (Dir, Dup);
             begin
+               if Format /= "text" and then Format /= "json" then
+                  Ada.Text_IO.Put_Line
+                    (Ada.Text_IO.Standard_Error,
+                     "ada-FuSa: req list: unsupported --format '" & Format &
+                     "' (supported: text, json)");
+                  return Exit_Usage;
+               end if;
                if Format = "json" then
                   declare
                      W : Fusa.Json.Writer.Instance;
@@ -2343,6 +2355,13 @@ package body Fusa.Cli is
                Disps  : constant Fusa.Config.Disposition_List :=
                  Fusa.Config.Load_Dispositions (Dir);
             begin
+               if Format /= "text" and then Format /= "json" then
+                  Ada.Text_IO.Put_Line
+                    (Ada.Text_IO.Standard_Error,
+                     "ada-FuSa: disposition list: unsupported --format '" & Format &
+                     "' (supported: text, json)");
+                  return Exit_Usage;
+               end if;
                if Format = "json" then
                   declare
                      W : Fusa.Json.Writer.Instance;
@@ -2537,6 +2556,13 @@ package body Fusa.Cli is
                   Format  : constant String := Flag_Value (Rest, "--format", "text");
                   Reports : constant Fusa.Config.Problem_Report_List := Fusa.Config.Load_Pr (Dir);
                begin
+                  if Format /= "text" and then Format /= "json" then
+                     Ada.Text_IO.Put_Line
+                       (Ada.Text_IO.Standard_Error,
+                        "ada-FuSa: pr list: unsupported --format '" & Format &
+                        "' (supported: text, json)");
+                     return Exit_Usage;
+                  end if;
                   if Format = "json" then
                      declare
                         W : Fusa.Json.Writer.Instance;
@@ -2968,7 +2994,12 @@ package body Fusa.Cli is
                               Stored := To_Unbounded_String
                                 (Stored_Raw (Stored_Raw'First + Prefix'Length .. Last));
                            end if;
-                           if To_String (Stored) = Sig then
+                           --  Constant-time compare (CWE-208): a plain
+                           --  "=" here would leak, via comparison time,
+                           --  how many leading hex characters of an
+                           --  attacker-supplied .sig file match the true
+                           --  signature.
+                           if Fusa.Hmac.Constant_Time_Equal (To_String (Stored), Sig) then
                               Ada.Text_IO.Put_Line ("OK: signature matches");
                               return Exit_Ok;
                            else
@@ -2992,16 +3023,22 @@ package body Fusa.Cli is
 
    Hook_Marker : constant String := "# installed by ada-FuSa (adafusa hooks install)";
 
-   procedure Make_Executable (Path : String) is
+   --  Regression: the chmod() return code used to be discarded
+   --  (pragma Unreferenced), so a failure (e.g. a read-only filesystem,
+   --  or the file having vanished between Write_File and this call) was
+   --  silently ignored -- `hooks install` would report success and leave
+   --  a hook that git silently skips because it isn't actually
+   --  executable. Returns True on success.
+   function Make_Executable (Path : String) return Boolean is
       function C_Chmod
         (Path : Interfaces.C.Strings.chars_ptr; Mode : Interfaces.C.int) return Interfaces.C.int;
       pragma Import (C, C_Chmod, "chmod");
       C_Path : Interfaces.C.Strings.chars_ptr := Interfaces.C.Strings.New_String (Path);
       Result : Interfaces.C.int;
-      pragma Unreferenced (Result);
    begin
       Result := C_Chmod (C_Path, 8#755#);
       Interfaces.C.Strings.Free (C_Path);
+      return Result = 0;
    end Make_Executable;
 
    --  fusa:req REQ-092
@@ -3052,7 +3089,11 @@ package body Fusa.Cli is
                   "#!/bin/sh" & ASCII.LF &
                     Hook_Marker & ASCII.LF &
                     "adafusa check --strict || exit 1" & ASCII.LF);
-               Make_Executable (Hook_Path);
+               if not Make_Executable (Hook_Path) then
+                  return Emit_Runtime_Error
+                    (Args, "hooks", "internal",
+                     "failed to make " & Hook_Path & " executable");
+               end if;
                Ada.Text_IO.Put_Line ("installed " & Hook_Path);
                return Exit_Ok;
 
@@ -3600,7 +3641,11 @@ package body Fusa.Cli is
                      end;
                   end if;
 
-                  if Has_Error_Add or else (Strict and then Natural (Added.Length) > 0) then
+                  --  .fusa.json's "strict" used to only be honoured by
+                  --  check/cyber.
+                  if Has_Error_Add
+                    or else ((Strict or else Cfg.Strict) and then Natural (Added.Length) > 0)
+                  then
                      return Exit_Gate_Fail;
                   end if;
                   return Exit_Ok;
@@ -4635,7 +4680,8 @@ package body Fusa.Cli is
                Emit (Args, Fusa.Report.Render_Text (Findings));
             end if;
 
-            if Fusa.Report.Has_Gate_Failure (Findings, Strict) then
+            --  .fusa.json's "strict" used to only be honoured by check/cyber.
+            if Fusa.Report.Has_Gate_Failure (Findings, Strict or else Cfg.Strict) then
                return Exit_Gate_Fail;
             end if;
             return Exit_Ok;
@@ -4694,7 +4740,8 @@ package body Fusa.Cli is
                Emit (Args, Fusa.Report.Render_Text (Findings));
             end if;
 
-            if Fusa.Report.Has_Gate_Failure (Findings, Strict) then
+            --  .fusa.json's "strict" used to only be honoured by check/cyber.
+            if Fusa.Report.Has_Gate_Failure (Findings, Strict or else Cfg.Strict) then
                return Exit_Gate_Fail;
             end if;
             return Exit_Ok;
@@ -4944,6 +4991,13 @@ package body Fusa.Cli is
             declare
                Format : constant String := Flag_Value (Rest, "--format", "text");
             begin
+               if Format /= "text" and then Format /= "json" then
+                  Ada.Text_IO.Put_Line
+                    (Ada.Text_IO.Standard_Error,
+                     "ada-FuSa: template list: unsupported --format '" & Format &
+                     "' (supported: text, json)");
+                  return Exit_Usage;
+               end if;
                if Format = "json" then
                   declare
                      W : Fusa.Json.Writer.Instance;

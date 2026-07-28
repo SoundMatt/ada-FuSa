@@ -1,4 +1,5 @@
 with Ada.Directories;
+with GNAT.OS_Lib;
 with Ada.Text_IO;
 with Ada.Strings.Fixed;
 with Ada.Strings.Unbounded; use Ada.Strings.Unbounded;
@@ -1076,6 +1077,86 @@ begin
       Ada.Directories.Delete_Tree (Lint_Root);
    end;
 
+   --  Regression: .fusa.json's "strict" field used to only be honoured
+   --  by check/cyber -- trace/diff/analyze/lint accepted a --strict CLI
+   --  flag but never OR'd in the project-wide config value, so a team
+   --  that set "strict": true project-wide still needed every command
+   --  invocation (including ad hoc/CI ones that forgot the flag) to
+   --  separately pass --strict.
+   declare
+      Strict_Cfg_Root : constant String := "tmp_test_cli_strict_cfg";
+   begin
+      if Ada.Directories.Exists (Strict_Cfg_Root) then
+         Ada.Directories.Delete_Tree (Strict_Cfg_Root);
+      end if;
+      Ada.Directories.Create_Path (Strict_Cfg_Root & "/src");
+      Fusa.Files.Write_File
+        (Strict_Cfg_Root & "/.fusa.json",
+         "{""project"":{""name"":""t""},""standard"":""generic"",""strict"":true}");
+      Fusa.Files.Write_File (Strict_Cfg_Root & "/.fusa-reqs.json", "{""requirements"":[]}");
+      Fusa.Files.Write_File
+        (Strict_Cfg_Root & "/src/messy.adb",
+         "procedure Messy is  " & ASCII.LF & "begin" & ASCII.LF & "   null;" & ASCII.LF &
+         "end Messy;" & ASCII.LF);
+      Check (Fusa.Cli.Run (Args ("lint", "--dir", Strict_Cfg_Root)) = Exit_Gate_Fail,
+             "lint now gate-fails on a WARNING-level LINT finding purely from "
+             & ".fusa.json's ""strict"": true, with no --strict CLI flag at all");
+      Check (Fusa.Cli.Run (Args ("analyze", "--dir", Strict_Cfg_Root)) = Exit_Ok,
+             "analyze still exits 0 under .fusa.json strict, since this "
+             & "fixture has no ANAL002 (Warning) finding, only what would "
+             & "be an ANAL001 (Info, never gates) if anything");
+      Ada.Directories.Delete_Tree (Strict_Cfg_Root);
+   end;
+
+   declare
+      Strict_Diff_Root : constant String := "tmp_test_cli_strict_diff";
+      Baseline_Path    : constant String := "tmp_test_cli_strict_diff_baseline.json";
+   begin
+      if Ada.Directories.Exists (Strict_Diff_Root) then
+         Ada.Directories.Delete_Tree (Strict_Diff_Root);
+      end if;
+      Ada.Directories.Create_Path (Strict_Diff_Root & "/src");
+      Fusa.Files.Write_File
+        (Strict_Diff_Root & "/.fusa.json",
+         "{""project"":{""name"":""t""},""standard"":""generic"",""strict"":true}");
+      Fusa.Files.Write_File (Strict_Diff_Root & "/.fusa-reqs.json", "{""requirements"":[]}");
+      --  An empty baseline: any WARNING-or-worse finding in the live run
+      --  is therefore "added".
+      Fusa.Files.Write_File (Baseline_Path, "{""findings"":[]}");
+      Fusa.Files.Write_File
+        (Strict_Diff_Root & "/src/messy.adb",
+         "procedure Messy is  " & ASCII.LF & "begin" & ASCII.LF & "   null;" & ASCII.LF &
+         "end Messy;" & ASCII.LF);
+      Check (Fusa.Cli.Run
+               (Args ("diff", "--dir", Strict_Diff_Root, "--baseline", Baseline_Path)) =
+             Exit_Gate_Fail,
+             "diff now gate-fails on an added (non-ERROR) finding purely "
+             & "from .fusa.json's ""strict"": true, with no --strict CLI "
+             & "flag at all");
+      Ada.Directories.Delete_Tree (Strict_Diff_Root);
+      Ada.Directories.Delete_File (Baseline_Path);
+   end;
+
+   declare
+      Strict_Trace_Root : constant String := "tmp_test_cli_strict_trace";
+   begin
+      if Ada.Directories.Exists (Strict_Trace_Root) then
+         Ada.Directories.Delete_Tree (Strict_Trace_Root);
+      end if;
+      Ada.Directories.Create_Path (Strict_Trace_Root & "/src");
+      Fusa.Files.Write_File
+        (Strict_Trace_Root & "/.fusa.json",
+         "{""project"":{""name"":""t""},""standard"":""generic"",""strict"":true}");
+      Fusa.Files.Write_File
+        (Strict_Trace_Root & "/.fusa-reqs.json",
+         "{""requirements"":[{""id"":""REQ-1"",""title"":""untraced""}]}");
+      Check (Fusa.Cli.Run (Args ("trace", "--dir", Strict_Trace_Root)) = Exit_Gate_Fail,
+             "trace now gate-fails on an untraced requirement purely from "
+             & ".fusa.json's ""strict"": true (implying --req-coverage 100), "
+             & "with no --strict CLI flag at all");
+      Ada.Directories.Delete_Tree (Strict_Trace_Root);
+   end;
+
    --  fusa:test REQ-114
    declare
       Sas_Root : constant String := "tmp_test_cli_sas";
@@ -1132,6 +1213,8 @@ begin
       Check (Ada.Strings.Fixed.Index (Out_Text, "default:") > 0,
              "template list mentions the default template");
    end;
+   Check (Fusa.Cli.Run (Args ("template", "list", "--format", "bogus")) = Exit_Usage,
+          "template list rejects an unsupported --format with a usage error");
    declare
       Tmpl_Root : constant String := "tmp_test_cli_template";
    begin
@@ -1258,6 +1341,12 @@ begin
       Check (Ada.Strings.Fixed.Index (Out_Text, """id"": ""REQ-900""") > 0,
              "req list --format json includes the newly added requirement");
    end;
+   --  Regression: req/disposition/pr/template list all fell through to
+   --  plain text for any --format value that wasn't exactly "json",
+   --  silently accepting bogus values instead of rejecting them like
+   --  every other --format-taking command.
+   Check (Fusa.Cli.Run (Args ("req", "list", "--dir", Root, "--format", "bogus")) = Exit_Usage,
+          "req list rejects an unsupported --format with a usage error");
 
    --  fusa:test REQ-091
    --  fusa:test REQ-088
@@ -1277,6 +1366,9 @@ begin
              and then Ada.Strings.Fixed.Index (Out_Text, """status"": ""accepted""") > 0,
              "disposition list --format json includes the newly added entry");
    end;
+   Check (Fusa.Cli.Run
+            (Args ("disposition", "list", "--dir", Root, "--format", "bogus")) = Exit_Usage,
+          "disposition list rejects an unsupported --format with a usage error");
 
    --  fusa:test REQ-095
    declare
@@ -1297,6 +1389,8 @@ begin
              "pr close on an unknown id exits 2");
       Check (Fusa.Cli.Run (Args ("pr", "close", "PR-001", "--dir", Pr_Root)) = Exit_Ok,
              "pr close on a known id exits 0");
+      Check (Fusa.Cli.Run (Args ("pr", "list", "--dir", Pr_Root, "--format", "bogus")) = Exit_Usage,
+             "pr list rejects an unsupported --format with a usage error");
       declare
          Reports : constant Fusa.Config.Problem_Report_List := Fusa.Config.Load_Pr (Pr_Root);
       begin
@@ -1362,6 +1456,13 @@ begin
              "hooks install exits 0 in a git repository");
       Check (Fusa.Files.Exists (Hooks_Root & "/.git/hooks/pre-commit"),
              "hooks install wrote .git/hooks/pre-commit");
+      --  Regression: Make_Executable used to discard chmod()'s return
+      --  code, so a chmod failure would have gone unnoticed and left a
+      --  non-executable hook that git silently skips -- assert the file
+      --  is actually executable, not just present.
+      Check (GNAT.OS_Lib.Is_Executable_File (Hooks_Root & "/.git/hooks/pre-commit"),
+             "the installed pre-commit hook is actually executable "
+             & "(chmod succeeded)");
       Check (Fusa.Cli.Run (Args ("hooks", "remove", "--dir", Hooks_Root)) = Exit_Ok,
              "hooks remove exits 0");
       Check (not Fusa.Files.Exists (Hooks_Root & "/.git/hooks/pre-commit"),
