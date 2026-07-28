@@ -5,6 +5,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+### Changed (issue #69, part 4/6 -- sas schema conformance)
+
+`sas.json` rewritten from its ad hoc `project`/`requirements`/`check`/`comp`/`dispositions`/
+`problemReports` shape to the section 9.3 canonical shape (DO-178C §11.20):
+
+- **Replaced the entire body with `checklist[]`/`summary`**, per the canonical
+  `{item,clause,present,evidence?}` entry shape. `checklist[]` enumerates all 20 DO-178C section
+  11 data items (11.1 through 11.20); `present` is set `true` only when this tool can point at a
+  real artifact it can see on disk right now -- a non-empty `.fusa-reqs.json` (11.9), the
+  project's actual source files (11.11), a real `.fusa-verify.json` (11.13/11.14), a real
+  `sci.json` (11.16), a real `.fusa-pr.json` entry (11.17), and this document itself (11.20).
+  Items ada-FuSa has no way to observe (plans, coding standards documents, CM/QA records) are
+  honestly reported `present: false` rather than guessed at or omitted -- `evidence` is only
+  emitted when `present` is `true`.
+- `sas.md`'s companion table rewritten to match (item/clause/present/evidence columns).
+- Dropped the old check-findings/cyclomatic-complexity/disposition tallies entirely -- they
+  weren't part of any canonical shape this command ever had, and duplicated what `check`/`comp`/
+  `disposition` already report on their own.
+
+9 new/updated regression tests; 688/688 checks passing (was 684).
+
 ### Changed (issue #69, part 3/6 -- safety-case schema conformance)
 
 `.fusa-safety-case.json`/`safety-case.json` brought into conformance with the section 9.2
