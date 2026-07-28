@@ -18,6 +18,7 @@ with Test_Badge;
 with Test_Deps;
 with Test_Analyze;
 with Test_Rules_Lint;
+with Test_Fix;
 with Test_Cli;
 
 procedure Run_Tests is
@@ -40,6 +41,7 @@ begin
    Test_Deps;
    Test_Analyze;
    Test_Rules_Lint;
+   Test_Fix;
    Test_Cli;
 
    if Test_Framework.Report then

@@ -110,6 +110,7 @@ the simplest route, since GNAT is not distributed via Homebrew.
 | `adafusa lint [--dir] [--strict]` | General-correctness/formatting hygiene (trailing whitespace, blank-line runs, trailing newline) | text, json |
 | `adafusa sas [--dir] [--output-dir]` | Software Accomplishment Summary, aggregated from existing evidence; always writes both `sas.json` and `sas.md`; always exits 0 | json, md |
 | `adafusa template list\|apply <name> [--dir] [--project-name] [--force]` | Scaffold a source-tree/build/CI skeleton (`.gpr`, `src/`, `tests/`, README, CI workflow) complementary to `init`; never writes a LICENSE | text, json |
+| `adafusa fix [--dir] [--apply]` | Whitespace/formatting-only auto-fix (tabs, trailing whitespace, blank-line runs, trailing newline); dry-run by default, gate-fails if any file would change | text, json |
 
 **Shared flags:** `--dir <path>` (project root, default `.`), `--output <file>` (write instead of
 stdout), `--no-color` (accepted; ada-FuSa does not currently emit ANSI colour), `--format <fmt>`.
@@ -323,6 +324,26 @@ uses ada-FuSa's own id scheme rather than claiming to replicate DO-178C's exact 
 strictly as a starting checklist; replace/extend it with your project's actual PSAC/SOI-derived
 objectives. The other six standards' commands scaffold an empty template and rely entirely on your
 own objective list.
+
+## Auto-fix (`fix`)
+
+`fix` is the **only** ada-FuSa command that writes to a project's actual source files, rather than
+a `.fusa-*.json` sidecar or a generated report — a meaningfully more consequential action than
+anything else this tool does, so its scope is deliberately narrow:
+
+- It fixes **only** whitespace/formatting issues that are 100% mechanical and carry zero semantic
+  risk — the exact set `ADA006` (tabs) and `LINT001`-`LINT003` (trailing whitespace, blank-line
+  runs, trailing-newline hygiene) already flag. `Fusa.Fix.Fix_Content` is a pure `String -> String`
+  function, verified idempotent (`Fix_Content (Fix_Content (S)) = Fix_Content (S)`) before being
+  wired into the CLI.
+- It **never** touches anything requiring a judgement call — an unjustified `pragma Suppress`, a
+  line-length violation that would need re-wrapping, any `SEC`-category security finding, an
+  `ANAL001` possibly-unused `with` (which has a documented real false-positive mode). "Safe to
+  auto-apply" and "safe to auto-decide" are different claims, and `fix` only ever makes the first.
+- It **defaults to a dry run**: without `--apply`, nothing is ever written to disk, and the command
+  gate-fails (exit `1`) if any file would change — the same `gofmt -l`/`prettier --check` pattern,
+  so a project can fail CI on unformatted code without `fix` ever touching a file unless a human
+  explicitly runs it with `--apply` (typically locally, not in CI).
 
 ## Evidence & Verification Utilities
 

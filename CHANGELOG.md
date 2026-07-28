@@ -5,6 +5,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+### Added (fix -- command-catalog completeness, part 4 of 4 -- full §9 catalog)
+
+The final spec §9.3 command, completing ada-FuSa's implementation of every applicable MUST/SHOULD/
+MAY command in the FuSaOps command catalog (§9.1/§9.2/§9.3; `misra` is the sole deliberate
+exception -- it maps only to `misra-c`/`misra-cpp`, and there is no MISRA-Ada standard to
+gap-report against).
+
+- **`fix`** (§9.3 MAY): the only command that writes to a project's actual source files rather
+  than a `.fusa-*.json` sidecar or a generated report. New `Fusa.Fix.Fix_Content` (pure
+  `String -> String`, verified idempotent via a standalone debug harness before wiring in) applies
+  exactly the transforms `ADA006`/`LINT001`-`LINT003` already flag: tabs to single spaces, trailing
+  whitespace stripped, 2+ consecutive blank lines collapsed to one, file normalised to exactly one
+  trailing newline. Nothing requiring a judgement call is ever touched -- not an unjustified
+  `pragma Suppress`, not a line-length violation, not any security finding. Defaults to a dry run
+  (`--apply` required to write anything); without `--apply`, gate-fails if any file would change,
+  the `gofmt -l`/`prettier --check` CI pattern.
+- Caught a real self-check regression while building this: `fusa-fix.ads`'s own doc comment
+  mentioned `` `pragma Suppress` `` (backtick-quoted) as an example of what `fix` does *not* touch --
+  the `ADA001` rule's `Is_Quoted` heuristic only recognises *double*-quoted text as "this is an
+  example, not real code" (an existing, documented convention elsewhere in this file), so the
+  backtick-quoted mention false-triggered `ADA001` on ada-FuSa's own source. Fixed by using double
+  quotes, matching the established convention.
+- 1 new requirement (REQ-116); 566 checks passing (was 548).
+
 ### Added (template -- command-catalog completeness, part 3 of 4)
 
 - **`template list`/`template apply <name>`** (§9.3 MAY): scaffolds a source-tree/build/CI

@@ -930,6 +930,67 @@ begin
       Ada.Directories.Delete_Tree (Tmpl_Root);
    end;
 
+   --  fusa:test REQ-116
+   declare
+      Fix_Root : constant String := "tmp_test_cli_fix";
+      Src_Path : constant String := Fix_Root & "/src/messy.adb";
+      Messy    : constant String :=
+        "procedure Messy is  " & ASCII.LF & "begin" & ASCII.LF & ASCII.LF & ASCII.LF &
+        "   null;" & ASCII.LF & "end Messy;" & ASCII.LF;
+   begin
+      if Ada.Directories.Exists (Fix_Root) then
+         Ada.Directories.Delete_Tree (Fix_Root);
+      end if;
+      Ada.Directories.Create_Path (Fix_Root & "/src");
+      Fusa.Files.Write_File
+        (Fix_Root & "/.fusa.json", "{""project"":{""name"":""t""},""standard"":""generic""}");
+      Fusa.Files.Write_File (Fix_Root & "/.fusa-reqs.json", "{""requirements"":[]}");
+      Fusa.Files.Write_File (Src_Path, Messy);
+
+      Check (Fusa.Cli.Run (Args ("fix", "--dir", Fix_Root, "--format", "bogus")) = Exit_Usage,
+             "fix --format bogus exits 2");
+
+      Check (Fusa.Cli.Run (Args ("fix", "--dir", Fix_Root)) = Exit_Gate_Fail,
+             "fix without --apply gate-fails when a file would change "
+             & "(the gofmt -l / prettier --check pattern)");
+      Check (Fusa.Files.Read_File (Src_Path) = Messy,
+             "fix without --apply NEVER writes to disk -- the file is byte-for-byte "
+             & "unchanged after a dry run");
+
+      declare
+         Exit_Code : Integer;
+         Out_Text  : constant String :=
+           Run_Capturing_Stdout (Args ("fix", "--dir", Fix_Root), Exit_Code);
+      begin
+         Check (Ada.Strings.Fixed.Index (Out_Text, "would fix  src/messy.adb") > 0,
+                "fix's dry-run text output names the file that would change, "
+                & "prefixed 'would fix', not 'fixed'");
+      end;
+
+      Check (Fusa.Cli.Run (Args ("fix", "--dir", Fix_Root, "--apply")) = Exit_Ok,
+             "fix --apply exits 0");
+      Check (Fusa.Files.Read_File (Src_Path) /=
+               Messy,
+             "fix --apply actually rewrote the file this time");
+      Check (Ada.Strings.Fixed.Index (Fusa.Files.Read_File (Src_Path), "  " & ASCII.LF) = 0,
+             "the applied fix actually removed the trailing whitespace");
+
+      Check (Fusa.Cli.Run (Args ("fix", "--dir", Fix_Root)) = Exit_Ok,
+             "re-running fix (dry-run) after --apply exits 0 -- nothing left to fix "
+             & "(Fix_Content is idempotent)");
+      declare
+         Exit_Code : Integer;
+         Out_Json  : constant String :=
+           Run_Capturing_Stdout
+             (Args ("fix", "--dir", Fix_Root, "--format", "json"), Exit_Code);
+      begin
+         Check (Ada.Strings.Fixed.Index (Out_Json, """files"": []") > 0,
+                "fix --format json reports an empty files array once nothing needs fixing");
+      end;
+
+      Ada.Directories.Delete_Tree (Fix_Root);
+   end;
+
    --  fusa:test REQ-090
    Check (Fusa.Cli.Run (Args ("req")) = Exit_Usage, "req with no subcommand exits 2");
    Check (Fusa.Cli.Run (Args ("req", "bogus")) = Exit_Usage,
