@@ -5,6 +5,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+### Added (sas -- command-catalog completeness, part 2 of 3)
+
+- **`sas`** (§9.3 MAY, Software Accomplishment Summary): always writes both `sas.json` (envelope +
+  tool-defined body, per the spec's own note on this command's shape) and `sas.md`. Every figure
+  is mechanically aggregated from data ada-FuSa already computes elsewhere -- requirement
+  traced/tested/secTested counts (via `Fusa.Annotations.Scan`, the same source `trace` uses),
+  `check`'s own finding counts, `comp` violations, disposition status, problem-report open/closed
+  counts. Asserting the software life cycle is complete is a human sign-off this tool cannot make;
+  `sas` only reports the current, honest state of that evidence, whatever it is. Always exits 0,
+  like `report`. 1 new requirement (REQ-114); 534 checks passing (was 528).
+
+`template`/`fix` remain -- `fix` in particular needs more care since it would be the first command
+to modify a user's actual source files.
+
 ### Added (cyber, sci, analyze, lint -- command-catalog completeness, part 1 of 2)
 
 Four of the seven remaining spec §9.2/§9.3 commands (`sas`/`template`/`fix` follow separately --

@@ -108,6 +108,7 @@ the simplest route, since GNAT is not distributed via Homebrew.
 | `adafusa sci [--dir]` | Software Configuration Index: every source file + evidence artifact, SHA-256 + size; always exits 0 | text, json |
 | `adafusa analyze [--dir] [--strict]` | Deeper own-pass static analysis (unused with-clauses, long parameter lists), separate from `check` | text, json |
 | `adafusa lint [--dir] [--strict]` | General-correctness/formatting hygiene (trailing whitespace, blank-line runs, trailing newline) | text, json |
+| `adafusa sas [--dir] [--output-dir]` | Software Accomplishment Summary, aggregated from existing evidence; always writes both `sas.json` and `sas.md`; always exits 0 | json, md |
 
 **Shared flags:** `--dir <path>` (project root, default `.`), `--output <file>` (write instead of
 stdout), `--no-color` (accepted; ada-FuSa does not currently emit ANSI colour), `--format <fmt>`.
@@ -395,6 +396,7 @@ own objective list.
 | `boundary.dot`/`boundary.mermaid` | `adafusa boundary --output` | Package/unit dependency graph |
 | `fmea.json`/`fmea.csv` | `adafusa fmea --output` | Design FMEA |
 | `safety-case.json`/`safety-case.md`/`safety-case.mermaid` | `adafusa safety-case --output` | GSN safety case |
+| `sas.json`/`sas.md` | `adafusa sas` | Software Accomplishment Summary |
 
 ## Docker
 

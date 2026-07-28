@@ -827,6 +827,48 @@ begin
       Ada.Directories.Delete_Tree (Lint_Root);
    end;
 
+   --  fusa:test REQ-114
+   declare
+      Sas_Root : constant String := "tmp_test_cli_sas";
+   begin
+      if Ada.Directories.Exists (Sas_Root) then
+         Ada.Directories.Delete_Tree (Sas_Root);
+      end if;
+      Ada.Directories.Create_Path (Sas_Root & "/src");
+      Fusa.Files.Write_File
+        (Sas_Root & "/.fusa.json",
+         "{""project"":{""name"":""sasproj""},""standard"":""do178c""}");
+      Fusa.Files.Write_File
+        (Sas_Root & "/.fusa-reqs.json",
+         "{""requirements"":[{""id"":""REQ-1"",""title"":""t""}]}");
+      Fusa.Files.Write_File
+        (Sas_Root & "/src/x.adb",
+         "procedure X is" & ASCII.LF &
+         "   -- fusa:req REQ-1" & ASCII.LF &
+         "begin" & ASCII.LF & "   null;" & ASCII.LF & "end X;" & ASCII.LF);
+      Check (not Fusa.Files.Exists (Sas_Root & "/sas.json"), "no sas.json initially");
+      Check (Fusa.Cli.Run (Args ("sas", "--dir", Sas_Root)) = Exit_Ok, "sas exits 0");
+      Check (Fusa.Files.Exists (Sas_Root & "/sas.json")
+             and then Fusa.Files.Exists (Sas_Root & "/sas.md"),
+             "sas always writes both sas.json and sas.md");
+      declare
+         Content : constant String := Fusa.Files.Read_File (Sas_Root & "/sas.json");
+      begin
+         Check (Ada.Strings.Fixed.Index (Content, """kind"": ""sas""") > 0,
+                "sas.json carries kind: sas");
+         Check (Ada.Strings.Fixed.Index (Content, """total"": 1") > 0
+                and then Ada.Strings.Fixed.Index (Content, """traced"": 1") > 0,
+                "sas.json's requirements block reflects the one traced requirement");
+      end;
+      declare
+         Md : constant String := Fusa.Files.Read_File (Sas_Root & "/sas.md");
+      begin
+         Check (Ada.Strings.Fixed.Index (Md, "# Software Accomplishment Summary") = 1,
+                "sas.md starts with a level-1 heading");
+      end;
+      Ada.Directories.Delete_Tree (Sas_Root);
+   end;
+
    --  fusa:test REQ-090
    Check (Fusa.Cli.Run (Args ("req")) = Exit_Usage, "req with no subcommand exits 2");
    Check (Fusa.Cli.Run (Args ("req", "bogus")) = Exit_Usage,

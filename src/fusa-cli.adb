@@ -201,6 +201,7 @@ package body Fusa.Cli is
       W.Value ("sci");
       W.Value ("analyze");
       W.Value ("lint");
+      W.Value ("sas");
       W.Array_End;
 
       W.Key ("formats");
@@ -243,6 +244,7 @@ package body Fusa.Cli is
       W.Key ("sci");          W.Array_Start; W.Value ("text"); W.Value ("json"); W.Array_End;
       W.Key ("analyze");      W.Array_Start; W.Value ("text"); W.Value ("json"); W.Array_End;
       W.Key ("lint");         W.Array_Start; W.Value ("text"); W.Value ("json"); W.Array_End;
+      W.Key ("sas");          W.Array_Start; W.Value ("json"); W.Value ("md"); W.Array_End;
       W.Object_End;
 
       W.Key ("standards");
@@ -4358,6 +4360,205 @@ package body Fusa.Cli is
    end Cmd_Lint;
 
    ----------------------------------------------------------------------
+   --  sas -- Software Accomplishment Summary (spec section 9.3 MAY)
+   ----------------------------------------------------------------------
+
+   --  Always writes BOTH sas.json and sas.md to Output_Dir (mirroring the
+   --  spec's own note that sas is "sas.json (envelope + tool-defined
+   --  body) plus sas.md"), the same "write the artifact unconditionally"
+   --  pattern release uses for sbom.json. Every figure in it is
+   --  mechanically aggregated from data ada-FuSa already computes
+   --  elsewhere (requirement/annotation counts, check's own findings,
+   --  comp violations, disposition/problem-report status) -- an
+   --  accomplishment summary asserting the software life cycle is
+   --  complete is a human sign-off ada-FuSa cannot make; this only
+   --  reports the current, honest state of that evidence, whatever it is.
+   --  Always exits 0 -- like `report`, it documents rather than gates.
+   --  fusa:req REQ-114
+   function Cmd_Sas (Args : String_List) return Integer is
+      Dir        : constant String := Dir_Of (Args);
+      Output_Dir : constant String := Flag_Value (Args, "--output-dir", Dir);
+   begin
+      declare
+         Cfg : Fusa.Config.Project_Config;
+      begin
+         begin
+            Cfg := Fusa.Config.Load (Dir);
+         exception
+            when Fusa.Config.No_Config_Error =>
+               return Emit_Runtime_Error (Args, "sas", "no-config", "no .fusa.json found in " & Dir);
+            when Fusa.Config.Invalid_Config_Error =>
+               return Emit_Runtime_Error (Args, "sas", "invalid-config", "invalid .fusa.json in " & Dir);
+         end;
+
+         if not Fusa.Files.Exists (Output_Dir) then
+            Ada.Directories.Create_Path (Output_Dir);
+         end if;
+
+         declare
+            Files : constant String_List := Fusa.Source_Scan.Find_Source_Files (Dir, Cfg);
+
+            Dup_Findings : Finding_List;
+            Reqs         : constant Fusa.Config.Requirement_List :=
+              Fusa.Config.Load_Requirements (Dir, Dup_Findings);
+            Ann_Findings : Finding_List;
+            Tags         : constant Fusa.Annotations.Tag_List :=
+              Fusa.Annotations.Scan (Dir, Files, Ann_Findings);
+            Req_Total, Req_Traced, Req_Tested, Req_Sec_Tested : Natural := 0;
+
+            Check_Findings : constant Finding_List := Fusa.Engine.Run_All (Dir, Files);
+            Chk_Errors, Chk_Warnings, Chk_Infos : Natural := 0;
+
+            Comp_Results : constant Fusa.Comp.Comp_Result_List := Fusa.Comp.Analyze (Dir, Files, 10);
+            Comp_Violations : Natural := 0;
+
+            Disp_Accepted, Disp_Deferred, Disp_Rejected : Natural := 0;
+            Pr_Open, Pr_Closed : Natural := 0;
+         begin
+            Req_Total := Natural (Reqs.Length);
+            for R of Reqs loop
+               declare
+                  Traced, Tested, Sec_Tested : Boolean := False;
+               begin
+                  for T of Tags loop
+                     if To_String (T.Requirement_Id) = To_String (R.Id) then
+                        Traced := True;
+                        if T.Kind = Test or else T.Kind = Sec_Test then
+                           Tested := True;
+                        end if;
+                        if T.Kind = Sec_Test then
+                           Sec_Tested := True;
+                        end if;
+                     end if;
+                  end loop;
+                  if Traced then
+                     Req_Traced := Req_Traced + 1;
+                  end if;
+                  if Tested then
+                     Req_Tested := Req_Tested + 1;
+                  end if;
+                  if Sec_Tested then
+                     Req_Sec_Tested := Req_Sec_Tested + 1;
+                  end if;
+               end;
+            end loop;
+
+            for F of Check_Findings loop
+               case F.Severity is
+                  when Error   => Chk_Errors   := Chk_Errors + 1;
+                  when Warning => Chk_Warnings := Chk_Warnings + 1;
+                  when Info    => Chk_Infos    := Chk_Infos + 1;
+               end case;
+            end loop;
+
+            for R of Comp_Results loop
+               if R.Exceeds_Threshold then
+                  Comp_Violations := Comp_Violations + 1;
+               end if;
+            end loop;
+
+            if Fusa.Config.Dispositions_Exist (Dir) then
+               for D of Fusa.Config.Load_Dispositions (Dir) loop
+                  case D.Status is
+                     when Accepted => Disp_Accepted := Disp_Accepted + 1;
+                     when Deferred => Disp_Deferred := Disp_Deferred + 1;
+                     when Rejected => Disp_Rejected := Disp_Rejected + 1;
+                     when Open     => null;
+                  end case;
+               end loop;
+            end if;
+
+            if Fusa.Config.Pr_Exists (Dir) then
+               for P of Fusa.Config.Load_Pr (Dir) loop
+                  if To_String (P.Status) = "closed" then
+                     Pr_Closed := Pr_Closed + 1;
+                  else
+                     Pr_Open := Pr_Open + 1;
+                  end if;
+               end loop;
+            end if;
+
+            declare
+               W : Fusa.Json.Writer.Instance;
+            begin
+               W.Object_Start;
+               Fusa.Report.Write_Header (W, "sas");
+               W.Key ("project");
+               W.Object_Start;
+               W.Field ("name", To_String (Cfg.Name));
+               W.Field_If_Non_Blank ("standard", To_String (Cfg.Standard));
+               W.Object_End;
+               W.Key ("requirements");
+               W.Object_Start;
+               W.Field ("total", Req_Total);
+               W.Field ("traced", Req_Traced);
+               W.Field ("tested", Req_Tested);
+               W.Field ("secTested", Req_Sec_Tested);
+               W.Object_End;
+               W.Key ("check");
+               W.Object_Start;
+               W.Field ("errors", Chk_Errors);
+               W.Field ("warnings", Chk_Warnings);
+               W.Field ("infos", Chk_Infos);
+               W.Object_End;
+               W.Key ("comp");
+               W.Object_Start;
+               W.Field ("totalFunctions", Natural (Comp_Results.Length));
+               W.Field ("violations", Comp_Violations);
+               W.Object_End;
+               W.Key ("dispositions");
+               W.Object_Start;
+               W.Field ("accepted", Disp_Accepted);
+               W.Field ("deferred", Disp_Deferred);
+               W.Field ("rejected", Disp_Rejected);
+               W.Object_End;
+               W.Key ("problemReports");
+               W.Object_Start;
+               W.Field ("open", Pr_Open);
+               W.Field ("closed", Pr_Closed);
+               W.Object_End;
+               W.Object_End;
+               Fusa.Files.Write_File
+                 (Fusa.Files.Join (Output_Dir, "sas.json"), Fusa.Json.Writer.To_String (W) & ASCII.LF);
+            end;
+            Ada.Text_IO.Put_Line ("wrote " & Fusa.Files.Join (Output_Dir, "sas.json"));
+
+            declare
+               Md : Unbounded_String := Null_Unbounded_String;
+            begin
+               Append (Md, "# Software Accomplishment Summary -- " & To_String (Cfg.Name) &
+                         ASCII.LF & ASCII.LF);
+               Append (Md, "**Standard:** " & To_String (Cfg.Standard) & ASCII.LF & ASCII.LF);
+               Append (Md, "## Requirements" & ASCII.LF & ASCII.LF);
+               Append (Md, "- Total: " & Trim_Img (Req_Total) & ASCII.LF);
+               Append (Md, "- Traced: " & Trim_Img (Req_Traced) & ASCII.LF);
+               Append (Md, "- Tested: " & Trim_Img (Req_Tested) & ASCII.LF);
+               Append (Md, "- Security-tested: " & Trim_Img (Req_Sec_Tested) & ASCII.LF & ASCII.LF);
+               Append (Md, "## Check findings" & ASCII.LF & ASCII.LF);
+               Append (Md, "- Errors: " & Trim_Img (Chk_Errors) & ASCII.LF);
+               Append (Md, "- Warnings: " & Trim_Img (Chk_Warnings) & ASCII.LF);
+               Append (Md, "- Infos: " & Trim_Img (Chk_Infos) & ASCII.LF & ASCII.LF);
+               Append (Md, "## Cyclomatic complexity" & ASCII.LF & ASCII.LF);
+               Append (Md, "- Functions analysed: " &
+                         Trim_Img (Natural (Comp_Results.Length)) & ASCII.LF);
+               Append (Md, "- Threshold violations: " & Trim_Img (Comp_Violations) &
+                         ASCII.LF & ASCII.LF);
+               Append (Md, "## Dispositions (waivers)" & ASCII.LF & ASCII.LF);
+               Append (Md, "- Accepted: " & Trim_Img (Disp_Accepted) & ASCII.LF);
+               Append (Md, "- Deferred: " & Trim_Img (Disp_Deferred) & ASCII.LF);
+               Append (Md, "- Rejected: " & Trim_Img (Disp_Rejected) & ASCII.LF & ASCII.LF);
+               Append (Md, "## Problem reports" & ASCII.LF & ASCII.LF);
+               Append (Md, "- Open: " & Trim_Img (Pr_Open) & ASCII.LF);
+               Append (Md, "- Closed: " & Trim_Img (Pr_Closed) & ASCII.LF);
+               Fusa.Files.Write_File (Fusa.Files.Join (Output_Dir, "sas.md"), To_String (Md));
+            end;
+            Ada.Text_IO.Put_Line ("wrote " & Fusa.Files.Join (Output_Dir, "sas.md"));
+         end;
+      end;
+      return Exit_Ok;
+   end Cmd_Sas;
+
+   ----------------------------------------------------------------------
    --  Usage / dispatch
    ----------------------------------------------------------------------
 
@@ -4369,7 +4570,7 @@ package body Fusa.Cli is
         "report comp hara tara vuln req disposition pr metrics sign hooks " &
         "do178 iso26262 iso21434 iec61508 iec62443 unece slsa " &
         "verify diff badge boundary impact coupling fmea safety-case " &
-        "cyber sci analyze lint");
+        "cyber sci analyze lint sas");
    end Print_Usage;
 
    function Run (Args : String_List) return Integer is
@@ -4462,6 +4663,8 @@ package body Fusa.Cli is
             return Cmd_Analyze (Rest);
          elsif Cmd = "lint" then
             return Cmd_Lint (Rest);
+         elsif Cmd = "sas" then
+            return Cmd_Sas (Rest);
          elsif Cmd = "--help" or else Cmd = "-h" or else Cmd = "help" then
             Print_Usage;
             return Exit_Ok;
