@@ -13,6 +13,7 @@ with Test_Zip;
 with Test_Func_Scan;
 with Test_Disposition;
 with Test_Comp;
+with Test_Hmac;
 with Test_Cli;
 
 procedure Run_Tests is
@@ -30,6 +31,7 @@ begin
    Test_Func_Scan;
    Test_Disposition;
    Test_Comp;
+   Test_Hmac;
    Test_Cli;
 
    if Test_Framework.Report then

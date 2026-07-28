@@ -89,6 +89,12 @@ the simplest route, since GNAT is not distributed via Homebrew.
 | `adafusa hara [--dir]` | Load/validate `.fusa-hara.json` hazard analysis (ISO 26262-3); scaffolds a template if absent | text, json |
 | `adafusa tara [--dir]` | Load/validate `.fusa-tara.json` threat analysis (ISO 21434 ch.9); scaffolds a template if absent | text, json |
 | `adafusa vuln [--dir]` | Dependency vulnerability scan (no CVE database integrated yet — see limitations) | text, json |
+| `adafusa req list\|add <id> <title>` | Manage `.fusa-reqs.json` from the CLI | text, json |
+| `adafusa disposition list\|add <fp-or-ruleId> <status> [rationale]` | Manage `.fusa-dispositions.json` waivers from the CLI | text, json |
+| `adafusa pr init\|list\|add\|close` | Problem-report log (DO-178C §11.17) | text, json |
+| `adafusa metrics [record]` | Append-only safety-metrics history (`.fusa-metrics.json`) | text, json |
+| `adafusa sign sign\|verify <file> --key <key>` | HMAC-SHA256 evidence-file signing | text |
+| `adafusa hooks install\|remove` | Git pre-commit hook running `check --strict` | text |
 
 **Shared flags:** `--dir <path>` (project root, default `.`), `--output <file>` (write instead of
 stdout), `--no-color` (accepted; ada-FuSa does not currently emit ANSI colour), `--format <fmt>`.

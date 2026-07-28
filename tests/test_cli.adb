@@ -305,6 +305,144 @@ begin
              "vuln surfaces an informational VULN001 finding once alire.toml exists");
    end;
 
+   --  fusa:test REQ-090
+   Check (Fusa.Cli.Run (Args ("req")) = Exit_Usage, "req with no subcommand exits 2");
+   Check (Fusa.Cli.Run (Args ("req", "bogus")) = Exit_Usage,
+          "req with an unknown subcommand exits 2");
+   Check (Fusa.Cli.Run (Args ("req", "add", "REQ-900", "A new req", "--dir", Root)) = Exit_Ok,
+          "req add with an id and title exits 0");
+   Check (Fusa.Cli.Run (Args ("req", "add", "REQ-900", "dup", "--dir", Root)) = Exit_Usage,
+          "req add rejects a duplicate id");
+   Check (Fusa.Cli.Run (Args ("req", "add", "REQ-901", "--dir", Root)) = Exit_Usage,
+          "req add requires both <id> and <title>");
+   declare
+      Exit_Code : Integer;
+      Out_Text  : constant String :=
+        Run_Capturing_Stdout (Args ("req", "list", "--dir", Root, "--format", "json"), Exit_Code);
+   begin
+      Check (Ada.Strings.Fixed.Index (Out_Text, """id"": ""REQ-900""") > 0,
+             "req list --format json includes the newly added requirement");
+   end;
+
+   --  fusa:test REQ-091
+   Check (Fusa.Cli.Run (Args ("disposition", "add", "ADA001", "accepted", "reviewed",
+                              "--dir", Root)) = Exit_Ok,
+          "disposition add with a bare rule id exits 0");
+   Check (Fusa.Cli.Run (Args ("disposition", "add", "ADA002", "bogus", "x",
+                              "--dir", Root)) = Exit_Usage,
+          "disposition add rejects an unrecognised status");
+   declare
+      Exit_Code : Integer;
+      Out_Text  : constant String :=
+        Run_Capturing_Stdout
+          (Args ("disposition", "list", "--dir", Root, "--format", "json"), Exit_Code);
+   begin
+      Check (Ada.Strings.Fixed.Index (Out_Text, """ruleId"": ""ADA001""") > 0
+             and then Ada.Strings.Fixed.Index (Out_Text, """status"": ""accepted""") > 0,
+             "disposition list --format json includes the newly added entry");
+   end;
+
+   --  fusa:test REQ-095
+   declare
+      Pr_Root : constant String := "tmp_test_cli_pr";
+   begin
+      if Ada.Directories.Exists (Pr_Root) then
+         Ada.Directories.Delete_Tree (Pr_Root);
+      end if;
+      Ada.Directories.Create_Path (Pr_Root);
+      Check (Fusa.Cli.Run (Args ("pr", "init", "--dir", Pr_Root)) = Exit_Ok,
+             "pr init exits 0 and creates .fusa-pr.json");
+      Check (Fusa.Files.Exists (Pr_Root & "/.fusa-pr.json"), "pr init created .fusa-pr.json");
+      Check (Fusa.Cli.Run
+               (Args ("pr", "add", "PR-001", "crash on startup", "--dir", Pr_Root)) = Exit_Ok,
+             "pr add exits 0");
+      Check (Fusa.Cli.Run (Args ("pr", "close", "PR-999", "--dir", Pr_Root)) = Exit_Usage,
+             "pr close on an unknown id exits 2");
+      Check (Fusa.Cli.Run (Args ("pr", "close", "PR-001", "--dir", Pr_Root)) = Exit_Ok,
+             "pr close on a known id exits 0");
+      declare
+         Reports : constant Fusa.Config.Problem_Report_List := Fusa.Config.Load_Pr (Pr_Root);
+      begin
+         Check (Natural (Reports.Length) = 1
+                and then To_String (Reports.Element (1).Status) = "closed",
+                "the closed PR's status is persisted as closed");
+      end;
+      Ada.Directories.Delete_Tree (Pr_Root);
+   end;
+
+   --  fusa:test REQ-094
+   Check (Fusa.Cli.Run (Args ("metrics", "record", "--dir", Root)) = Exit_Ok,
+          "metrics record exits 0");
+   Check (Fusa.Files.Exists (Root & "/.fusa-metrics.json"),
+          "metrics record created .fusa-metrics.json");
+   Check (Fusa.Cli.Run (Args ("metrics", "record", "--dir", Root)) = Exit_Ok,
+          "a second metrics record exits 0 (appends, does not overwrite)");
+   declare
+      Snapshots : constant Fusa.Config.Metric_Snapshot_List := Fusa.Config.Load_Metrics (Root);
+   begin
+      Check (Natural (Snapshots.Length) = 2,
+             "two metrics record calls produce two accumulated snapshots");
+   end;
+
+   --  fusa:test REQ-093
+   declare
+      Sign_Root : constant String := "tmp_test_cli_sign";
+   begin
+      if Ada.Directories.Exists (Sign_Root) then
+         Ada.Directories.Delete_Tree (Sign_Root);
+      end if;
+      Ada.Directories.Create_Path (Sign_Root);
+      Fusa.Files.Write_File (Sign_Root & "/evidence.txt", "important data");
+
+      Check (Fusa.Cli.Run (Args ("sign")) = Exit_Usage, "sign with no subcommand exits 2");
+      Check (Fusa.Cli.Run
+               (Args ("sign", "sign", Sign_Root & "/evidence.txt")) = Exit_Usage,
+             "sign sign without --key exits 2 (usage)");
+      Check (Fusa.Cli.Run
+               (Args ("sign", "sign", Sign_Root & "/evidence.txt", "--key", "k")) = Exit_Ok,
+             "sign sign with --key exits 0");
+      Check (Fusa.Files.Exists (Sign_Root & "/evidence.txt.sig"), "sign sign wrote a .sig file");
+      Check (Fusa.Cli.Run
+               (Args ("sign", "verify", Sign_Root & "/evidence.txt", "--key", "k")) = Exit_Ok,
+             "sign verify with the correct key exits 0");
+      Check (Fusa.Cli.Run
+               (Args ("sign", "verify", Sign_Root & "/evidence.txt", "--key", "wrong"))
+             = Exit_Gate_Fail,
+             "sign verify with the wrong key exits 1 (gate fail)");
+      Ada.Directories.Delete_Tree (Sign_Root);
+   end;
+
+   --  fusa:test REQ-092
+   declare
+      Hooks_Root : constant String := "tmp_test_cli_hooks";
+   begin
+      if Ada.Directories.Exists (Hooks_Root) then
+         Ada.Directories.Delete_Tree (Hooks_Root);
+      end if;
+      Ada.Directories.Create_Path (Hooks_Root & "/.git");
+      Check (Fusa.Cli.Run (Args ("hooks")) = Exit_Usage, "hooks with no subcommand exits 2");
+      Check (Fusa.Cli.Run (Args ("hooks", "install", "--dir", Hooks_Root)) = Exit_Ok,
+             "hooks install exits 0 in a git repository");
+      Check (Fusa.Files.Exists (Hooks_Root & "/.git/hooks/pre-commit"),
+             "hooks install wrote .git/hooks/pre-commit");
+      Check (Fusa.Cli.Run (Args ("hooks", "remove", "--dir", Hooks_Root)) = Exit_Ok,
+             "hooks remove exits 0");
+      Check (not Fusa.Files.Exists (Hooks_Root & "/.git/hooks/pre-commit"),
+             "hooks remove deleted the pre-commit hook");
+      Ada.Directories.Delete_Tree (Hooks_Root);
+   end;
+   declare
+      No_Git_Root : constant String := "tmp_test_cli_nogit";
+   begin
+      if Ada.Directories.Exists (No_Git_Root) then
+         Ada.Directories.Delete_Tree (No_Git_Root);
+      end if;
+      Ada.Directories.Create_Path (No_Git_Root);
+      Check (Fusa.Cli.Run (Args ("hooks", "install", "--dir", No_Git_Root)) = Exit_Runtime,
+             "hooks install outside a git repository exits 3 (runtime error)");
+      Ada.Directories.Delete_Tree (No_Git_Root);
+   end;
+
    --  trace: no requirements yet -> zero totals, still exits 0
    --  fusa:test REQ-011
    Check (Fusa.Cli.Run (Args ("trace", "--dir", Root)) = Exit_Ok,

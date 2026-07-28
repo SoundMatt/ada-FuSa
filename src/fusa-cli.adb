@@ -4,6 +4,7 @@ with Ada.Strings.Fixed;
 with Ada.Strings.Unbounded; use Ada.Strings.Unbounded;
 with Ada.Containers.Indefinite_Vectors;
 with Interfaces.C; use Interfaces.C;
+with Interfaces.C.Strings;
 
 with Fusa.Config;
 with Fusa.Files;
@@ -15,6 +16,7 @@ with Fusa.Comp;
 with Fusa.Report;
 with Fusa.Json.Writer;
 with Fusa.Sha256;
+with Fusa.Hmac;
 with Fusa.Zip;
 
 package body Fusa.Cli is
@@ -170,6 +172,12 @@ package body Fusa.Cli is
       W.Value ("hara");
       W.Value ("tara");
       W.Value ("vuln");
+      W.Value ("req");
+      W.Value ("disposition");
+      W.Value ("pr");
+      W.Value ("metrics");
+      W.Value ("sign");
+      W.Value ("hooks");
       W.Array_End;
 
       W.Key ("formats");
@@ -187,6 +195,12 @@ package body Fusa.Cli is
       W.Key ("hara");         W.Array_Start; W.Value ("text"); W.Value ("json"); W.Array_End;
       W.Key ("tara");         W.Array_Start; W.Value ("text"); W.Value ("json"); W.Array_End;
       W.Key ("vuln");         W.Array_Start; W.Value ("text"); W.Value ("json"); W.Array_End;
+      W.Key ("req");          W.Array_Start; W.Value ("text"); W.Value ("json"); W.Array_End;
+      W.Key ("disposition");  W.Array_Start; W.Value ("text"); W.Value ("json"); W.Array_End;
+      W.Key ("pr");           W.Array_Start; W.Value ("text"); W.Value ("json"); W.Array_End;
+      W.Key ("metrics");      W.Array_Start; W.Value ("text"); W.Value ("json"); W.Array_End;
+      W.Key ("sign");         W.Array_Start; W.Value ("text"); W.Array_End;
+      W.Key ("hooks");        W.Array_Start; W.Value ("text"); W.Array_End;
       W.Object_End;
 
       W.Key ("standards");
@@ -1782,6 +1796,915 @@ package body Fusa.Cli is
    end Cmd_Vuln;
 
    ----------------------------------------------------------------------
+   --  req
+   ----------------------------------------------------------------------
+
+   --  fusa:req REQ-090
+   function Cmd_Req (Args : String_List) return Integer is
+   begin
+      if Args.Is_Empty then
+         Ada.Text_IO.Put_Line
+           (Ada.Text_IO.Standard_Error, "ada-FuSa: req: missing subcommand (list|add)");
+         return Exit_Usage;
+      end if;
+      declare
+         Verb : constant String := Args.Element (1);
+         Rest : String_List := Args;
+      begin
+         Rest.Delete_First;
+         if Verb = "list" then
+            declare
+               Dir    : constant String := Dir_Of (Rest);
+               Format : constant String := Flag_Value (Rest, "--format", "text");
+               Dup    : Finding_List;
+               Reqs   : constant Fusa.Config.Requirement_List :=
+                 Fusa.Config.Load_Requirements (Dir, Dup);
+            begin
+               if Format = "json" then
+                  declare
+                     W : Fusa.Json.Writer.Instance;
+                  begin
+                     W.Object_Start;
+                     Fusa.Report.Write_Header (W, "req-list");
+                     W.Key ("requirements");
+                     W.Array_Start;
+                     for R of Reqs loop
+                        W.Object_Start;
+                        W.Field ("id", To_String (R.Id));
+                        W.Field_If_Non_Blank ("title", To_String (R.Title));
+                        W.Field_If_Non_Blank ("text", To_String (R.Text));
+                        W.Field_If_Non_Blank ("standard", To_String (R.Standard));
+                        W.Field_If_Non_Blank ("level", To_String (R.Level));
+                        W.Field_If_Non_Blank ("asil", To_String (R.Asil));
+                        W.Field_If_Non_Blank ("parent", To_String (R.Parent));
+                        W.Object_End;
+                     end loop;
+                     W.Array_End;
+                     W.Object_End;
+                     Emit (Rest, Fusa.Json.Writer.To_String (W));
+                  end;
+               else
+                  declare
+                     Buf : Unbounded_String := Null_Unbounded_String;
+                  begin
+                     for R of Reqs loop
+                        Append (Buf, To_String (R.Id) & ": " & To_String (R.Title) & ASCII.LF);
+                     end loop;
+                     Append (Buf, Trim_Img (Natural (Reqs.Length)) & " requirements");
+                     Emit (Rest, To_String (Buf));
+                  end;
+               end if;
+            end;
+            return Exit_Ok;
+
+         elsif Verb = "add" then
+            declare
+               Dir       : constant String := Dir_Of (Rest);
+               Id, Title : Unbounded_String := Null_Unbounded_String;
+            begin
+               declare
+                  I : Positive := 1;
+               begin
+                  while I <= Natural (Rest.Length) loop
+                     declare
+                        A : constant String := Rest.Element (I);
+                     begin
+                        if A = "--dir" or else A = "--text" or else A = "--standard"
+                          or else A = "--level" or else A = "--asil" or else A = "--parent"
+                        then
+                           I := I + 2;
+                        elsif A'Length > 0 and then A (A'First) /= '-' then
+                           if Length (Id) = 0 then
+                              Id := To_Unbounded_String (A);
+                           elsif Length (Title) = 0 then
+                              Title := To_Unbounded_String (A);
+                           end if;
+                           I := I + 1;
+                        else
+                           I := I + 1;
+                        end if;
+                     end;
+                  end loop;
+               end;
+
+               if Length (Id) = 0 or else Length (Title) = 0 then
+                  Ada.Text_IO.Put_Line
+                    (Ada.Text_IO.Standard_Error, "ada-FuSa: req add: requires <id> <title>");
+                  return Exit_Usage;
+               end if;
+
+               declare
+                  Dup  : Finding_List;
+                  Reqs : Fusa.Config.Requirement_List := Fusa.Config.Load_Requirements (Dir, Dup);
+               begin
+                  for R of Reqs loop
+                     if To_String (R.Id) = To_String (Id) then
+                        Ada.Text_IO.Put_Line
+                          (Ada.Text_IO.Standard_Error,
+                           "ada-FuSa: req add: id """ & To_String (Id) & """ already exists");
+                        return Exit_Usage;
+                     end if;
+                  end loop;
+
+                  declare
+                     New_Req : Fusa.Config.Requirement;
+                  begin
+                     New_Req.Id       := Id;
+                     New_Req.Title    := Title;
+                     New_Req.Text     := To_Unbounded_String (Flag_Value (Rest, "--text", ""));
+                     New_Req.Standard := To_Unbounded_String (Flag_Value (Rest, "--standard", ""));
+                     New_Req.Level    := To_Unbounded_String (Flag_Value (Rest, "--level", ""));
+                     New_Req.Asil     := To_Unbounded_String (Flag_Value (Rest, "--asil", ""));
+                     New_Req.Parent   := To_Unbounded_String (Flag_Value (Rest, "--parent", ""));
+                     Reqs.Append (New_Req);
+                  end;
+                  Fusa.Config.Save_Requirements (Dir, Reqs);
+                  Ada.Text_IO.Put_Line
+                    ("added " & To_String (Id) & " to " &
+                       Fusa.Files.Join (Dir, Fusa.Config.Reqs_File));
+               end;
+            end;
+            return Exit_Ok;
+
+         else
+            Ada.Text_IO.Put_Line
+              (Ada.Text_IO.Standard_Error,
+               "ada-FuSa: req: unknown subcommand '" & Verb & "' (expected list|add)");
+            return Exit_Usage;
+         end if;
+      end;
+   end Cmd_Req;
+
+   ----------------------------------------------------------------------
+   --  disposition
+   ----------------------------------------------------------------------
+
+   --  fusa:req REQ-091
+   function Cmd_Disposition (Args : String_List) return Integer is
+   begin
+      if Args.Is_Empty then
+         Ada.Text_IO.Put_Line
+           (Ada.Text_IO.Standard_Error,
+            "ada-FuSa: disposition: missing subcommand (list|add)");
+         return Exit_Usage;
+      end if;
+      declare
+         Verb : constant String := Args.Element (1);
+         Rest : String_List := Args;
+      begin
+         Rest.Delete_First;
+         if Verb = "list" then
+            declare
+               Dir    : constant String := Dir_Of (Rest);
+               Format : constant String := Flag_Value (Rest, "--format", "text");
+               Disps  : constant Fusa.Config.Disposition_List :=
+                 Fusa.Config.Load_Dispositions (Dir);
+            begin
+               if Format = "json" then
+                  declare
+                     W : Fusa.Json.Writer.Instance;
+                  begin
+                     W.Object_Start;
+                     Fusa.Report.Write_Header (W, "disposition-list");
+                     W.Key ("dispositions");
+                     W.Array_Start;
+                     for E of Disps loop
+                        W.Object_Start;
+                        W.Field_If_Non_Blank ("fingerprint", To_String (E.Fingerprint));
+                        W.Field_If_Non_Blank ("ruleId", To_String (E.Rule_Id));
+                        W.Field_If_Non_Blank ("file", To_String (E.File));
+                        if E.Line > 0 then
+                           W.Field ("line", E.Line);
+                        end if;
+                        W.Field ("status", Image (E.Status));
+                        W.Field_If_Non_Blank ("note", To_String (E.Note));
+                        W.Object_End;
+                     end loop;
+                     W.Array_End;
+                     W.Object_End;
+                     Emit (Rest, Fusa.Json.Writer.To_String (W));
+                  end;
+               else
+                  declare
+                     Buf : Unbounded_String := Null_Unbounded_String;
+                  begin
+                     for E of Disps loop
+                        Append
+                          (Buf,
+                           (if Length (E.Fingerprint) > 0 then To_String (E.Fingerprint)
+                            else To_String (E.Rule_Id)) &
+                             ": " & Image (E.Status) & " -- " & To_String (E.Note) & ASCII.LF);
+                     end loop;
+                     Append (Buf, Trim_Img (Natural (Disps.Length)) & " dispositions");
+                     Emit (Rest, To_String (Buf));
+                  end;
+               end if;
+            end;
+            return Exit_Ok;
+
+         elsif Verb = "add" then
+            declare
+               Dir            : constant String := Dir_Of (Rest);
+               Fp             : Unbounded_String := Null_Unbounded_String;
+               Status_Str     : Unbounded_String := Null_Unbounded_String;
+               Rationale      : Unbounded_String := Null_Unbounded_String;
+               Positional_Idx : Natural := 0;
+            begin
+               declare
+                  I : Positive := 1;
+               begin
+                  while I <= Natural (Rest.Length) loop
+                     declare
+                        A : constant String := Rest.Element (I);
+                     begin
+                        if A = "--dir" or else A = "--rule-id" or else A = "--file"
+                          or else A = "--line" or else A = "--by"
+                        then
+                           I := I + 2;
+                        elsif A'Length > 0 and then A (A'First) /= '-' then
+                           Positional_Idx := Positional_Idx + 1;
+                           case Positional_Idx is
+                              when 1 => Fp := To_Unbounded_String (A);
+                              when 2 => Status_Str := To_Unbounded_String (A);
+                              when 3 => Rationale := To_Unbounded_String (A);
+                              when others => null;
+                           end case;
+                           I := I + 1;
+                        else
+                           I := I + 1;
+                        end if;
+                     end;
+                  end loop;
+               end;
+
+               if Length (Fp) = 0 or else Length (Status_Str) = 0 then
+                  Ada.Text_IO.Put_Line
+                    (Ada.Text_IO.Standard_Error,
+                     "ada-FuSa: disposition add: requires <fingerprint-or-ruleId> " &
+                       "<accepted|deferred|rejected> [rationale]");
+                  return Exit_Usage;
+               end if;
+
+               if To_String (Status_Str) /= "accepted"
+                 and then To_String (Status_Str) /= "deferred"
+                 and then To_String (Status_Str) /= "rejected"
+               then
+                  Ada.Text_IO.Put_Line
+                    (Ada.Text_IO.Standard_Error,
+                     "ada-FuSa: disposition add: status must be one of accepted, " &
+                       "deferred, rejected");
+                  return Exit_Usage;
+               end if;
+
+               declare
+                  Disps  : Fusa.Config.Disposition_List := Fusa.Config.Load_Dispositions (Dir);
+                  E      : Fusa.Config.Disposition_Entry;
+                  Fp_Str : constant String := To_String (Fp);
+               begin
+                  --  A bare rule id (e.g. "ADA001") is distinguished from a
+                  --  fingerprint by the "sha256:" prefix a fingerprint
+                  --  always carries (spec section 4.2).
+                  if Fp_Str'Length >= 7
+                    and then Fp_Str (Fp_Str'First .. Fp_Str'First + 6) = "sha256:"
+                  then
+                     E.Fingerprint := Fp;
+                  else
+                     E.Rule_Id := Fp;
+                  end if;
+                  E.File := To_Unbounded_String (Flag_Value (Rest, "--file", ""));
+                  declare
+                     Line_Str : constant String := Flag_Value (Rest, "--line", "");
+                  begin
+                     if Line_Str'Length > 0 then
+                        begin
+                           E.Line := Natural'Value (Line_Str);
+                        exception
+                           when Constraint_Error =>
+                              Ada.Text_IO.Put_Line
+                                (Ada.Text_IO.Standard_Error,
+                                 "ada-FuSa: disposition add: --line must be a " &
+                                   "non-negative integer");
+                              return Exit_Usage;
+                        end;
+                     end if;
+                  end;
+                  if Length (E.Rule_Id) = 0 then
+                     E.Rule_Id := To_Unbounded_String (Flag_Value (Rest, "--rule-id", ""));
+                  end if;
+                  E.Status :=
+                    (if To_String (Status_Str) = "accepted" then Accepted
+                     elsif To_String (Status_Str) = "deferred" then Deferred
+                     else Rejected);
+                  E.Note    := Rationale;
+                  E.By      := To_Unbounded_String (Flag_Value (Rest, "--by", ""));
+                  E.At_Time := To_Unbounded_String (Fusa.Report.Now_Rfc3339);
+                  Disps.Append (E);
+                  Fusa.Config.Save_Dispositions (Dir, Disps);
+                  Ada.Text_IO.Put_Line
+                    ("added disposition for " & Fp_Str & " to " &
+                       Fusa.Files.Join (Dir, Fusa.Config.Dispositions_File));
+               end;
+            end;
+            return Exit_Ok;
+
+         else
+            Ada.Text_IO.Put_Line
+              (Ada.Text_IO.Standard_Error,
+               "ada-FuSa: disposition: unknown subcommand '" & Verb & "' (expected list|add)");
+            return Exit_Usage;
+         end if;
+      end;
+   end Cmd_Disposition;
+
+   ----------------------------------------------------------------------
+   --  pr
+   ----------------------------------------------------------------------
+
+   --  fusa:req REQ-095
+   function Cmd_Pr (Args : String_List) return Integer is
+   begin
+      if Args.Is_Empty then
+         Ada.Text_IO.Put_Line
+           (Ada.Text_IO.Standard_Error,
+            "ada-FuSa: pr: missing subcommand (init|list|add|close)");
+         return Exit_Usage;
+      end if;
+      declare
+         Verb : constant String := Args.Element (1);
+         Rest : String_List := Args;
+      begin
+         Rest.Delete_First;
+         declare
+            Dir : constant String := Dir_Of (Rest);
+         begin
+            if Verb = "init" then
+               if Fusa.Config.Pr_Exists (Dir) then
+                  Ada.Text_IO.Put_Line
+                    (Ada.Text_IO.Standard_Error,
+                     "ada-FuSa: " & Fusa.Files.Join (Dir, Fusa.Config.Pr_File) &
+                       " already exists, leaving unchanged");
+               else
+                  Fusa.Config.Save_Pr (Dir, Fusa.Config.Problem_Report_Vectors.Empty_Vector);
+                  Ada.Text_IO.Put_Line ("created " & Fusa.Files.Join (Dir, Fusa.Config.Pr_File));
+               end if;
+               return Exit_Ok;
+
+            elsif Verb = "list" then
+               declare
+                  Format  : constant String := Flag_Value (Rest, "--format", "text");
+                  Reports : constant Fusa.Config.Problem_Report_List := Fusa.Config.Load_Pr (Dir);
+               begin
+                  if Format = "json" then
+                     declare
+                        W : Fusa.Json.Writer.Instance;
+                     begin
+                        W.Object_Start;
+                        Fusa.Report.Write_Header (W, "pr-list");
+                        W.Key ("reports");
+                        W.Array_Start;
+                        for P of Reports loop
+                           W.Object_Start;
+                           W.Field ("id", To_String (P.Id));
+                           W.Field ("title", To_String (P.Title));
+                           W.Field_If_Non_Blank ("severity", To_String (P.Severity));
+                           W.Field ("status", To_String (P.Status));
+                           W.Field_If_Non_Blank ("resolution", To_String (P.Resolution));
+                           W.Field_If_Non_Blank ("openedAt", To_String (P.Opened_At));
+                           W.Field_If_Non_Blank ("closedAt", To_String (P.Closed_At));
+                           W.Object_End;
+                        end loop;
+                        W.Array_End;
+                        W.Object_End;
+                        Emit (Rest, Fusa.Json.Writer.To_String (W));
+                     end;
+                  else
+                     declare
+                        Buf : Unbounded_String := Null_Unbounded_String;
+                     begin
+                        for P of Reports loop
+                           Append (Buf, To_String (P.Id) & " [" & To_String (P.Status) & "]: " &
+                                     To_String (P.Title) & ASCII.LF);
+                        end loop;
+                        Append (Buf, Trim_Img (Natural (Reports.Length)) & " problem reports");
+                        Emit (Rest, To_String (Buf));
+                     end;
+                  end if;
+               end;
+               return Exit_Ok;
+
+            elsif Verb = "add" then
+               declare
+                  Id, Title : Unbounded_String := Null_Unbounded_String;
+               begin
+                  declare
+                     I : Positive := 1;
+                  begin
+                     while I <= Natural (Rest.Length) loop
+                        declare
+                           A : constant String := Rest.Element (I);
+                        begin
+                           if A = "--dir" or else A = "--severity" then
+                              I := I + 2;
+                           elsif A'Length > 0 and then A (A'First) /= '-' then
+                              if Length (Id) = 0 then
+                                 Id := To_Unbounded_String (A);
+                              elsif Length (Title) = 0 then
+                                 Title := To_Unbounded_String (A);
+                              end if;
+                              I := I + 1;
+                           else
+                              I := I + 1;
+                           end if;
+                        end;
+                     end loop;
+                  end;
+
+                  if Length (Id) = 0 or else Length (Title) = 0 then
+                     Ada.Text_IO.Put_Line
+                       (Ada.Text_IO.Standard_Error, "ada-FuSa: pr add: requires <id> <title>");
+                     return Exit_Usage;
+                  end if;
+
+                  declare
+                     Reports : Fusa.Config.Problem_Report_List := Fusa.Config.Load_Pr (Dir);
+                  begin
+                     for P of Reports loop
+                        if To_String (P.Id) = To_String (Id) then
+                           Ada.Text_IO.Put_Line
+                             (Ada.Text_IO.Standard_Error,
+                              "ada-FuSa: pr add: id """ & To_String (Id) & """ already exists");
+                           return Exit_Usage;
+                        end if;
+                     end loop;
+
+                     declare
+                        New_Pr : Fusa.Config.Problem_Report;
+                     begin
+                        New_Pr.Id        := Id;
+                        New_Pr.Title     := Title;
+                        New_Pr.Severity  := To_Unbounded_String (Flag_Value (Rest, "--severity", ""));
+                        New_Pr.Status    := To_Unbounded_String ("open");
+                        New_Pr.Opened_At := To_Unbounded_String (Fusa.Report.Now_Rfc3339);
+                        Reports.Append (New_Pr);
+                     end;
+                     Fusa.Config.Save_Pr (Dir, Reports);
+                     Ada.Text_IO.Put_Line
+                       ("added " & To_String (Id) & " to " &
+                          Fusa.Files.Join (Dir, Fusa.Config.Pr_File));
+                  end;
+               end;
+               return Exit_Ok;
+
+            elsif Verb = "close" then
+               declare
+                  Id : Unbounded_String := Null_Unbounded_String;
+               begin
+                  declare
+                     I : Positive := 1;
+                  begin
+                     while I <= Natural (Rest.Length) loop
+                        declare
+                           A : constant String := Rest.Element (I);
+                        begin
+                           if A = "--dir" or else A = "--resolution" then
+                              I := I + 2;
+                           elsif A'Length > 0 and then A (A'First) /= '-' then
+                              if Length (Id) = 0 then
+                                 Id := To_Unbounded_String (A);
+                              end if;
+                              I := I + 1;
+                           else
+                              I := I + 1;
+                           end if;
+                        end;
+                     end loop;
+                  end;
+
+                  if Length (Id) = 0 then
+                     Ada.Text_IO.Put_Line
+                       (Ada.Text_IO.Standard_Error, "ada-FuSa: pr close: requires <id>");
+                     return Exit_Usage;
+                  end if;
+
+                  declare
+                     Reports : Fusa.Config.Problem_Report_List := Fusa.Config.Load_Pr (Dir);
+                     Found   : Boolean := False;
+                  begin
+                     for I in 1 .. Natural (Reports.Length) loop
+                        if To_String (Reports.Element (I).Id) = To_String (Id) then
+                           declare
+                              P : Fusa.Config.Problem_Report := Reports.Element (I);
+                           begin
+                              P.Status     := To_Unbounded_String ("closed");
+                              P.Resolution := To_Unbounded_String (Flag_Value (Rest, "--resolution", ""));
+                              P.Closed_At  := To_Unbounded_String (Fusa.Report.Now_Rfc3339);
+                              Reports.Replace_Element (I, P);
+                           end;
+                           Found := True;
+                           exit;
+                        end if;
+                     end loop;
+
+                     if not Found then
+                        Ada.Text_IO.Put_Line
+                          (Ada.Text_IO.Standard_Error,
+                           "ada-FuSa: pr close: no problem report with id """ &
+                             To_String (Id) & """");
+                        return Exit_Usage;
+                     end if;
+
+                     Fusa.Config.Save_Pr (Dir, Reports);
+                     Ada.Text_IO.Put_Line ("closed " & To_String (Id));
+                  end;
+               end;
+               return Exit_Ok;
+
+            else
+               Ada.Text_IO.Put_Line
+                 (Ada.Text_IO.Standard_Error,
+                  "ada-FuSa: pr: unknown subcommand '" & Verb & "' (expected init|list|add|close)");
+               return Exit_Usage;
+            end if;
+         end;
+      end;
+   end Cmd_Pr;
+
+   ----------------------------------------------------------------------
+   --  metrics
+   ----------------------------------------------------------------------
+
+   --  fusa:req REQ-094
+   function Cmd_Metrics (Args : String_List) return Integer is
+      Record_Mode : Boolean := False;
+      Rest        : String_List := Args;
+   begin
+      if not Args.Is_Empty and then Args.Element (1) = "record" then
+         Record_Mode := True;
+         Rest.Delete_First;
+      end if;
+
+      declare
+         Dir    : constant String := Dir_Of (Rest);
+         Format : constant String := Flag_Value (Rest, "--format", "text");
+      begin
+         if Format /= "text" and then Format /= "json" then
+            Ada.Text_IO.Put_Line
+              (Ada.Text_IO.Standard_Error,
+               "ada-FuSa: metrics: unsupported --format '" & Format &
+                 "' (supported: text, json)");
+            return Exit_Usage;
+         end if;
+
+         if Record_Mode then
+            declare
+               Cfg : Fusa.Config.Project_Config;
+            begin
+               begin
+                  Cfg := Fusa.Config.Load (Dir);
+               exception
+                  when Fusa.Config.No_Config_Error =>
+                     return Emit_Runtime_Error
+                       (Rest, "metrics", "no-config", "no .fusa.json found in " & Dir);
+                  when Fusa.Config.Invalid_Config_Error =>
+                     return Emit_Runtime_Error
+                       (Rest, "metrics", "invalid-config", "invalid .fusa.json in " & Dir);
+               end;
+
+               declare
+                  Files        : constant String_List :=
+                    Fusa.Source_Scan.Find_Source_Files (Dir, Cfg);
+                  Findings     : constant Finding_List := Fusa.Engine.Run_All (Dir, Files);
+                  Dup          : Finding_List;
+                  Reqs         : constant Fusa.Config.Requirement_List :=
+                    Fusa.Config.Load_Requirements (Dir, Dup);
+                  Comp_Results : constant Fusa.Comp.Comp_Result_List :=
+                    Fusa.Comp.Analyze (Dir, Files, 10);
+                  Snap         : Fusa.Config.Metric_Snapshot;
+               begin
+                  for F of Findings loop
+                     case F.Severity is
+                        when Error   => Snap.Check_Errors := Snap.Check_Errors + 1;
+                        when Warning => Snap.Check_Warnings := Snap.Check_Warnings + 1;
+                        when Info    => Snap.Check_Infos := Snap.Check_Infos + 1;
+                     end case;
+                  end loop;
+                  for C of Comp_Results loop
+                     if C.Exceeds_Threshold then
+                        Snap.Comp_Violations := Snap.Comp_Violations + 1;
+                     end if;
+                  end loop;
+                  Snap.Total_Reqs := Natural (Reqs.Length);
+                  Snap.At_Time    := To_Unbounded_String (Fusa.Report.Now_Rfc3339);
+
+                  declare
+                     Snapshots : Fusa.Config.Metric_Snapshot_List := Fusa.Config.Load_Metrics (Dir);
+                  begin
+                     Snapshots.Append (Snap);
+                     Fusa.Config.Save_Metrics (Dir, Snapshots);
+                     Ada.Text_IO.Put_Line
+                       ("recorded snapshot to " &
+                          Fusa.Files.Join (Dir, Fusa.Config.Metrics_File) & " (" &
+                          Trim_Img (Natural (Snapshots.Length)) & " total)");
+                  end;
+               end;
+            end;
+            return Exit_Ok;
+         end if;
+
+         declare
+            Snapshots : constant Fusa.Config.Metric_Snapshot_List := Fusa.Config.Load_Metrics (Dir);
+         begin
+            if Format = "json" then
+               declare
+                  W : Fusa.Json.Writer.Instance;
+               begin
+                  W.Object_Start;
+                  Fusa.Report.Write_Header (W, "metrics");
+                  W.Key ("snapshots");
+                  W.Array_Start;
+                  for S of Snapshots loop
+                     W.Object_Start;
+                     W.Field ("at", To_String (S.At_Time));
+                     W.Field ("totalRequirements", S.Total_Reqs);
+                     W.Field ("checkErrors", S.Check_Errors);
+                     W.Field ("checkWarnings", S.Check_Warnings);
+                     W.Field ("checkInfos", S.Check_Infos);
+                     W.Field ("compViolations", S.Comp_Violations);
+                     W.Object_End;
+                  end loop;
+                  W.Array_End;
+                  W.Object_End;
+                  Emit (Rest, Fusa.Json.Writer.To_String (W));
+               end;
+            else
+               declare
+                  Buf : Unbounded_String := Null_Unbounded_String;
+               begin
+                  for S of Snapshots loop
+                     Append (Buf, To_String (S.At_Time) & ": reqs=" & Trim_Img (S.Total_Reqs) &
+                               " errors=" & Trim_Img (S.Check_Errors) &
+                               " warnings=" & Trim_Img (S.Check_Warnings) &
+                               " compViolations=" & Trim_Img (S.Comp_Violations) & ASCII.LF);
+                  end loop;
+                  Append (Buf, Trim_Img (Natural (Snapshots.Length)) & " snapshots");
+                  Emit (Rest, To_String (Buf));
+               end;
+            end if;
+         end;
+         return Exit_Ok;
+      end;
+   end Cmd_Metrics;
+
+   ----------------------------------------------------------------------
+   --  sign
+   ----------------------------------------------------------------------
+
+   function Resolve_Key (Args : String_List) return String is
+      Key_Str  : constant String := Flag_Value (Args, "--key", "");
+      Key_File : constant String := Flag_Value (Args, "--key-file", "");
+   begin
+      if Key_File'Length > 0 then
+         return Fusa.Files.Read_File (Key_File);
+      end if;
+      return Key_Str;
+   end Resolve_Key;
+
+   --  fusa:req REQ-093
+   function Cmd_Sign (Args : String_List) return Integer is
+   begin
+      if Args.Is_Empty then
+         Ada.Text_IO.Put_Line
+           (Ada.Text_IO.Standard_Error, "ada-FuSa: sign: missing subcommand (sign|verify)");
+         return Exit_Usage;
+      end if;
+      declare
+         Verb : constant String := Args.Element (1);
+         Rest : String_List := Args;
+      begin
+         Rest.Delete_First;
+         if Verb /= "sign" and then Verb /= "verify" then
+            Ada.Text_IO.Put_Line
+              (Ada.Text_IO.Standard_Error,
+               "ada-FuSa: sign: unknown subcommand '" & Verb & "' (expected sign|verify)");
+            return Exit_Usage;
+         end if;
+
+         declare
+            File_Path : Unbounded_String := Null_Unbounded_String;
+         begin
+            declare
+               I : Positive := 1;
+            begin
+               while I <= Natural (Rest.Length) loop
+                  declare
+                     A : constant String := Rest.Element (I);
+                  begin
+                     if A = "--dir" or else A = "--key" or else A = "--key-file"
+                       or else A = "--sig"
+                     then
+                        I := I + 2;
+                     elsif A'Length > 0 and then A (A'First) /= '-' then
+                        if Length (File_Path) = 0 then
+                           File_Path := To_Unbounded_String (A);
+                        end if;
+                        I := I + 1;
+                     else
+                        I := I + 1;
+                     end if;
+                  end;
+               end loop;
+            end;
+
+            if Length (File_Path) = 0 then
+               Ada.Text_IO.Put_Line
+                 (Ada.Text_IO.Standard_Error, "ada-FuSa: sign " & Verb & ": requires <file>");
+               return Exit_Usage;
+            end if;
+
+            declare
+               Key : constant String := Resolve_Key (Rest);
+            begin
+               if Key'Length = 0 then
+                  Ada.Text_IO.Put_Line
+                    (Ada.Text_IO.Standard_Error,
+                     "ada-FuSa: sign " & Verb & ": requires --key <key> or --key-file <path>");
+                  return Exit_Usage;
+               end if;
+
+               if not Fusa.Files.Exists (To_String (File_Path)) then
+                  return Emit_Runtime_Error
+                    (Rest, "sign", "no-file", "file not found: " & To_String (File_Path));
+               end if;
+
+               declare
+                  Content : constant String := Fusa.Files.Read_File (To_String (File_Path));
+                  Sig     : constant String := Fusa.Hmac.Sha256_Hex (Key, Content);
+               begin
+                  if Verb = "sign" then
+                     declare
+                        Sig_Path : constant String :=
+                          Flag_Value (Rest, "--sig", To_String (File_Path) & ".sig");
+                     begin
+                        Fusa.Files.Write_File (Sig_Path, "sha256-hmac:" & Sig & ASCII.LF);
+                        Ada.Text_IO.Put_Line ("wrote " & Sig_Path);
+                     end;
+                     return Exit_Ok;
+                  else --  "verify"
+                     declare
+                        Sig_Path : constant String :=
+                          Flag_Value (Rest, "--sig", To_String (File_Path) & ".sig");
+                     begin
+                        if not Fusa.Files.Exists (Sig_Path) then
+                           return Emit_Runtime_Error
+                             (Rest, "sign", "no-signature",
+                              "signature file not found: " & Sig_Path);
+                        end if;
+                        declare
+                           Stored_Raw : constant String := Fusa.Files.Read_File (Sig_Path);
+                           Prefix     : constant String := "sha256-hmac:";
+                           Stored     : Unbounded_String := Null_Unbounded_String;
+                           Last       : Natural := Stored_Raw'Last;
+                        begin
+                           --  Ada.Strings.Fixed.Trim's blank set is space
+                           --  only, not LF/CR -- Write_File always appends
+                           --  a trailing ASCII.LF, so that must be
+                           --  stripped explicitly or every verify would
+                           --  spuriously fail.
+                           while Last >= Stored_Raw'First
+                             and then (Stored_Raw (Last) = ASCII.LF
+                                       or else Stored_Raw (Last) = ASCII.CR
+                                       or else Stored_Raw (Last) = ' ')
+                           loop
+                              Last := Last - 1;
+                           end loop;
+                           if Last >= Stored_Raw'First
+                             and then Last - Stored_Raw'First + 1 >= Prefix'Length
+                             and then Stored_Raw (Stored_Raw'First .. Stored_Raw'First +
+                                                     Prefix'Length - 1) = Prefix
+                           then
+                              Stored := To_Unbounded_String
+                                (Stored_Raw (Stored_Raw'First + Prefix'Length .. Last));
+                           end if;
+                           if To_String (Stored) = Sig then
+                              Ada.Text_IO.Put_Line ("OK: signature matches");
+                              return Exit_Ok;
+                           else
+                              Ada.Text_IO.Put_Line
+                                (Ada.Text_IO.Standard_Error,
+                                 "FAILED: signature does not match");
+                              return Exit_Gate_Fail;
+                           end if;
+                        end;
+                     end;
+                  end if;
+               end;
+            end;
+         end;
+      end;
+   end Cmd_Sign;
+
+   ----------------------------------------------------------------------
+   --  hooks
+   ----------------------------------------------------------------------
+
+   Hook_Marker : constant String := "# installed by ada-FuSa (adafusa hooks install)";
+
+   procedure Make_Executable (Path : String) is
+      function C_Chmod
+        (Path : Interfaces.C.Strings.chars_ptr; Mode : Interfaces.C.int) return Interfaces.C.int;
+      pragma Import (C, C_Chmod, "chmod");
+      C_Path : Interfaces.C.Strings.chars_ptr := Interfaces.C.Strings.New_String (Path);
+      Result : Interfaces.C.int;
+      pragma Unreferenced (Result);
+   begin
+      Result := C_Chmod (C_Path, 8#755#);
+      Interfaces.C.Strings.Free (C_Path);
+   end Make_Executable;
+
+   --  fusa:req REQ-092
+   function Cmd_Hooks (Args : String_List) return Integer is
+   begin
+      if Args.Is_Empty then
+         Ada.Text_IO.Put_Line
+           (Ada.Text_IO.Standard_Error, "ada-FuSa: hooks: missing subcommand (install|remove)");
+         return Exit_Usage;
+      end if;
+      declare
+         Verb : constant String := Args.Element (1);
+         Rest : String_List := Args;
+      begin
+         Rest.Delete_First;
+         declare
+            Dir       : constant String := Dir_Of (Rest);
+            Hooks_Dir : constant String := Fusa.Files.Join (Dir, ".git/hooks");
+            Hook_Path : constant String := Fusa.Files.Join (Hooks_Dir, "pre-commit");
+         begin
+            if Verb = "install" then
+               if not Fusa.Files.Is_Directory (Fusa.Files.Join (Dir, ".git")) then
+                  Ada.Text_IO.Put_Line
+                    (Ada.Text_IO.Standard_Error,
+                     "ada-FuSa: hooks install: " & Dir &
+                       " is not a git repository (no .git directory)");
+                  return Exit_Runtime;
+               end if;
+               if Fusa.Files.Exists (Hook_Path) then
+                  declare
+                     Existing : constant String := Fusa.Files.Read_File (Hook_Path);
+                  begin
+                     if Ada.Strings.Fixed.Index (Existing, Hook_Marker) = 0 then
+                        Ada.Text_IO.Put_Line
+                          (Ada.Text_IO.Standard_Error,
+                           "ada-FuSa: hooks install: " & Hook_Path &
+                             " already exists and was not installed by ada-FuSa -- " &
+                             "remove it manually first");
+                        return Exit_Runtime;
+                     end if;
+                  end;
+               end if;
+               if not Fusa.Files.Is_Directory (Hooks_Dir) then
+                  Ada.Directories.Create_Path (Hooks_Dir);
+               end if;
+               Fusa.Files.Write_File
+                 (Hook_Path,
+                  "#!/bin/sh" & ASCII.LF &
+                    Hook_Marker & ASCII.LF &
+                    "adafusa check --strict || exit 1" & ASCII.LF);
+               Make_Executable (Hook_Path);
+               Ada.Text_IO.Put_Line ("installed " & Hook_Path);
+               return Exit_Ok;
+
+            elsif Verb = "remove" then
+               if not Fusa.Files.Exists (Hook_Path) then
+                  Ada.Text_IO.Put_Line ("no pre-commit hook installed at " & Hook_Path);
+                  return Exit_Ok;
+               end if;
+               declare
+                  Existing : constant String := Fusa.Files.Read_File (Hook_Path);
+               begin
+                  if Ada.Strings.Fixed.Index (Existing, Hook_Marker) = 0 then
+                     Ada.Text_IO.Put_Line
+                       (Ada.Text_IO.Standard_Error,
+                        "ada-FuSa: hooks remove: " & Hook_Path &
+                          " was not installed by ada-FuSa -- refusing to remove it");
+                     return Exit_Runtime;
+                  end if;
+               end;
+               Ada.Directories.Delete_File (Hook_Path);
+               Ada.Text_IO.Put_Line ("removed " & Hook_Path);
+               return Exit_Ok;
+
+            else
+               Ada.Text_IO.Put_Line
+                 (Ada.Text_IO.Standard_Error,
+                  "ada-FuSa: hooks: unknown subcommand '" & Verb &
+                    "' (expected install|remove)");
+               return Exit_Usage;
+            end if;
+         end;
+      end;
+   end Cmd_Hooks;
+
+   ----------------------------------------------------------------------
    --  Usage / dispatch
    ----------------------------------------------------------------------
 
@@ -1790,7 +2713,7 @@ package body Fusa.Cli is
       Ada.Text_IO.Put_Line (Ada.Text_IO.Standard_Error,
         "usage: adafusa <command> [options]" & ASCII.LF &
         "commands: version capabilities init check trace qualify release audit-pack " &
-        "report comp hara tara vuln");
+        "report comp hara tara vuln req disposition pr metrics sign hooks");
    end Print_Usage;
 
    function Run (Args : String_List) return Integer is
@@ -1833,6 +2756,18 @@ package body Fusa.Cli is
             return Cmd_Tara (Rest);
          elsif Cmd = "vuln" then
             return Cmd_Vuln (Rest);
+         elsif Cmd = "req" then
+            return Cmd_Req (Rest);
+         elsif Cmd = "disposition" then
+            return Cmd_Disposition (Rest);
+         elsif Cmd = "pr" then
+            return Cmd_Pr (Rest);
+         elsif Cmd = "metrics" then
+            return Cmd_Metrics (Rest);
+         elsif Cmd = "sign" then
+            return Cmd_Sign (Rest);
+         elsif Cmd = "hooks" then
+            return Cmd_Hooks (Rest);
          elsif Cmd = "--help" or else Cmd = "-h" or else Cmd = "help" then
             Print_Usage;
             return Exit_Ok;
