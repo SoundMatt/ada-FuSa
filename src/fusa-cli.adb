@@ -1771,6 +1771,7 @@ package body Fusa.Cli is
    function Cmd_Hara (Args : String_List) return Integer is
       Dir    : constant String := Dir_Of (Args);
       Format : constant String := Flag_Value (Args, "--format", "text");
+      Init   : constant Boolean := Has_Flag (Args, "--init");
    begin
       if Format /= "text" and then Format /= "json" then
          Ada.Text_IO.Put_Line
@@ -1781,7 +1782,31 @@ package body Fusa.Cli is
       end if;
 
       if not Fusa.Config.Hara_Exists (Dir) then
-         Fusa.Config.Scaffold_Hara (Dir);
+         if not Init then
+            --  section 1.2.5 MUST: a hara run with --format json on an
+            --  absent file (with no --init/scaffold flag) MUST exit
+            --  non-zero rather than silently report zero hazards as if
+            --  the analysis were complete.
+            return Emit_Runtime_Error
+              (Args, "hara-report", "no-config",
+               "no " & Fusa.Config.Hara_File & " found in " & Dir &
+               " (pass --init to scaffold one)");
+         end if;
+         declare
+            Standard_Hint : Unbounded_String := Null_Unbounded_String;
+         begin
+            begin
+               declare
+                  Hcfg : constant Fusa.Config.Project_Config := Fusa.Config.Load (Dir);
+               begin
+                  Standard_Hint := Hcfg.Standard;
+               end;
+            exception
+               when Fusa.Config.No_Config_Error | Fusa.Config.Invalid_Config_Error =>
+                  null;
+            end;
+            Fusa.Config.Scaffold_Hara (Dir, To_String (Standard_Hint));
+         end;
          Ada.Text_IO.Put_Line
            ("created " & Fusa.Files.Join (Dir, Fusa.Config.Hara_File) &
               " (template) -- fill in your hazards and re-run");
@@ -1790,30 +1815,104 @@ package body Fusa.Cli is
 
       declare
          Findings : Finding_List;
-         Hazards  : constant Fusa.Config.Hazard_List := Fusa.Config.Load_Hara (Dir, Findings);
+         Doc      : constant Fusa.Config.Hara_Document := Fusa.Config.Load_Hara (Dir, Findings);
+         Hazards_With_Asil, Hazards_With_Sg, Sg_With_Fssr : Natural := 0;
       begin
+         for H of Doc.Hazards loop
+            if Length (H.Risk.Asil) > 0 then
+               Hazards_With_Asil := Hazards_With_Asil + 1;
+            end if;
+            if not H.Safety_Goals.Is_Empty then
+               Hazards_With_Sg := Hazards_With_Sg + 1;
+            end if;
+         end loop;
+         for SG of Doc.Safety_Goals loop
+            if not SG.Fssr_Refs.Is_Empty then
+               Sg_With_Fssr := Sg_With_Fssr + 1;
+            end if;
+         end loop;
+
          if Format = "json" then
             declare
                W : Fusa.Json.Writer.Instance;
             begin
                W.Object_Start;
                --  §1.2.5/§9.2: kind is "hara-report", not the bare
-               --  command name.
+               --  command name. The JSON output shares the input file's
+               --  operationalSituations/hazards/safetyGoals shape
+               --  verbatim (per section 9.2), plus a draft "completeness"
+               --  block and the usual validation findings/summary
+               --  extension.
                Fusa.Report.Write_Header (W, "hara-report");
-               W.Key ("hazards");
+               W.Key ("operationalSituations");
                W.Array_Start;
-               for H of Hazards loop
+               for OS of Doc.Operational_Situations loop
                   W.Object_Start;
-                  W.Field ("id", To_String (H.Id));
-                  W.Field ("hazard", To_String (H.Description));
-                  W.Field ("severity", To_String (H.Severity));
-                  W.Field ("exposure", To_String (H.Exposure));
-                  W.Field ("controllability", To_String (H.Controllability));
-                  W.Field ("asil", To_String (H.Asil));
-                  W.Field ("safetyGoal", To_String (H.Safety_Goal));
+                  W.Field ("id", To_String (OS.Id));
+                  W.Field ("description", To_String (OS.Description));
                   W.Object_End;
                end loop;
                W.Array_End;
+               W.Key ("hazards");
+               W.Array_Start;
+               for H of Doc.Hazards loop
+                  W.Object_Start;
+                  W.Field ("id", To_String (H.Id));
+                  W.Field ("description", To_String (H.Description));
+                  W.Field_If_Non_Blank ("source", To_String (H.Source));
+                  W.Key ("situations");
+                  W.Array_Start;
+                  for S of H.Situations loop
+                     W.Value (S);
+                  end loop;
+                  W.Array_End;
+                  W.Key ("risk");
+                  W.Object_Start;
+                  W.Field ("severity", To_String (H.Risk.Severity));
+                  W.Field ("exposure", To_String (H.Risk.Exposure));
+                  W.Field ("controllability", To_String (H.Risk.Controllability));
+                  W.Field ("asil", To_String (H.Risk.Asil));
+                  W.Object_End;
+                  W.Key ("safetyGoals");
+                  W.Array_Start;
+                  for SG of H.Safety_Goals loop
+                     W.Value (SG);
+                  end loop;
+                  W.Array_End;
+                  W.Object_End;
+               end loop;
+               W.Array_End;
+               W.Key ("safetyGoals");
+               W.Array_Start;
+               for SG of Doc.Safety_Goals loop
+                  W.Object_Start;
+                  W.Field ("id", To_String (SG.Id));
+                  W.Field ("description", To_String (SG.Description));
+                  W.Key ("hazards");
+                  W.Array_Start;
+                  for H of SG.Hazards loop
+                     W.Value (H);
+                  end loop;
+                  W.Array_End;
+                  W.Field ("asil", To_String (SG.Asil));
+                  W.Field_If_Non_Blank ("safeState", To_String (SG.Safe_State));
+                  W.Key ("fssrRefs");
+                  W.Array_Start;
+                  for R of SG.Fssr_Refs loop
+                     W.Value (R);
+                  end loop;
+                  W.Array_End;
+                  W.Object_End;
+               end loop;
+               W.Array_End;
+               W.Key ("completeness");
+               W.Object_Start;
+               W.Field ("totalHazards", Natural (Doc.Hazards.Length));
+               W.Field ("hazardsWithAsil", Hazards_With_Asil);
+               W.Field ("hazardsWithSafetyGoal", Hazards_With_Sg);
+               W.Field ("safetyGoalsWithFssrRefs", Sg_With_Fssr);
+               W.Field ("danglingReferences", Doc.Dangling_References);
+               W.Object_End;
                Fusa.Report.Write_Findings_Array (W, Findings);
                Fusa.Report.Write_Summary (W, Findings);
                W.Object_End;
@@ -1823,11 +1922,12 @@ package body Fusa.Cli is
             declare
                Buf : Unbounded_String := Null_Unbounded_String;
             begin
-               for H of Hazards loop
+               for H of Doc.Hazards loop
                   Append (Buf, To_String (H.Id) & ": " & To_String (H.Description) &
-                            " (ASIL " & To_String (H.Asil) & ")" & ASCII.LF);
+                            " (ASIL " & To_String (H.Risk.Asil) & ")" & ASCII.LF);
                end loop;
-               Append (Buf, Trim_Img (Natural (Hazards.Length)) & " hazards, " &
+               Append (Buf, Trim_Img (Natural (Doc.Hazards.Length)) & " hazards, " &
+                         Trim_Img (Natural (Doc.Safety_Goals.Length)) & " safety goals, " &
                          Trim_Img (Natural (Findings.Length)) & " validation findings");
                Emit (Args, To_String (Buf));
             end;
@@ -1846,8 +1946,10 @@ package body Fusa.Cli is
 
    --  fusa:req REQ-085
    function Cmd_Tara (Args : String_List) return Integer is
-      Dir    : constant String := Dir_Of (Args);
-      Format : constant String := Flag_Value (Args, "--format", "text");
+      Dir       : constant String := Dir_Of (Args);
+      Format    : constant String := Flag_Value (Args, "--format", "text");
+      Init      : constant Boolean := Has_Flag (Args, "--init");
+      Min_Cov_Str : constant String := Flag_Value (Args, "--min-coverage", "");
    begin
       if Format /= "text" and then Format /= "json" then
          Ada.Text_IO.Put_Line
@@ -1858,6 +1960,15 @@ package body Fusa.Cli is
       end if;
 
       if not Fusa.Config.Tara_Exists (Dir) then
+         if not Init then
+            --  Same MUST as hara (section 1.2.5, applied consistently to
+            --  its structural sibling): a missing input file must not be
+            --  silently reported as a complete, empty analysis.
+            return Emit_Runtime_Error
+              (Args, "tara-report", "no-config",
+               "no " & Fusa.Config.Tara_File & " found in " & Dir &
+               " (pass --init to scaffold one)");
+         end if;
          Fusa.Config.Scaffold_Tara (Dir);
          Ada.Text_IO.Put_Line
            ("created " & Fusa.Files.Join (Dir, Fusa.Config.Tara_File) &
@@ -1867,26 +1978,88 @@ package body Fusa.Cli is
 
       declare
          Findings : Finding_List;
-         Threats  : constant Fusa.Config.Threat_List := Fusa.Config.Load_Tara (Dir, Findings);
+         Doc      : constant Fusa.Config.Tara_Document := Fusa.Config.Load_Tara (Dir, Findings);
+
+         --  summary.assetsAnalyzed: the number of distinct assets actually
+         --  covered, not the raw threat count (the same asset can have
+         --  several threats).
+         function Count_Distinct_Assets return Natural is
+            Seen  : String_List;
+            Count : Natural := 0;
+         begin
+            for T of Doc.Threats loop
+               declare
+                  A     : constant String := To_String (T.Asset);
+                  Found : Boolean := False;
+               begin
+                  for S of Seen loop
+                     if S = A then
+                        Found := True;
+                        exit;
+                     end if;
+                  end loop;
+                  if not Found then
+                     Seen.Append (A);
+                     Count := Count + 1;
+                  end if;
+               end;
+            end loop;
+            return Count;
+         end Count_Distinct_Assets;
+
+         Assets_Analyzed  : constant Natural := Count_Distinct_Assets;
+         Assets_In_Project : constant Natural :=
+           (if Doc.Assets_In_Project_Given then Doc.Assets_In_Project else Assets_Analyzed);
+         Coverage_Pct     : constant Natural :=
+           (if Assets_In_Project = 0 then 100
+            else Assets_Analyzed * 100 / Assets_In_Project);
+         Min_Coverage     : Natural := 0;
+         Gate_Fail        : Boolean := False;
       begin
+         if Min_Cov_Str'Length > 0 then
+            begin
+               Min_Coverage := Natural'Value (Min_Cov_Str);
+            exception
+               when Constraint_Error =>
+                  Ada.Text_IO.Put_Line
+                    (Ada.Text_IO.Standard_Error,
+                     "ada-FuSa: tara: --min-coverage must be a non-negative integer");
+                  return Exit_Usage;
+            end;
+         end if;
+         if Min_Coverage > 0 and then Coverage_Pct < Min_Coverage then
+            Gate_Fail := True;
+         end if;
+
          if Format = "json" then
             declare
                W : Fusa.Json.Writer.Instance;
             begin
                W.Object_Start;
                --  §1.2.5/§9.2: kind is "tara-report", not the bare
-               --  command name.
+               --  command name. "summary" is the canonical coverage
+               --  block (section 9.2), NOT the generic errors/warnings/
+               --  infos tally every other JSON report uses -- that tally
+               --  goes under "findingsSummary" instead (same collision
+               --  gap-report had, fixed the same way).
                Fusa.Report.Write_Header (W, "tara-report");
                W.Key ("threats");
                W.Array_Start;
-               for T of Threats loop
+               for T of Doc.Threats loop
                   W.Object_Start;
                   W.Field ("id", To_String (T.Id));
                   W.Field ("asset", To_String (T.Asset));
                   W.Field ("threat", To_String (T.Description));
+                  W.Field_If_Non_Blank ("cwe", To_String (T.Cwe));
                   W.Field ("attackVector", To_String (T.Attack_Vector));
-                  W.Field ("impact", To_String (T.Impact));
-                  W.Field ("likelihood", To_String (T.Likelihood));
+                  W.Field ("attackFeasibility", To_String (T.Attack_Feasibility));
+                  W.Key ("impact");
+                  W.Object_Start;
+                  W.Field ("safety", To_String (T.Impact.Safety));
+                  W.Field ("financial", To_String (T.Impact.Financial));
+                  W.Field ("operational", To_String (T.Impact.Operational));
+                  W.Field ("privacy", To_String (T.Impact.Privacy));
+                  W.Object_End;
                   W.Field ("risk", To_String (T.Risk));
                   W.Field ("treatment", To_String (T.Treatment));
                   W.Key ("mitigations");
@@ -1895,11 +2068,29 @@ package body Fusa.Cli is
                      W.Value (M);
                   end loop;
                   W.Array_End;
+                  if T.Location.Present then
+                     W.Key ("location");
+                     W.Object_Start;
+                     W.Field ("file", To_String (T.Location.File));
+                     if T.Location.Line > 0 then
+                        W.Field ("line", T.Location.Line);
+                     end if;
+                     W.Object_End;
+                  end if;
+                  W.Field_If_Non_Blank ("cyberRuleId", To_String (T.Cyber_Rule_Id));
                   W.Object_End;
                end loop;
                W.Array_End;
+               W.Key ("summary");
+               W.Object_Start;
+               W.Field ("assetsAnalyzed", Assets_Analyzed);
+               W.Field ("assetsInProject", Assets_In_Project);
+               W.Field ("coveragePct", Coverage_Pct);
+               W.Field_If_Non_Blank
+                 ("assetInventoryMethod", To_String (Doc.Asset_Inventory_Method));
+               W.Object_End;
                Fusa.Report.Write_Findings_Array (W, Findings);
-               Fusa.Report.Write_Summary (W, Findings);
+               Fusa.Report.Write_Summary (W, Findings, "findingsSummary");
                W.Object_End;
                Emit (Args, Fusa.Json.Writer.To_String (W));
             end;
@@ -1907,17 +2098,19 @@ package body Fusa.Cli is
             declare
                Buf : Unbounded_String := Null_Unbounded_String;
             begin
-               for T of Threats loop
+               for T of Doc.Threats loop
                   Append (Buf, To_String (T.Id) & ": " & To_String (T.Description) &
                             " (risk " & To_String (T.Risk) & ")" & ASCII.LF);
                end loop;
-               Append (Buf, Trim_Img (Natural (Threats.Length)) & " threats, " &
+               Append (Buf, Trim_Img (Natural (Doc.Threats.Length)) & " threats, " &
+                         Trim_Img (Assets_Analyzed) & "/" & Trim_Img (Assets_In_Project) &
+                         " assets analyzed (" & Trim_Img (Coverage_Pct) & "%), " &
                          Trim_Img (Natural (Findings.Length)) & " validation findings");
                Emit (Args, To_String (Buf));
             end;
          end if;
 
-         if Fusa.Report.Has_Gate_Failure (Findings, False) then
+         if Gate_Fail or else Fusa.Report.Has_Gate_Failure (Findings, False) then
             return Exit_Gate_Fail;
          end if;
          return Exit_Ok;

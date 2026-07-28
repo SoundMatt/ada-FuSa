@@ -353,5 +353,52 @@ begin
       Ada.Directories.Delete_Tree (Proj_Root);
    end;
 
+   --  fusa:test REQ-082
+   --  Determine_Asil: the published ISO 26262-3:2018 Table 4 lookup.
+   --  Not exhaustive over all 36 S/E/C combinations, but covers every
+   --  corner of the table (the all-QM low corner, the sole ASIL-D cell,
+   --  a representative cell of each other rank) plus invalid-input
+   --  fail-safe behaviour, so a transcription error anywhere in the
+   --  table is very likely to be caught.
+   Check (Fusa.Config.Determine_Asil ("S1", "E1", "C1") = "QM",
+          "S1/E1/C1 -> QM (the table's lowest-risk corner)");
+   Check (Fusa.Config.Determine_Asil ("S1", "E3", "C3") = "ASIL-A",
+          "S1/E3/C3 -> ASIL-A");
+   Check (Fusa.Config.Determine_Asil ("S2", "E4", "C2") = "ASIL-B",
+          "S2/E4/C2 -> ASIL-B");
+   Check (Fusa.Config.Determine_Asil ("S3", "E3", "C3") = "ASIL-C",
+          "S3/E3/C3 -> ASIL-C");
+   Check (Fusa.Config.Determine_Asil ("S3", "E4", "C3") = "ASIL-D",
+          "S3/E4/C3 -> ASIL-D (the table's sole highest-risk cell)");
+   Check (Fusa.Config.Determine_Asil ("S0", "E4", "C3") = "",
+          "S0 is outside the table's S1-S3 range -- fails safe to blank, "
+          & "not a guessed ASIL");
+   Check (Fusa.Config.Determine_Asil ("S1", "E0", "C1") = "",
+          "E0 is outside the table's E1-E4 range -- fails safe to blank");
+   Check (Fusa.Config.Determine_Asil ("bogus", "E1", "C1") = "",
+          "an unrecognised severity code fails safe to blank");
+
+   --  fusa:test REQ-083
+   --  Determine_Tara_Risk: risk tracks the worse of attackFeasibility and
+   --  the highest SFOP impact level.
+   declare
+      High_Impact : constant Fusa.Config.Sfop_Impact :=
+        (Safety => To_Unbounded_String ("high"), Financial => To_Unbounded_String ("low"),
+         Operational => To_Unbounded_String ("low"), Privacy => To_Unbounded_String ("low"));
+      Low_Impact  : constant Fusa.Config.Sfop_Impact :=
+        (Safety => To_Unbounded_String ("low"), Financial => To_Unbounded_String ("negligible"),
+         Operational => To_Unbounded_String ("low"), Privacy => To_Unbounded_String ("low"));
+   begin
+      Check (Fusa.Config.Determine_Tara_Risk ("very-low", Low_Impact) = "low",
+             "very-low feasibility + all-low impact -> low risk");
+      Check (Fusa.Config.Determine_Tara_Risk ("very-low", High_Impact) = "high",
+             "even very-low feasibility is overridden by a high SFOP impact "
+             & "-- risk tracks the WORSE of the two inputs");
+      Check (Fusa.Config.Determine_Tara_Risk ("high", Low_Impact) = "high",
+             "high feasibility with low impact still yields high risk");
+      Check (Fusa.Config.Determine_Tara_Risk ("bogus", Low_Impact) = "",
+             "an unrecognised attackFeasibility fails safe to blank");
+   end;
+
    Ada.Directories.Delete_Tree (Root);
 end Test_Engine;
