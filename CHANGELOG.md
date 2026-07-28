@@ -5,6 +5,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+### Fixed (Docker image's stale spec-version label)
+
+The Docker image build's `SPEC_VERSION` build-arg (`ci.yml`'s `docker` job and the Dockerfile's
+own `ARG` default) was still `"1.11"`, left over from before `Fusa.Spec_Version` was bumped to
+`"1.15.0"` -- a built image's `io.x-fusa.spec-version` OCI label (and description string) would
+silently misreport its own spec conformance to anything reading the label, even though the binary
+itself correctly reports `1.15.0` via `adafusa version`. Bumped both to `1.15.0`.
+
+New regression test (`test_fusa_core.adb`) reads the repo's actual `Dockerfile` and
+`.github/workflows/ci.yml` and asserts `SPEC_VERSION=` & `Fusa.Spec_Version` appears in both --
+verified to fail before the fix (temporarily reverted the Dockerfile default to confirm) and pass
+after, so this specific drift can't recur silently again in either direction.
+
+4 new regression checks; 737/737 checks passing (was 733).
+
 ### Added (issue #69 part 6/6 + issue #80 -- FUSA-STUB detection, attestation, spec v1.15.0)
 
 Implements section 1.6's evidence content-quality baseline in full, closing the last part of
