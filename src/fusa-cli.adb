@@ -4399,6 +4399,7 @@ package body Fusa.Cli is
                   W.Field ("id", To_String (N.Id));
                   W.Field_If_Non_Blank ("type", To_String (N.Kind));
                   W.Field_If_Non_Blank ("text", To_String (N.Text));
+                  W.Field_If_Non_Blank ("evidence", To_String (N.Evidence));
                   W.Object_End;
                end loop;
                W.Array_End;
@@ -4421,6 +4422,18 @@ package body Fusa.Cli is
                   end loop;
                end loop;
                W.Array_End;
+               declare
+                  Completeness : constant Fusa.Config.Gsn_Completeness :=
+                    Fusa.Config.Safety_Case_Completeness (Nodes);
+               begin
+                  W.Key ("completeness");
+                  W.Object_Start;
+                  W.Field ("totalGoals", Completeness.Total_Goals);
+                  W.Field
+                    ("goalsWithEvidence", Completeness.Goals_With_Evidence);
+                  W.Field ("undeveloped", Completeness.Undeveloped);
+                  W.Object_End;
+               end;
                Fusa.Report.Write_Findings_Array (W, Findings);
                Fusa.Report.Write_Summary (W, Findings);
                W.Object_End;
@@ -4484,6 +4497,10 @@ package body Fusa.Cli is
                   Visited.Append (Id);
                   Append (Buf, Prefix & "- [" & To_String (N.Kind) & "] " & Id & ": " &
                             To_String (N.Text) & ASCII.LF);
+                  if Length (N.Evidence) > 0 then
+                     Append (Buf, Prefix & "    (evidence: " &
+                               To_String (N.Evidence) & ")" & ASCII.LF);
+                  end if;
                   for Ctx of N.In_Context_Of loop
                      Append (Buf, Prefix & "    (context: " & Ctx & ")" & ASCII.LF);
                   end loop;

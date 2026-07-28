@@ -5,6 +5,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+### Changed (issue #69, part 3/6 -- safety-case schema conformance)
+
+`.fusa-safety-case.json`/`safety-case.json` brought into conformance with the section 9.2
+canonical shape (GSN Community Standard v3):
+
+- **Added the `"evidence"` field** on GSN nodes (solution nodes SHOULD set it to a real,
+  existing artifact filename) -- previously parsed the input file's `evidence` but never
+  round-tripped it into any output format (text, Markdown, Mermaid, or JSON).
+- **New `GSN004` validation finding** (WARNING) when a solution node's `evidence` names a file
+  that does not actually exist in the project -- per the spec, a fabricated evidence claim "is
+  worse than an honestly missing solution," so this doesn't silently pass.
+- **Added the `"completeness"` block** (`totalGoals`/`goalsWithEvidence`/`undeveloped`) to
+  `--format json` output. `goalsWithEvidence` traces each goal's `supportedBy` chain
+  (transitively, cycle-safe) for a solution node with non-blank evidence; `undeveloped` counts
+  goals with no `supportedBy` chain at all, so an argument gap is surfaced in the graph rather
+  than silently omitted.
+- Text-outline rendering now shows a solution node's evidence file alongside its text.
+
+7 new/updated regression tests; 684/684 checks passing (was 677).
+
 ### Changed (issue #69, part 2/6 -- fmea schema conformance)
 
 `.fusa-fmea.json`/`fmea.json` brought into conformance with the section 9.2 canonical shape
