@@ -5,6 +5,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+### Fixed (deep-audit PR5/11 -- release --full and audit-pack evidence completeness)
+
+Continuing the multi-agent audit fix series.
+
+- **`release --full` falsely claimed fmea/boundary were unimplemented**: it unconditionally
+  printed `"skipping fmea (not yet implemented)"` / `"skipping boundary (not yet implemented)"`
+  and never called either -- but both are fully shipped commands (`Cmd_Fmea`, `Cmd_Boundary`).
+  Fixed by actually wiring them into the evidence pipeline (`fmea.json`, `boundary.dot`), matching
+  the already-established best-effort, non-gating pattern `vuln` uses (a failure in one evidence
+  step doesn't abort the rest of the pipeline).
+- **`audit-pack`'s hardcoded 7-file allowlist**: despite `audit-pack`'s own documented purpose --
+  "all existing evidence artifacts, bundled" -- it only ever looked for 7 fixed filenames, missing
+  `comp-report.json`, `vuln.json`, `badge.svg`, `boundary.dot`/`.mermaid`, `fmea.json`/`.csv`,
+  `safety-case.*`, `sas.json`/`.md`, and the SPDX document. Fixed by expanding the allowlist to
+  every evidence artifact filename documented in README's Evidence Artifacts table (a missing file
+  is already a no-op, not an error, so this only adds coverage) plus best-effort SPDX bundling
+  (its filename is `<name>-<version>.spdx.json`, so it needs `.fusa.json` loaded first; skipped
+  silently if that fails, matching every other entry's graceful-absence behaviour).
+
+4 new regression tests, including one proving `audit-pack` now bundles `boundary.dot` (never one
+of the original 7 filenames) and one resolving a test-fixture ordering conflict the fmea wiring
+introduced (release --full's first run now scaffolds `.fusa-fmea.json` as a side effect, same as
+fmea's own documented first-run behaviour); 599/599 checks passing (was 596).
+
 ### Fixed (deep-audit PR4/11 -- qualify's self-test independence)
 
 Continuing the multi-agent audit fix series.

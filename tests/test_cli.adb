@@ -291,6 +291,25 @@ begin
    Check (Fusa.Files.Exists (Root & "/audit-pack.zip"),
           "release --full also produces audit-pack.zip as its final step");
 
+   --  Regression: release --full used to print "not yet implemented" and
+   --  skip fmea/boundary entirely, even though both are fully shipped
+   --  commands. boundary needs no input sidecar, so it writes real
+   --  content on the very first --full run; fmea's own scaffold-on-
+   --  first-run behaviour (no .fusa-fmea.json yet) means this first run
+   --  only creates the *input* sidecar, not a fmea.json report -- that's
+   --  fmea's existing, unrelated first-run contract, not a --full bug.
+   --  fusa:test REQ-013
+   Check (Fusa.Files.Exists (Root & "/boundary.dot"),
+          "release --full now writes boundary.dot (boundary is wired in, not skipped)");
+   Check (Fusa.Files.Exists (Root & "/.fusa-fmea.json"),
+          "release --full's first run scaffolds .fusa-fmea.json via fmea's "
+          & "own template-on-first-run behaviour (fmea is wired in, not skipped)");
+   --  Delete the sidecar scaffold immediately: it's a side effect of this
+   --  release --full run, not deliberately-seeded fixture state, and a
+   --  later test (REQ-106's fmea block) asserts .fusa-fmea.json is absent
+   --  before fmea's own first run against this same shared Root.
+   Ada.Directories.Delete_File (Root & "/.fusa-fmea.json");
+
    --  fusa:test REQ-076
    Check (not Fusa.Files.Exists (Root & "/t-0.1.0.spdx.json"),
           "release without --spdx-version does not write an SPDX document");
@@ -313,6 +332,17 @@ begin
             (Args ("audit-pack", "--dir", Root, "--output", Root & "/custom.zip")) = Exit_Ok,
           "audit-pack honours an explicit --output path");
    Check (Fusa.Files.Exists (Root & "/custom.zip"), "audit-pack wrote to the custom path");
+
+   --  Regression: audit-pack used to bundle a fixed 7-file allowlist that
+   --  missed most of the tool's own evidence artifacts. boundary.dot
+   --  exists in Root by this point (release --full wrote it above) but
+   --  was never one of the original 7 -- its filename (stored uncompressed
+   --  in the zip's local file headers by this hand-rolled writer) must
+   --  now appear in the archive's raw bytes.
+   Check (Ada.Strings.Fixed.Index
+            (Fusa.Files.Read_File (Root & "/audit-pack.zip"), "boundary.dot") > 0,
+          "audit-pack's expanded allowlist bundles boundary.dot, which was "
+          & "never one of the original 7 hardcoded filenames");
 
    --  fusa:test REQ-081
    Check (Fusa.Cli.Run (Args ("comp", "--dir", Root)) = Exit_Ok,

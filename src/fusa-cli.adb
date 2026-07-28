@@ -1192,6 +1192,8 @@ package body Fusa.Cli is
 
    function Cmd_Audit_Pack (Args : String_List) return Integer;
    function Cmd_Vuln (Args : String_List) return Integer;
+   function Cmd_Fmea (Args : String_List) return Integer;
+   function Cmd_Boundary (Args : String_List) return Integer;
 
    --  fusa:req REQ-013
    function Cmd_Release (Args : String_List) return Integer is
@@ -1329,10 +1331,38 @@ package body Fusa.Cli is
               (Fusa.Files.Join (Output_Dir, "artifact-manifest.json"),
                Fusa.Json.Writer.To_String (W3) & ASCII.LF);
          end;
-         Ada.Text_IO.Put_Line
-           (Ada.Text_IO.Standard_Error, "ada-FuSa: skipping fmea (not yet implemented)");
-         Ada.Text_IO.Put_Line
-           (Ada.Text_IO.Standard_Error, "ada-FuSa: skipping boundary (not yet implemented)");
+         declare
+            Fmea_Args : String_List;
+            Fmea_Rc   : Integer;
+            pragma Unreferenced (Fmea_Rc);
+         begin
+            Fmea_Args.Append ("--dir");
+            Fmea_Args.Append (Dir);
+            Fmea_Args.Append ("--format");
+            Fmea_Args.Append ("json");
+            Fmea_Args.Append ("--output");
+            Fmea_Args.Append (Fusa.Files.Join (Output_Dir, "fmea.json"));
+            --  fmea and boundary are fully implemented commands (Cmd_Fmea,
+            --  Cmd_Boundary) -- regression: this used to unconditionally
+            --  print "not yet implemented" and skip both, which was false
+            --  by the time either command shipped. fmea's own
+            --  scaffold-on-first-run behaviour (a missing .fusa-fmea.json
+            --  produces a template, not a report, and exits 0) does not
+            --  abort the rest of --full's evidence pipeline, matching
+            --  vuln's already-skip-don't-abort behaviour below.
+            Fmea_Rc := Cmd_Fmea (Fmea_Args);
+         end;
+         declare
+            Boundary_Args : String_List;
+            Boundary_Rc   : Integer;
+            pragma Unreferenced (Boundary_Rc);
+         begin
+            Boundary_Args.Append ("--dir");
+            Boundary_Args.Append (Dir);
+            Boundary_Args.Append ("--output");
+            Boundary_Args.Append (Fusa.Files.Join (Output_Dir, "boundary.dot"));
+            Boundary_Rc := Cmd_Boundary (Boundary_Args);
+         end;
          declare
             Vuln_Args : String_List;
             Vuln_Rc   : Integer;
@@ -1387,6 +1417,17 @@ package body Fusa.Cli is
          end if;
       end Add_If_Exists;
    begin
+      --  Regression: this used to be a fixed 7-file allowlist that missed
+      --  most of the tool's own evidence artifacts (comp-report.json,
+      --  vuln.json, badge.svg, boundary.dot/.mermaid, fmea.json/.csv,
+      --  safety-case.*, sas.json/.md, and the SPDX document) -- silently
+      --  shipping an "audit pack" that omitted evidence the project
+      --  actually has, despite audit-pack's own README description
+      --  promising "all existing evidence artifacts, bundled". Add_If_Exists
+      --  already treats a missing file as "nothing to bundle", so this is
+      --  every evidence artifact filename documented in README's Evidence
+      --  Artifacts table -- listing one that doesn't exist for a given
+      --  project is a no-op, not an error.
       Add_If_Exists (Fusa.Config.Config_File);
       Add_If_Exists (Fusa.Config.Reqs_File);
       Add_If_Exists ("fusa-report.json");
@@ -1394,6 +1435,36 @@ package body Fusa.Cli is
       Add_If_Exists ("sbom.json");
       Add_If_Exists ("provenance.json");
       Add_If_Exists ("artifact-manifest.json");
+      Add_If_Exists ("comp-report.json");
+      Add_If_Exists ("vuln.json");
+      Add_If_Exists ("badge.svg");
+      Add_If_Exists ("boundary.dot");
+      Add_If_Exists ("boundary.mermaid");
+      Add_If_Exists ("fmea.json");
+      Add_If_Exists ("fmea.csv");
+      Add_If_Exists ("safety-case.json");
+      Add_If_Exists ("safety-case.md");
+      Add_If_Exists ("safety-case.mermaid");
+      Add_If_Exists ("sas.json");
+      Add_If_Exists ("sas.md");
+
+      --  The SPDX document's filename is <name>-<version>.spdx.json --
+      --  variable, so it can't be a Name literal like the others above.
+      --  Best-effort: if .fusa.json is missing or invalid, there is
+      --  nothing to bundle here (and Config_File's own Add_If_Exists call
+      --  above already surfaced that absence), so silently skip rather
+      --  than failing the whole audit-pack over it.
+      begin
+         declare
+            Cfg : constant Fusa.Config.Project_Config := Fusa.Config.Load (Dir);
+         begin
+            Add_If_Exists
+              (To_String (Cfg.Name) & "-" & To_String (Cfg.Version) & ".spdx.json");
+         end;
+      exception
+         when Fusa.Config.No_Config_Error | Fusa.Config.Invalid_Config_Error =>
+            null;
+      end;
 
       declare
          W : Fusa.Json.Writer.Instance;
