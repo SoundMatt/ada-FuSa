@@ -4,6 +4,7 @@ with Test_Framework; use Test_Framework;
 
 procedure Test_Fusa_Core is
 begin
+   --  fusa:test REQ-047
    Check (Fusa.Normalize_Message ("line 42 has 3 errors") = "line # has # errors",
           "digit runs collapse to '#'");
    Check (Fusa.Normalize_Message ("a   b" & ASCII.HT & "c") = "a b c",
@@ -11,6 +12,7 @@ begin
    Check (Fusa.Normalize_Message ("  trim me  ") = "trim me",
           "leading/trailing whitespace is trimmed");
 
+   --  fusa:test REQ-046
    Check (Fusa.Derive_Category ("LINT001") = Fusa.Lint, "LINT prefix -> lint category");
    Check (Fusa.Derive_Category ("ADA005") = Fusa.Safety, "ADA prefix -> safety category");
    Check (Fusa.Derive_Category ("FUSA001") = Fusa.Safety, "FUSA prefix -> safety category");
@@ -34,6 +36,7 @@ begin
 
    --  Image() for every enum literal (not just the ones exercised above).
    --  fusa:test REQ-002
+   --  fusa:test REQ-043
    Check (Fusa.Image (Fusa.Info) = "INFO", "Severity Image: INFO");
    Check (Fusa.Image (Fusa.Warning) = "WARNING", "Severity Image: WARNING");
    Check (Fusa.Image (Fusa.Error) = "ERROR", "Severity Image: ERROR");
@@ -70,6 +73,8 @@ begin
         Make_Finding ("ADA002", Error, "bad thing", Make_Location ("src/x.adb", 10));
    begin
       --  fusa:test REQ-004
+      --  fusa:test REQ-044
+      --  fusa:test REQ-045
       Check (Length (F1.Fingerprint) = 71, --  "sha256:" (7) + 64 hex chars
              "fingerprint has the expected 'sha256:' + 64-hex-char length");
       Check (F1.Fingerprint = F2.Fingerprint,

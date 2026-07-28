@@ -16,8 +16,11 @@ begin
    end if;
    Ada.Directories.Create_Path (Root);
 
+   --  fusa:test REQ-051
    Check (not Fusa.Config.Exists (Root), "no config initially");
 
+   --  fusa:test REQ-050
+   --  fusa:test REQ-052
    declare
       Cfg : Fusa.Config.Project_Config := Fusa.Config.Default_Config ("myproj");
    begin
@@ -45,7 +48,11 @@ begin
              "excludePatterns round-trips");
    end;
 
+   --  fusa:test REQ-053
+   Check (not Fusa.Config.Requirements_Exist (Root), "no requirements file initially");
+
    --  Requirements + duplicate-id detection
+   --  fusa:test REQ-054
    declare
       Reqs : Fusa.Config.Requirement_List;
       R1, R2 : Fusa.Config.Requirement;
@@ -57,6 +64,8 @@ begin
       Reqs.Append (R2);
       Fusa.Config.Save_Requirements (Root, Reqs);
    end;
+   Check (Fusa.Config.Requirements_Exist (Root),
+          "Requirements_Exist is true once Save_Requirements has written the file");
 
    declare
       Findings : Finding_List;
