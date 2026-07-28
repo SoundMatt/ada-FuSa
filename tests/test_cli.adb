@@ -1256,15 +1256,33 @@ begin
       begin
          Check (Ada.Strings.Fixed.Index (Content, """kind"": ""sas""") > 0,
                 "sas.json carries kind: sas");
-         Check (Ada.Strings.Fixed.Index (Content, """total"": 1") > 0
-                and then Ada.Strings.Fixed.Index (Content, """traced"": 1") > 0,
-                "sas.json's requirements block reflects the one traced requirement");
+         Check (Ada.Strings.Fixed.Index (Content, """checklist"":") > 0,
+                "sas.json has the canonical checklist[] array");
+         Check (Ada.Strings.Fixed.Index
+                  (Content, """item"": ""Software Requirements Data""") > 0
+                and then Ada.Strings.Fixed.Index (Content, """clause"": ""11.9""") > 0
+                and then Ada.Strings.Fixed.Index
+                  (Content, """evidence"": "".fusa-reqs.json""") > 0,
+                "sas.json's checklist marks 11.9 present with real evidence, "
+                & "since a non-empty .fusa-reqs.json exists");
+         Check (Ada.Strings.Fixed.Index
+                  (Content, """item"": ""Plan for Software Aspects of Certification""") > 0
+                and then Ada.Strings.Fixed.Index (Content, """clause"": ""11.1""") > 0,
+                "sas.json's checklist still lists items ada-FuSa cannot observe "
+                & "(no fabricated presence)");
+         Check (Ada.Strings.Fixed.Index (Content, """total"": 20") > 0
+                and then Ada.Strings.Fixed.Index (Content, """present"": 3") > 0,
+                "sas.json's summary: 3 of 20 items present (requirements data, "
+                & "source code, and the SAS document itself)");
       end;
       declare
          Md : constant String := Fusa.Files.Read_File (Sas_Root & "/sas.md");
       begin
          Check (Ada.Strings.Fixed.Index (Md, "# Software Accomplishment Summary") = 1,
                 "sas.md starts with a level-1 heading");
+         Check (Ada.Strings.Fixed.Index (Md, "Software Requirements Data") > 0
+                and then Ada.Strings.Fixed.Index (Md, "3/20 present") > 0,
+                "sas.md's checklist table and summary match sas.json");
       end;
       Ada.Directories.Delete_Tree (Sas_Root);
    end;

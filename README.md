@@ -110,7 +110,7 @@ the simplest route, since GNAT is not distributed via Homebrew.
 | `adafusa sci [--dir]` | Software Configuration Index: every source file + evidence artifact, SHA-256 + size; always exits 0 | text, json |
 | `adafusa analyze [--dir] [--strict]` | Deeper own-pass static analysis (unused with-clauses, long parameter lists), separate from `check` | text, json |
 | `adafusa lint [--dir] [--strict]` | General-correctness/formatting hygiene (trailing whitespace, blank-line runs, trailing newline) | text, json |
-| `adafusa sas [--dir] [--output-dir]` | Software Accomplishment Summary, aggregated from existing evidence; always writes both `sas.json` and `sas.md`; always exits 0 | json, md |
+| `adafusa sas [--dir] [--output-dir]` | Software Accomplishment Summary (DO-178C section 11.20): a `checklist[]` of the section 11 data items, `present` set only from real artifacts this tool can see on disk; always writes both `sas.json` and `sas.md`; always exits 0 | json, md |
 | `adafusa template list\|apply <name> [--dir] [--project-name] [--force]` | Scaffold a source-tree/build/CI skeleton (`.gpr`, `src/`, `tests/`, README, CI workflow) complementary to `init`; never writes a LICENSE | text, json |
 | `adafusa fix [--dir] [--apply]` | Whitespace/formatting-only auto-fix (tabs, trailing whitespace, blank-line runs, trailing newline); dry-run by default, gate-fails if any file would change | text, json |
 

@@ -4851,21 +4851,47 @@ package body Fusa.Cli is
    --  sas -- Software Accomplishment Summary (spec section 9.3 MAY)
    ----------------------------------------------------------------------
 
-   --  Always writes BOTH sas.json and sas.md to Output_Dir (mirroring the
-   --  spec's own note that sas is "sas.json (envelope + tool-defined
-   --  body) plus sas.md"), the same "write the artifact unconditionally"
-   --  pattern release uses for sbom.json. Every figure in it is
-   --  mechanically aggregated from data ada-FuSa already computes
-   --  elsewhere (requirement/annotation counts, check's own findings,
-   --  comp violations, disposition/problem-report status) -- an
-   --  accomplishment summary asserting the software life cycle is
-   --  complete is a human sign-off ada-FuSa cannot make; this only
-   --  reports the current, honest state of that evidence, whatever it is.
-   --  Always exits 0 -- like `report`, it documents rather than gates.
+   --  Always writes BOTH sas.json and sas.md to Output_Dir (per the
+   --  section 9.3 MUST: sas.json is not a replacement for the
+   --  human-readable companion, the two are complementary), the same
+   --  "write the artifact unconditionally" pattern release uses for
+   --  sbom.json. checklist[] enumerates the DO-178C section 11 data
+   --  items; "present" is set true only when this tool can point at a
+   --  real artifact it can see on disk right now (a real requirements
+   --  file with entries, a real verify input, a real problem-report
+   --  entry, a real sci.json, real source files, or this document
+   --  itself) -- items ada-FuSa has no way to observe (plans, standards
+   --  documents, CM/QA records) are honestly reported absent rather than
+   --  guessed at. Always exits 0 -- like `report`, it documents rather
+   --  than gates.
    --  fusa:req REQ-114
    function Cmd_Sas (Args : String_List) return Integer is
       Dir        : constant String := Dir_Of (Args);
       Output_Dir : constant String := Flag_Value (Args, "--output-dir", Dir);
+
+      type Sas_Item is record
+         Item     : Unbounded_String;
+         Clause   : Unbounded_String;
+         Present  : Boolean;
+         Evidence : Unbounded_String;
+      end record;
+
+      package Sas_Item_Vectors is new
+        Ada.Containers.Indefinite_Vectors (Positive, Sas_Item);
+      subtype Sas_Item_List is Sas_Item_Vectors.Vector;
+
+      Checklist : Sas_Item_List;
+
+      procedure Add
+        (Item, Clause : String; Present : Boolean; Evidence : String := "")
+      is
+      begin
+         Checklist.Append
+           (Sas_Item'(Item     => To_Unbounded_String (Item),
+                      Clause   => To_Unbounded_String (Clause),
+                      Present  => Present,
+                      Evidence => To_Unbounded_String (Evidence)));
+      end Add;
    begin
       declare
          Cfg : Fusa.Config.Project_Config;
@@ -4889,158 +4915,139 @@ package body Fusa.Cli is
             Dup_Findings : Finding_List;
             Reqs         : constant Fusa.Config.Requirement_List :=
               Fusa.Config.Load_Requirements (Dir, Dup_Findings);
-            Ann_Findings : Finding_List;
-            Tags         : constant Fusa.Annotations.Tag_List :=
-              Fusa.Annotations.Scan (Dir, Files, Ann_Findings);
-            Req_Total, Req_Traced, Req_Tested, Req_Sec_Tested : Natural := 0;
 
-            Check_Findings : constant Finding_List := Fusa.Engine.Run_All (Dir, Files);
-            Chk_Errors, Chk_Warnings, Chk_Infos : Natural := 0;
-
-            Comp_Results : constant Fusa.Comp.Comp_Result_List := Fusa.Comp.Analyze (Dir, Files, 10);
-            Comp_Violations : Natural := 0;
-
-            Disp_Accepted, Disp_Deferred, Disp_Rejected : Natural := 0;
-            Pr_Open, Pr_Closed : Natural := 0;
+            Verify_Findings : Finding_List;
+            Verify_Passed, Verify_Failed : Natural := 0;
          begin
-            Req_Total := Natural (Reqs.Length);
-            for R of Reqs loop
-               declare
-                  Traced, Tested, Sec_Tested : Boolean := False;
-               begin
-                  for T of Tags loop
-                     if To_String (T.Requirement_Id) = To_String (R.Id) then
-                        Traced := True;
-                        if T.Kind = Test or else T.Kind = Sec_Test then
-                           Tested := True;
-                        end if;
-                        if T.Kind = Sec_Test then
-                           Sec_Tested := True;
-                        end if;
-                     end if;
-                  end loop;
-                  if Traced then
-                     Req_Traced := Req_Traced + 1;
-                  end if;
-                  if Tested then
-                     Req_Tested := Req_Tested + 1;
-                  end if;
-                  if Sec_Tested then
-                     Req_Sec_Tested := Req_Sec_Tested + 1;
-                  end if;
-               end;
-            end loop;
-
-            for F of Check_Findings loop
-               case F.Severity is
-                  when Error   => Chk_Errors   := Chk_Errors + 1;
-                  when Warning => Chk_Warnings := Chk_Warnings + 1;
-                  when Info    => Chk_Infos    := Chk_Infos + 1;
-               end case;
-            end loop;
-
-            for R of Comp_Results loop
-               if R.Exceeds_Threshold then
-                  Comp_Violations := Comp_Violations + 1;
+            declare
+               Suites : constant Fusa.Config.Verify_Suite_List :=
+                 Fusa.Config.Load_Verify
+                   (Dir, Verify_Findings, Verify_Passed, Verify_Failed);
+               Pr_Count : Natural := 0;
+            begin
+               if Fusa.Config.Pr_Exists (Dir) then
+                  Pr_Count := Natural (Fusa.Config.Load_Pr (Dir).Length);
                end if;
-            end loop;
 
-            if Fusa.Config.Dispositions_Exist (Dir) then
-               for D of Fusa.Config.Load_Dispositions (Dir) loop
-                  case D.Status is
-                     when Accepted => Disp_Accepted := Disp_Accepted + 1;
-                     when Deferred => Disp_Deferred := Disp_Deferred + 1;
-                     when Rejected => Disp_Rejected := Disp_Rejected + 1;
-                     when Open     => null;
-                  end case;
-               end loop;
-            end if;
+               Add ("Plan for Software Aspects of Certification", "11.1",
+                    False);
+               Add ("Software Development Plan", "11.2", False);
+               Add ("Software Verification Plan", "11.3", False);
+               Add ("Software Configuration Management Plan", "11.4", False);
+               Add ("Software Quality Assurance Plan", "11.5", False);
+               Add ("Software Requirements Standards", "11.6", False);
+               Add ("Software Design Standards", "11.7", False);
+               Add ("Software Code Standards", "11.8", False);
+               Add ("Software Requirements Data", "11.9",
+                    Natural (Reqs.Length) > 0, Fusa.Config.Reqs_File);
+               Add ("Software Design Description", "11.10", False);
+               if Natural (Files.Length) > 0 then
+                  Add ("Source Code", "11.11", True, Files.First_Element);
+               else
+                  Add ("Source Code", "11.11", False);
+               end if;
+               Add ("Executable Object Code", "11.12", False);
+               Add ("Software Verification Cases and Procedures", "11.13",
+                    Fusa.Config.Verify_Exists (Dir), Fusa.Config.Verify_File);
+               Add ("Software Verification Results", "11.14",
+                    Fusa.Config.Verify_Exists (Dir)
+                      and then Natural (Suites.Length) > 0
+                      and then Verify_Passed + Verify_Failed > 0,
+                    Fusa.Config.Verify_File);
+               Add ("Software Life Cycle Environment Configuration Index",
+                    "11.15", False);
+               Add ("Software Configuration Index", "11.16",
+                    Fusa.Files.Exists (Fusa.Files.Join (Dir, "sci.json")),
+                    "sci.json");
+               Add ("Problem Reports", "11.17", Pr_Count > 0,
+                    Fusa.Config.Pr_File);
+               Add ("Software Configuration Management Records", "11.18",
+                    False);
+               Add ("Software Quality Assurance Records", "11.19", False);
+               Add ("Software Accomplishment Summary", "11.20", True,
+                    "sas.json");
+            end;
 
-            if Fusa.Config.Pr_Exists (Dir) then
-               for P of Fusa.Config.Load_Pr (Dir) loop
-                  if To_String (P.Status) = "closed" then
-                     Pr_Closed := Pr_Closed + 1;
-                  else
-                     Pr_Open := Pr_Open + 1;
+            declare
+               Total, Present : Natural := 0;
+            begin
+               for C of Checklist loop
+                  Total := Total + 1;
+                  if C.Present then
+                     Present := Present + 1;
                   end if;
                end loop;
-            end if;
 
-            declare
-               W : Fusa.Json.Writer.Instance;
-            begin
-               W.Object_Start;
-               Fusa.Report.Write_Header (W, "sas");
-               W.Key ("project");
-               W.Object_Start;
-               W.Field ("name", To_String (Cfg.Name));
-               W.Field_If_Non_Blank ("standard", To_String (Cfg.Standard));
-               W.Object_End;
-               W.Key ("requirements");
-               W.Object_Start;
-               W.Field ("total", Req_Total);
-               W.Field ("traced", Req_Traced);
-               W.Field ("tested", Req_Tested);
-               W.Field ("secTested", Req_Sec_Tested);
-               W.Object_End;
-               W.Key ("check");
-               W.Object_Start;
-               W.Field ("errors", Chk_Errors);
-               W.Field ("warnings", Chk_Warnings);
-               W.Field ("infos", Chk_Infos);
-               W.Object_End;
-               W.Key ("comp");
-               W.Object_Start;
-               W.Field ("totalFunctions", Natural (Comp_Results.Length));
-               W.Field ("violations", Comp_Violations);
-               W.Object_End;
-               W.Key ("dispositions");
-               W.Object_Start;
-               W.Field ("accepted", Disp_Accepted);
-               W.Field ("deferred", Disp_Deferred);
-               W.Field ("rejected", Disp_Rejected);
-               W.Object_End;
-               W.Key ("problemReports");
-               W.Object_Start;
-               W.Field ("open", Pr_Open);
-               W.Field ("closed", Pr_Closed);
-               W.Object_End;
-               W.Object_End;
-               Fusa.Files.Write_File
-                 (Fusa.Files.Join (Output_Dir, "sas.json"), Fusa.Json.Writer.To_String (W) & ASCII.LF);
-            end;
-            Ada.Text_IO.Put_Line ("wrote " & Fusa.Files.Join (Output_Dir, "sas.json"));
+               declare
+                  W : Fusa.Json.Writer.Instance;
+               begin
+                  W.Object_Start;
+                  Fusa.Report.Write_Header (W, "sas");
+                  W.Key ("checklist");
+                  W.Array_Start;
+                  for C of Checklist loop
+                     W.Object_Start;
+                     W.Field ("item", To_String (C.Item));
+                     W.Field ("clause", To_String (C.Clause));
+                     W.Field ("present", C.Present);
+                     if C.Present then
+                        W.Field_If_Non_Blank
+                          ("evidence", To_String (C.Evidence));
+                     end if;
+                     W.Object_End;
+                  end loop;
+                  W.Array_End;
+                  W.Key ("summary");
+                  W.Object_Start;
+                  W.Field ("total", Total);
+                  W.Field ("present", Present);
+                  W.Object_End;
+                  W.Object_End;
+                  declare
+                     Sas_Json_Path : constant String :=
+                       Fusa.Files.Join (Output_Dir, "sas.json");
+                  begin
+                     Fusa.Files.Write_File
+                       (Sas_Json_Path,
+                        Fusa.Json.Writer.To_String (W) & ASCII.LF);
+                     Ada.Text_IO.Put_Line ("wrote " & Sas_Json_Path);
+                  end;
+               end;
 
-            declare
-               Md : Unbounded_String := Null_Unbounded_String;
-            begin
-               Append (Md, "# Software Accomplishment Summary -- " & To_String (Cfg.Name) &
-                         ASCII.LF & ASCII.LF);
-               Append (Md, "**Standard:** " & To_String (Cfg.Standard) & ASCII.LF & ASCII.LF);
-               Append (Md, "## Requirements" & ASCII.LF & ASCII.LF);
-               Append (Md, "- Total: " & Trim_Img (Req_Total) & ASCII.LF);
-               Append (Md, "- Traced: " & Trim_Img (Req_Traced) & ASCII.LF);
-               Append (Md, "- Tested: " & Trim_Img (Req_Tested) & ASCII.LF);
-               Append (Md, "- Security-tested: " & Trim_Img (Req_Sec_Tested) & ASCII.LF & ASCII.LF);
-               Append (Md, "## Check findings" & ASCII.LF & ASCII.LF);
-               Append (Md, "- Errors: " & Trim_Img (Chk_Errors) & ASCII.LF);
-               Append (Md, "- Warnings: " & Trim_Img (Chk_Warnings) & ASCII.LF);
-               Append (Md, "- Infos: " & Trim_Img (Chk_Infos) & ASCII.LF & ASCII.LF);
-               Append (Md, "## Cyclomatic complexity" & ASCII.LF & ASCII.LF);
-               Append (Md, "- Functions analysed: " &
-                         Trim_Img (Natural (Comp_Results.Length)) & ASCII.LF);
-               Append (Md, "- Threshold violations: " & Trim_Img (Comp_Violations) &
-                         ASCII.LF & ASCII.LF);
-               Append (Md, "## Dispositions (waivers)" & ASCII.LF & ASCII.LF);
-               Append (Md, "- Accepted: " & Trim_Img (Disp_Accepted) & ASCII.LF);
-               Append (Md, "- Deferred: " & Trim_Img (Disp_Deferred) & ASCII.LF);
-               Append (Md, "- Rejected: " & Trim_Img (Disp_Rejected) & ASCII.LF & ASCII.LF);
-               Append (Md, "## Problem reports" & ASCII.LF & ASCII.LF);
-               Append (Md, "- Open: " & Trim_Img (Pr_Open) & ASCII.LF);
-               Append (Md, "- Closed: " & Trim_Img (Pr_Closed) & ASCII.LF);
-               Fusa.Files.Write_File (Fusa.Files.Join (Output_Dir, "sas.md"), To_String (Md));
+               declare
+                  Md            : Unbounded_String := Null_Unbounded_String;
+                  Sas_Md_Path   : constant String :=
+                    Fusa.Files.Join (Output_Dir, "sas.md");
+               begin
+                  Append (Md, "# Software Accomplishment Summary -- " &
+                            To_String (Cfg.Name) & ASCII.LF & ASCII.LF);
+                  Append (Md, "**Standard:** " & To_String (Cfg.Standard) &
+                            ASCII.LF & ASCII.LF);
+                  Append (Md, "## DO-178C section 11 checklist" & ASCII.LF &
+                            ASCII.LF);
+                  Append (Md, "| Item | Clause | Present | Evidence |" &
+                            ASCII.LF);
+                  Append (Md, "|------|--------|---------|----------|" &
+                            ASCII.LF);
+                  for C of Checklist loop
+                     declare
+                        Evidence_Cell : constant String :=
+                          (if C.Present and then Length (C.Evidence) > 0
+                           then To_String (C.Evidence) else "--");
+                        Present_Cell  : constant String :=
+                          (if C.Present then "yes" else "no");
+                     begin
+                        Append (Md, "| " & To_String (C.Item) & " | " &
+                                  To_String (C.Clause) & " | " & Present_Cell &
+                                  " | " & Evidence_Cell & " |" & ASCII.LF);
+                     end;
+                  end loop;
+                  Append (Md, ASCII.LF & "**Summary:** " & Trim_Img (Present) &
+                            "/" & Trim_Img (Total) & " present" & ASCII.LF);
+                  Fusa.Files.Write_File (Sas_Md_Path, To_String (Md));
+                  Ada.Text_IO.Put_Line ("wrote " & Sas_Md_Path);
+               end;
             end;
-            Ada.Text_IO.Put_Line ("wrote " & Fusa.Files.Join (Output_Dir, "sas.md"));
          end;
       end;
       return Exit_Ok;
