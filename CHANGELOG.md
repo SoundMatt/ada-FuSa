@@ -5,6 +5,34 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+### Added (test-tag traceability completeness)
+
+`trace`'s `testedRequirements` metric (distinct from `tracedRequirements`, which `--req-coverage`
+gates on) sat at 60/107 (56%) — 47 requirements carried only an `impl` tag, no `-- fusa:test`
+linking them back to the test that actually exercises them. All 47 are tagged here, several
+alongside genuinely new tests for paths that turned out to have no test at all rather than just a
+missing annotation:
+
+- `Fusa.Json.Writer`'s `Null_Value` and the `Integer`/`Boolean` overloads of `Value`, and
+  `Field_If_Non_Blank`'s omit-when-blank behaviour, were never exercised by any test (nor, for
+  `Null_Value`, by any production code — no command ever emits a bare JSON `null`). Direct tests
+  added.
+- `Fusa.Config.Requirements_Exist` was dead code — declared, implemented, never called from tests
+  *or* production code. A direct test added.
+- `Fusa.Files.Exists`/`Is_Directory`/`Read_File`/`Write_File`/`Split_Lines` were exercised
+  constantly as test-fixture-setup infrastructure but never asserted on directly. Direct
+  round-trip tests added.
+- The remaining ~40 (rule engine, JSON accessors, config persistence, report envelope
+  composition, category/fingerprint derivation, glob matching, …) already had real test coverage;
+  only the linking annotation was missing.
+- `SEC001`-`SEC004`'s existing test also picked up a `-- fusa:sec-test` tag (previously
+  `secTestedRequirements` was 0/107 — no requirement in the whole project was marked
+  security-tested, even though the security rule pack demonstrably is).
+
+`testedRequirements` is now 107/107 (100%); `secTestedRequirements` 1/107 (only the one
+requirement that's genuinely a dedicated security-rule test — not padded to look better than it
+is). 496 checks passing (was 480).
+
 ### Changed (BREAKING — §13 schema realignment)
 
 Per spec §16 step 8 ("Evidence (SHOULD): the §9.2/§9.3 commands, following the §13 canonical

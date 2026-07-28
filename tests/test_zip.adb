@@ -10,6 +10,7 @@ procedure Test_Zip is
    Root : constant String := "tmp_test_zip";
 begin
    --  Standard CRC-32 check value (ISO 3309 / ITU-T V.42 test vector).
+   --  fusa:test REQ-055
    Check (Fusa.Crc32.Compute ("123456789") = 16#CBF4_3926#,
           "CRC-32 matches the standard '123456789' check value");
    Check (Fusa.Crc32.Compute ("") = 0, "CRC-32 of empty input is 0");

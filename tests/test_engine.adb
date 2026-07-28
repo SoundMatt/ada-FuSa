@@ -16,12 +16,14 @@ procedure Test_Engine is
    Root : constant String := "tmp_test_engine";
 begin
    --  fusa:test REQ-017
+   --  fusa:test REQ-041
    Check (Fusa.Engine.Rule_Count >= 8, "at least the 8 starter rules are registered");
 
    declare
       Prev : Unbounded_String := Null_Unbounded_String;
       Ok   : Boolean := True;
    begin
+      --  fusa:test REQ-038
       for I in 1 .. Fusa.Engine.Rule_Count loop
          declare
             Cur : constant String := Fusa.Engine.Get_Rule (I).Id;
@@ -44,6 +46,7 @@ begin
       D      : constant Fusa.Engine.Rule_Access := new Test_Engine_Rules.Dummy_Rule;
       Raised : Boolean := False;
    begin
+      --  fusa:test REQ-040
       begin
          Fusa.Engine.Register (D);
       exception
@@ -81,6 +84,9 @@ begin
       "   pragma Suppress (All_Checks); -- fusa:unsafe reviewed in SC-42" & ASCII.LF &
       "begin" & ASCII.LF & "   null;" & ASCII.LF & "end Y;" & ASCII.LF);
 
+   --  fusa:test REQ-039
+   --  fusa:test REQ-042
+   --  fusa:test REQ-056
    declare
       Cfg      : constant Fusa.Config.Project_Config := Fusa.Config.Default_Config ("t");
       Files    : constant String_List := Fusa.Source_Scan.Find_Source_Files (Root, Cfg);
@@ -196,6 +202,7 @@ begin
    end;
 
    --  fusa:test REQ-078
+   --  fusa:sec-test REQ-078
    --  Each case lives in its own file, far enough from any fusa:unsafe
    --  comment in another case that the Suppress_Lookback/Lookahead windows
    --  (5/2 lines) can't overlap between cases.

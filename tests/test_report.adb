@@ -9,10 +9,12 @@ with Test_Framework; use Test_Framework;
 
 procedure Test_Report is
 begin
+   --  fusa:test REQ-063
    Check (Fusa.Report.Now_Rfc3339'Length = 20, "RFC3339 timestamp is 20 characters");
    Check (Fusa.Report.Now_Rfc3339 (11) = 'T', "RFC3339 timestamp has 'T' at position 11");
    Check (Fusa.Report.Now_Rfc3339 (20) = 'Z', "RFC3339 timestamp ends with 'Z'");
 
+   --  fusa:test REQ-068
    Check (Fusa.Report.Render_Text (Finding_Vectors.Empty_Vector) = "No findings.",
           "Render_Text reports 'No findings.' for an empty list");
 
@@ -33,6 +35,7 @@ begin
       end;
    end;
 
+   --  fusa:test REQ-069
    declare
       Error_Only : Finding_List;
       Warn_Only  : Finding_List;
@@ -135,9 +138,13 @@ begin
         (Make_Finding ("ADA001", Error, "e", Make_Location ("a.adb")));
       W.Object_Start;
       --  fusa:test REQ-003
+      --  fusa:test REQ-064
       Fusa.Report.Write_Header (W, "check-report");
+      --  fusa:test REQ-065
       Fusa.Report.Write_Report_Extension (W, "/root", "proj", "iso26262", "ASIL-B", "", "");
+      --  fusa:test REQ-066
       Fusa.Report.Write_Findings_Array (W, Findings);
+      --  fusa:test REQ-067
       Fusa.Report.Write_Summary (W, Findings);
       W.Object_End;
 

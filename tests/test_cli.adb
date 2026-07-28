@@ -53,6 +53,7 @@ procedure Test_Cli is
    end Run_Capturing_Stdout;
 begin
    --  fusa:test REQ-001
+   --  fusa:test REQ-037
    Check (Fusa.Cli.Run (Args ("bogus")) = Exit_Usage, "unknown command exits 2 (usage)");
 
    declare
@@ -739,6 +740,7 @@ begin
    end;
 
    --  fusa:test REQ-091
+   --  fusa:test REQ-088
    Check (Fusa.Cli.Run (Args ("disposition", "add", "ADA001", "accepted", "reviewed",
                               "--dir", Root)) = Exit_Ok,
           "disposition add with a bare rule id exits 0");
@@ -764,6 +766,7 @@ begin
          Ada.Directories.Delete_Tree (Pr_Root);
       end if;
       Ada.Directories.Create_Path (Pr_Root);
+      --  fusa:test REQ-089
       Check (Fusa.Cli.Run (Args ("pr", "init", "--dir", Pr_Root)) = Exit_Ok,
              "pr init exits 0 and creates .fusa-pr.json");
       Check (Fusa.Files.Exists (Pr_Root & "/.fusa-pr.json"), "pr init created .fusa-pr.json");

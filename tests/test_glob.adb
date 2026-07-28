@@ -4,6 +4,7 @@ with Test_Framework; use Test_Framework;
 
 procedure Test_Glob is
 begin
+   --  fusa:test REQ-048
    Check (Fusa.Glob.Match ("*.adb", "foo.adb"), "'*' matches a simple filename");
    Check (not Fusa.Glob.Match ("*.adb", "foo.ads"), "'*' pattern rejects wrong extension");
    Check (not Fusa.Glob.Match ("*.adb", "sub/foo.adb"),
@@ -12,6 +13,7 @@ begin
    Check (Fusa.Glob.Match ("foo?.adb", "foo1.adb"), "'?' matches exactly one character");
    Check (not Fusa.Glob.Match ("foo?.adb", "foo12.adb"), "'?' does not match two characters");
 
+   --  fusa:test REQ-049
    declare
       Patterns : String_List;
    begin

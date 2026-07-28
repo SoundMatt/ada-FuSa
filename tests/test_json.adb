@@ -20,10 +20,14 @@ procedure Test_Json is
 begin
    --  Parser + accessors
    --  fusa:test REQ-018
+   --  fusa:test REQ-032
+   --  fusa:test REQ-034
+   --  fusa:test REQ-035
+   --  fusa:test REQ-036
    declare
       V : constant Fusa.Json.Value_Access :=
         Fusa.Json.Parse
-          ("{""a"":1,""b"":""hi"",""c"":true,""d"":[1,2,3]," &
+          ("{""a"":1,""b"":""hi"",""c"":true,""d"":[1,2,3],""h"":[""x"",""y""]," &
            """e"":{""f"":""nested""},""g"":null}");
    begin
       Check (Fusa.Json.Is_Object (V), "root parses as object");
@@ -31,10 +35,13 @@ begin
       Check (Fusa.Json.Get_Bool (V, "c") = True, "bool field reads back");
       Check (Fusa.Json.Array_Length (Fusa.Json.Get_Array (V, "d")) = 3,
              "array length is 3");
+      Check (Fusa.Json.As_String (Fusa.Json.Array_Item (Fusa.Json.Get_Array (V, "h"), 1)) = "x",
+             "Array_Item + As_String reads back the first element of a string array");
       Check (Fusa.Json.Get_String (Fusa.Json.Get_Member (V, "e"), "f") = "nested",
              "nested object field reads back");
       Check (Fusa.Json.Get_String (V, "missing", "def") = "def",
              "missing key returns supplied default");
+      --  fusa:test REQ-033
       Check (not Fusa.Json.Has_Key (V, "missing"), "Has_Key false for absent key");
       Check (Fusa.Json.Has_Key (V, "a"), "Has_Key true for present key");
    end;
@@ -135,6 +142,11 @@ begin
    end;
 
    --  Writer: object/array/nesting/empty-object round trip
+   --  fusa:test REQ-025
+   --  fusa:test REQ-026
+   --  fusa:test REQ-027
+   --  fusa:test REQ-029
+   --  fusa:test REQ-031
    declare
       W : Fusa.Json.Writer.Instance;
    begin
@@ -158,6 +170,69 @@ begin
                 "writer output round-trips through the parser");
          Check (Fusa.Json.Array_Length (Fusa.Json.Get_Array (Reparsed, "arr")) = 2,
                 "written array round-trips with correct length");
+      end;
+   end;
+
+   --  Value/Field's Integer and Boolean overloads, and Null_Value -- none
+   --  of these are ever called from real command code (every production
+   --  call site uses the String overloads or Field's typed shorthand for
+   --  scalars, and no command emits a bare JSON null), so this is their
+   --  only exercise.
+   --  fusa:test REQ-027
+   --  fusa:test REQ-028
+   declare
+      W : Fusa.Json.Writer.Instance;
+   begin
+      W.Object_Start;
+      W.Key ("n");
+      W.Value (42);
+      W.Key ("b");
+      W.Value (True);
+      W.Key ("nothing");
+      W.Null_Value;
+      W.Key ("arr");
+      W.Array_Start;
+      W.Value (1);
+      W.Value (False);
+      W.Null_Value;
+      W.Array_End;
+      W.Object_End;
+
+      declare
+         Out_Text : constant String := Fusa.Json.Writer.To_String (W);
+         Reparsed : constant Fusa.Json.Value_Access := Fusa.Json.Parse (Out_Text);
+         Arr      : constant Fusa.Json.Value_Access := Fusa.Json.Get_Array (Reparsed, "arr");
+      begin
+         Check (Fusa.Json.Get_Bool (Reparsed, "b") = True, "Value(Boolean) round-trips");
+         Check (Fusa.Json.Get_Member (Reparsed, "n").Kind = Fusa.Json.Json_Number
+                and then Fusa.Json.Get_Member (Reparsed, "n").Num_Val = 42.0,
+                "Value(Integer) round-trips as a JSON number");
+         Check (Fusa.Json.Get_Member (Reparsed, "nothing").Kind = Fusa.Json.Json_Null,
+                "Null_Value round-trips as a JSON null");
+         Check (Fusa.Json.Array_Item (Arr, 3).Kind = Fusa.Json.Json_Null,
+                "Null_Value also works as an array element, not just an object value");
+      end;
+   end;
+
+   --  Field_If_Non_Blank: omitted when the value is blank, emitted
+   --  otherwise -- never both, so a single object exercises both halves.
+   --  fusa:test REQ-030
+   declare
+      W : Fusa.Json.Writer.Instance;
+   begin
+      W.Object_Start;
+      W.Field_If_Non_Blank ("present", "value");
+      W.Field_If_Non_Blank ("absent", "");
+      W.Object_End;
+
+      declare
+         Out_Text : constant String := Fusa.Json.Writer.To_String (W);
+         Reparsed : constant Fusa.Json.Value_Access := Fusa.Json.Parse (Out_Text);
+      begin
+         Check (Fusa.Json.Has_Key (Reparsed, "present"),
+                "Field_If_Non_Blank emits the field when the value is non-empty");
+         Check (not Fusa.Json.Has_Key (Reparsed, "absent"),
+                "Field_If_Non_Blank omits the field entirely when the value is empty");
       end;
    end;
 
