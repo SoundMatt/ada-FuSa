@@ -28,6 +28,10 @@ package body Fusa.Files is
       end loop;
       return Result (1 .. Natural (Last));
    exception
+      --  fusa:unsafe intentional error-boundary translation: any failure
+      --  (Open/Read, or a bad Size read before Open) must still close the
+      --  file handle if it was opened, then surface uniformly as
+      --  Read_Error regardless of the underlying exception.
       when others =>
          if Is_Open (File) then
             Close (File);

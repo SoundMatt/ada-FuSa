@@ -6,10 +6,13 @@ package body Fusa.Rules_Style is
 
    Max_Line_Length : constant := 79; --  AQSG-recommended line length limit
 
-   --  How many lines after the matched one a "-- fusa:unsafe" justification
-   --  may appear on and still suppress the finding -- covers a pragma or
-   --  statement that was wrapped (e.g. to satisfy ADA005's line-length
-   --  limit) with its justification comment on the following line.
+   --  How many lines before/after the matched one a "-- fusa:unsafe"
+   --  justification may appear on and still suppress the finding --
+   --  covers both a justification comment placed on the line(s)
+   --  immediately above the code it explains (a common Ada convention)
+   --  and one placed after a statement that was wrapped (e.g. to satisfy
+   --  ADA005's line-length limit).
+   Suppress_Lookback  : constant := 5;
    Suppress_Lookahead : constant := 2;
 
    --  Uppercases and collapses whitespace runs to a single space, so
@@ -46,6 +49,33 @@ package body Fusa.Rules_Style is
       return Result (1 .. Out_Len);
    end Normalize_For_Match;
 
+   --  Approximate "is Pos inside a quoted region" check: counts
+   --  double-quote characters before Pos on the (normalized) line. An odd
+   --  count means Pos falls inside quotes -- either a real Ada string
+   --  literal (e.g. a test fixture, or one of this rule pack's own
+   --  known-answer fixtures in Fusa.Cli's Cmd_Qualify, which legitimately
+   --  contain text like "pragma Suppress" as fixture *data*, not real
+   --  code to flag) or a quoted example in a doc comment (e.g. this
+   --  package's own comments quoting "PRAGMA SUPPRESS" as an example of
+   --  case-insensitive matching). Same technique as
+   --  Fusa.Annotations.In_String_Literal.
+   function Is_Quoted (Line : String; Pos : Positive) return Boolean is
+      Quote_Count : Natural := 0;
+   begin
+      for I in Line'First .. Pos - 1 loop
+         if Line (I) = '"' then
+            Quote_Count := Quote_Count + 1;
+         end if;
+      end loop;
+      return Quote_Count mod 2 = 1;
+   end Is_Quoted;
+
+   --  How many lines before a "when others =>" to search for a bare
+   --  "exception" keyword when distinguishing a real exception handler
+   --  from a "case ... is ... when others =>" default branch -- see
+   --  Scan_Exception_Handler.
+   Exception_Lookback : constant := 6;
+
    function Scan_Substring
      (Project_Root      : String;
       Files             : String_List;
@@ -70,17 +100,20 @@ package body Fusa.Rules_Style is
                begin
                   for I in 1 .. Natural (Lines.Length) loop
                      declare
-                        Line : constant String := Lines.Element (I);
+                        Line      : constant String := Lines.Element (I);
+                        Norm_Line : constant String := Normalize_For_Match (Line);
+                        Match_Pos : constant Natural :=
+                          Ada.Strings.Fixed.Index (Norm_Line, Norm_Needle);
                      begin
-                        if Ada.Strings.Fixed.Index
-                             (Normalize_For_Match (Line), Norm_Needle) > 0
+                        if Match_Pos > 0
+                          and then not Is_Quoted (Norm_Line, Match_Pos)
                         then
                            declare
                               Suppressed : Boolean := False;
                            begin
                               if Require_No_Unsafe then
-                                 for J in I .. Natural'Min
-                                   (I + Suppress_Lookahead, Natural (Lines.Length))
+                                 for J in Natural'Max (1, I - Suppress_Lookback) ..
+                                   Natural'Min (I + Suppress_Lookahead, Natural (Lines.Length))
                                  loop
                                     if Ada.Strings.Fixed.Index
                                          (Lines.Element (J), "fusa:unsafe") > 0
@@ -111,6 +144,94 @@ package body Fusa.Rules_Style is
       end loop;
       return Result;
    end Scan_Substring;
+
+   --  ADA002-specific: the catch-all handler arrow is textually identical
+   --  whether it introduces a real exception handler (the safety concern
+   --  ADA002 exists to catch) or a `case` statement's default branch (a
+   --  completely normal, often-required Ada idiom with no bearing on
+   --  exception handling at all). Only flag the former, by requiring a
+   --  bare "exception" keyword on one of the nearby preceding
+   --  lines.
+   function Scan_Exception_Handler
+     (Project_Root : String; Files : String_List) return Finding_List
+   is
+      Result      : Finding_List;
+      Norm_Needle : constant String := Normalize_For_Match ("when others =>");
+   begin
+      for Rel of Files loop
+         declare
+            Full : constant String := Fusa.Files.Join (Project_Root, Rel);
+         begin
+            if Fusa.Files.Exists (Full) then
+               declare
+                  Content : constant String := Fusa.Files.Read_File (Full);
+                  Lines   : constant String_List := Fusa.Files.Split_Lines (Content);
+               begin
+                  for I in 1 .. Natural (Lines.Length) loop
+                     declare
+                        Norm_Line : constant String :=
+                          Normalize_For_Match (Lines.Element (I));
+                        Match_Pos : constant Natural :=
+                          Ada.Strings.Fixed.Index (Norm_Line, Norm_Needle);
+                     begin
+                        if Match_Pos > 0
+                          and then not Is_Quoted (Norm_Line, Match_Pos)
+                        then
+                           declare
+                              Is_Exception_Handler : Boolean := False;
+                           begin
+                              for J in Natural'Max (1, I - Exception_Lookback) .. I - 1 loop
+                                 if Ada.Strings.Fixed.Index
+                                      (Normalize_For_Match (Lines.Element (J)),
+                                       "EXCEPTION") > 0
+                                 then
+                                    Is_Exception_Handler := True;
+                                    exit;
+                                 end if;
+                              end loop;
+
+                              if Is_Exception_Handler then
+                                 declare
+                                    Suppressed : Boolean := False;
+                                 begin
+                                    for J in Natural'Max (1, I - Suppress_Lookback) ..
+                                      Natural'Min (I + Suppress_Lookahead, Natural (Lines.Length))
+                                    loop
+                                       if Ada.Strings.Fixed.Index
+                                            (Lines.Element (J), "fusa:unsafe") > 0
+                                       then
+                                          Suppressed := True;
+                                          exit;
+                                       end if;
+                                    end loop;
+
+                                    if not Suppressed then
+                                       Result.Append
+                                         (Make_Finding
+                                            (Rule_Id  => "ADA002",
+                                             Severity => Warning,
+                                             Message  =>
+                                               "blanket ""when others"" handler " &
+                                               "may hide unanticipated exceptions",
+                                             Loc      => Make_Location (Rel, I),
+                                             Category => Derive_Category ("ADA002"),
+                                             Remediation =>
+                                               "handle specific exceptions, or " &
+                                               "justify with a trailing " &
+                                               """-- fusa:unsafe <reason>"" comment"));
+                                    end if;
+                                 end;
+                              end if;
+                           end;
+                        end if;
+                     end;
+                  end loop;
+               end;
+            end if;
+         end;
+      end loop;
+      return Result;
+   end Scan_Exception_Handler;
 
    function Scan_Line_Length
      (Project_Root : String; Files : String_List) return Finding_List
@@ -186,7 +307,7 @@ package body Fusa.Rules_Style is
    end Scan_Tabs;
 
    ----------------------------------------------------------------------
-   --  ADA001 -- pragma Suppress without justification
+   --  ADA001 -- unjustified check-disabling Suppress pragma
    ----------------------------------------------------------------------
 
    type Ada001_Rule is new Rule_Interface with null record;
@@ -213,14 +334,10 @@ package body Fusa.Rules_Style is
      ("blanket ""when others =>"" exception handler without -- fusa:unsafe");
    overriding function Run
      (R : Ada002_Rule; Project_Root : String; Files : String_List) return Finding_List
-   is (Scan_Substring
-         (Project_Root, Files, "ADA002", Warning, "when others =>",
-          "blanket ""when others"" handler may hide unanticipated exceptions",
-          "handle specific exceptions, or justify with a trailing ""-- fusa:unsafe <reason>"" comment",
-          Require_No_Unsafe => True));
+   is (Scan_Exception_Handler (Project_Root, Files));
 
    ----------------------------------------------------------------------
-   --  ADA003 -- Unchecked_Conversion without justification
+   --  ADA003 -- unjustified strong-typing-bypassing conversion
    ----------------------------------------------------------------------
 
    type Ada003_Rule is new Rule_Interface with null record;
@@ -237,7 +354,7 @@ package body Fusa.Rules_Style is
           Require_No_Unsafe => True));
 
    ----------------------------------------------------------------------
-   --  ADA004 -- Unchecked_Deallocation without justification
+   --  ADA004 -- unjustified manual memory deallocation
    ----------------------------------------------------------------------
 
    type Ada004_Rule is new Rule_Interface with null record;
@@ -280,7 +397,7 @@ package body Fusa.Rules_Style is
    is (Scan_Tabs (Project_Root, Files));
 
    ----------------------------------------------------------------------
-   --  ADA007 -- TODO marker
+   --  ADA007 -- incomplete-work marker comment
    ----------------------------------------------------------------------
 
    type Ada007_Rule is new Rule_Interface with null record;
@@ -297,7 +414,7 @@ package body Fusa.Rules_Style is
           Require_No_Unsafe => False));
 
    ----------------------------------------------------------------------
-   --  ADA008 -- pragma Warnings (Off without justification
+   --  ADA008 -- unjustified compiler-diagnostic suppression
    ----------------------------------------------------------------------
 
    type Ada008_Rule is new Rule_Interface with null record;
