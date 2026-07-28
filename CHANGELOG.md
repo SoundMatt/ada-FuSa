@@ -89,6 +89,10 @@ repro steps and rationale on each.
 - SARIF output (`check`/`report --format sarif`) now carries a `properties` object on each result
   with `category`, and `standard`/`clause` when non-blank, so format-invariant identifiers stay
   consistent between the `json` and `sarif` formats (spec §2.9, SHOULD) (#36).
+- `ADA005` (line length), `ADA006` (tab character), and `ADA008` (compiler diagnostic suppression)
+  now report category `style` instead of the blanket `ADA` → `safety` prefix mapping, so filtering
+  findings by category no longer bundles style nits in with genuinely safety-relevant findings like
+  `ADA001`/`ADA003`/`ADA004`. Rule ids are unchanged (#37).
 
 ## v0.1.0 — 2026-07-27
 
