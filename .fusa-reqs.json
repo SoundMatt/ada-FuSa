@@ -461,6 +461,18 @@
       "title": "qualify hash field (RFC 8785 JCS)",
       "text": "qualify emits a hash field computed as sha256: + hex(SHA-256(canonical)), where canonical is the document (results sorted by name, hash field itself absent, generatedAt blanked) serialised per RFC 8785 JSON Canonicalization Scheme, making the hash reproducible across independent runs of the same known-answer results.",
       "level": "SW"
+    },
+    {
+      "id": "REQ-078",
+      "title": "CWE-mapped security starter rule pack",
+      "text": "SEC001-SEC004 detect possible hardcoded credentials (password/secret/api_key identifiers assigned a literal, CWE-798), a weak hash algorithm reference (GNAT.MD5, CWE-327), and external process spawning (GNAT.OS_Lib.Spawn, CWE-78), each honouring a trailing -- fusa:unsafe justification comment.",
+      "level": "SW"
+    },
+    {
+      "id": "REQ-079",
+      "title": "Project-structure starter rule pack",
+      "text": "FUSA001-FUSA004 check for the presence of a .gpr project file, a LICENSE file, a README file, and .github/workflows CI configuration at the project root, mirroring java-FuSa's project-structure rule category.",
+      "level": "SW"
     }
   ]
 }

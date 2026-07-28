@@ -71,6 +71,15 @@ begin
    end if;
    Ada.Directories.Create_Path (Root & "/src");
 
+   --  Satisfies the FUSA001-004 project-structure rules so later
+   --  "check --strict exits 0" assertions in this file aren't perturbed by
+   --  new WARNING findings unrelated to what each assertion is testing.
+   Ada.Directories.Create_Path (Root & "/.github/workflows");
+   Fusa.Files.Write_File (Root & "/LICENSE", "MPL-2.0");
+   Fusa.Files.Write_File (Root & "/README.md", "# Test fixture");
+   Fusa.Files.Write_File (Root & "/t.gpr", "project T is end T;");
+   Fusa.Files.Write_File (Root & "/.github/workflows/ci.yml", "name: CI");
+
    Check (Fusa.Cli.Run (Args ("check", "--dir", Root)) = Exit_Runtime,
           "check without .fusa.json exits 3 (runtime error)");
    Check (Fusa.Cli.Run (Args ("check", "--dir", Root, "--format", "bogus")) = Exit_Usage,
