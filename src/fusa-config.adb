@@ -1,9 +1,13 @@
 with Ada.Text_IO;
+with Ada.Strings.Fixed;
 with Fusa.Files;
 with Fusa.Json;      use Fusa.Json;
 with Fusa.Json.Writer;
 
 package body Fusa.Config is
+
+   function Trim_Img (N : Integer) return String is
+     (Ada.Strings.Fixed.Trim (Integer'Image (N), Ada.Strings.Left));
 
    ----------------------------------------------------------------------
    --  .fusa.json
@@ -968,5 +972,304 @@ package body Fusa.Config is
         (Fusa.Files.Join (Project_Root, Gap_Objectives_File (Standard_Id)),
          Fusa.Json.Writer.To_String (W) & ASCII.LF);
    end Scaffold_Gap_Objectives;
+
+   ----------------------------------------------------------------------
+   --  .fusa-fmea.json
+   ----------------------------------------------------------------------
+
+   function Fmea_Exists (Project_Root : String) return Boolean is
+     (Fusa.Files.Exists (Fusa.Files.Join (Project_Root, Fmea_File)));
+
+   --  Returns 0 (invalid/absent) unless Key holds a JSON number that is a
+   --  whole number in 1 .. 10.
+   function Get_Rating (Item : Fusa.Json.Value_Access; Key : String) return Natural is
+      M : constant Fusa.Json.Value_Access := Fusa.Json.Get_Member (Item, Key);
+   begin
+      if M = null or else M.Kind /= Fusa.Json.Json_Number then
+         return 0;
+      end if;
+      if M.Num_Val < 1.0 or else M.Num_Val > 10.0
+        or else M.Num_Val /= Long_Float'Truncation (M.Num_Val)
+      then
+         return 0;
+      end if;
+      return Natural (M.Num_Val);
+   end Get_Rating;
+
+   function Load_Fmea
+     (Project_Root : String; Findings : in out Finding_List) return Fmea_Entry_List
+   is
+      Result : Fmea_Entry_List;
+      Path   : constant String := Fusa.Files.Join (Project_Root, Fmea_File);
+   begin
+      if not Fusa.Files.Exists (Path) then
+         return Result;
+      end if;
+
+      declare
+         Content : constant String := Fusa.Files.Read_File (Path);
+         Root    : Fusa.Json.Value_Access;
+      begin
+         begin
+            Root := Fusa.Json.Parse (Content);
+         exception
+            when Fusa.Json.Json_Error =>
+               raise Invalid_Config_Error with "parse error in " & Path;
+         end;
+
+         declare
+            Items : constant Fusa.Json.Value_Access := Fusa.Json.Get_Array (Root, "entries");
+         begin
+            for I in 1 .. Fusa.Json.Array_Length (Items) loop
+               declare
+                  Item : constant Fusa.Json.Value_Access := Fusa.Json.Array_Item (Items, I);
+                  Id   : constant String := Fusa.Json.Get_String (Item, "id");
+                  E    : Fmea_Entry;
+               begin
+                  if Id'Length = 0 then
+                     Findings.Append
+                       (Make_Finding
+                          (Rule_Id     => "FMEA001",
+                           Severity    => Error,
+                           Message     =>
+                             "FMEA entry at index" & Integer'Image (I) &
+                             " has a missing, empty, or non-string id in " & Fmea_File,
+                           Loc         => Make_Location (Fmea_File),
+                           Category    => Fusa.Safety,
+                           Remediation => "give this entry a non-empty string ""id"""));
+                  else
+                     E.Id           := To_Unbounded_String (Id);
+                     E.Item         := To_Unbounded_String (Fusa.Json.Get_String (Item, "item"));
+                     E.Func         := To_Unbounded_String (Fusa.Json.Get_String (Item, "function"));
+                     E.Failure_Mode :=
+                       To_Unbounded_String (Fusa.Json.Get_String (Item, "failureMode"));
+                     E.Effect       := To_Unbounded_String (Fusa.Json.Get_String (Item, "effect"));
+                     E.Cause        := To_Unbounded_String (Fusa.Json.Get_String (Item, "cause"));
+                     E.Mitigation   :=
+                       To_Unbounded_String (Fusa.Json.Get_String (Item, "mitigation"));
+                     E.Severity     := Get_Rating (Item, "severity");
+                     E.Occurrence   := Get_Rating (Item, "occurrence");
+                     E.Detection    := Get_Rating (Item, "detection");
+
+                     if E.Severity = 0 or else E.Occurrence = 0 or else E.Detection = 0 then
+                        Findings.Append
+                          (Make_Finding
+                             (Rule_Id     => "FMEA002",
+                              Severity    => Warning,
+                              Message     =>
+                                "FMEA entry """ & Id & """ has a missing/invalid severity, " &
+                                "occurrence, or detection rating (must each be a whole number " &
+                                "1..10) in " & Fmea_File,
+                              Loc         => Make_Location (Fmea_File),
+                              Category    => Fusa.Safety,
+                              Remediation =>
+                                "set severity/occurrence/detection to whole numbers 1..10"));
+                     end if;
+
+                     declare
+                        Explicit_Rpn : constant Fusa.Json.Value_Access :=
+                          Fusa.Json.Get_Member (Item, "rpn");
+                        Computed     : constant Natural :=
+                          E.Severity * E.Occurrence * E.Detection;
+                     begin
+                        if Explicit_Rpn /= null
+                          and then Explicit_Rpn.Kind = Fusa.Json.Json_Number
+                        then
+                           E.Rpn := Natural (Explicit_Rpn.Num_Val);
+                           if E.Severity > 0 and then E.Occurrence > 0 and then E.Detection > 0
+                             and then E.Rpn /= Computed
+                           then
+                              Findings.Append
+                                (Make_Finding
+                                   (Rule_Id     => "FMEA003",
+                                    Severity    => Warning,
+                                    Message     =>
+                                      "FMEA entry """ & Id & """'s explicit rpn (" &
+                                      Trim_Img (E.Rpn) &
+                                      ") does not match severity*occurrence*detection (" &
+                                      Trim_Img (Computed) & ") in " & Fmea_File,
+                                    Loc         => Make_Location (Fmea_File),
+                                    Category    => Fusa.Safety,
+                                    Remediation =>
+                                      "recompute rpn as severity*occurrence*detection, or " &
+                                      "correct whichever rating is wrong"));
+                           end if;
+                        else
+                           E.Rpn := Computed;
+                        end if;
+                     end;
+
+                     Result.Append (E);
+                  end if;
+               end;
+            end loop;
+         end;
+      end;
+      return Result;
+   end Load_Fmea;
+
+   procedure Scaffold_Fmea (Project_Root : String) is
+   begin
+      if not Fmea_Exists (Project_Root) then
+         Fusa.Files.Write_File
+           (Fusa.Files.Join (Project_Root, Fmea_File), "{" & ASCII.LF &
+              "  ""entries"": []" & ASCII.LF & "}" & ASCII.LF);
+      end if;
+   end Scaffold_Fmea;
+
+   ----------------------------------------------------------------------
+   --  .fusa-safety-case.json
+   ----------------------------------------------------------------------
+
+   function Safety_Case_Exists (Project_Root : String) return Boolean is
+     (Fusa.Files.Exists (Fusa.Files.Join (Project_Root, Safety_Case_File)));
+
+   function Load_Safety_Case
+     (Project_Root : String;
+      Findings     : in out Finding_List;
+      Root_Goal    : out Unbounded_String) return Gsn_Node_List
+   is
+      Result : Gsn_Node_List;
+      Path   : constant String := Fusa.Files.Join (Project_Root, Safety_Case_File);
+   begin
+      Root_Goal := Null_Unbounded_String;
+      if not Fusa.Files.Exists (Path) then
+         return Result;
+      end if;
+
+      declare
+         Content : constant String := Fusa.Files.Read_File (Path);
+         Root    : Fusa.Json.Value_Access;
+      begin
+         begin
+            Root := Fusa.Json.Parse (Content);
+         exception
+            when Fusa.Json.Json_Error =>
+               raise Invalid_Config_Error with "parse error in " & Path;
+         end;
+
+         Root_Goal := To_Unbounded_String (Fusa.Json.Get_String (Root, "rootGoal"));
+
+         declare
+            Items : constant Fusa.Json.Value_Access := Fusa.Json.Get_Array (Root, "nodes");
+         begin
+            for I in 1 .. Fusa.Json.Array_Length (Items) loop
+               declare
+                  Item : constant Fusa.Json.Value_Access := Fusa.Json.Array_Item (Items, I);
+                  Id   : constant String := Fusa.Json.Get_String (Item, "id");
+                  Kind : constant String := Fusa.Json.Get_String (Item, "type");
+                  N    : Gsn_Node;
+               begin
+                  if Id'Length = 0 then
+                     Findings.Append
+                       (Make_Finding
+                          (Rule_Id     => "GSN001",
+                           Severity    => Error,
+                           Message     =>
+                             "GSN node at index" & Integer'Image (I) &
+                             " has a missing, empty, or non-string id in " & Safety_Case_File,
+                           Loc         => Make_Location (Safety_Case_File),
+                           Category    => Fusa.Safety,
+                           Remediation => "give this node a non-empty string ""id"""));
+                  else
+                     N.Id   := To_Unbounded_String (Id);
+                     N.Text := To_Unbounded_String (Fusa.Json.Get_String (Item, "text"));
+                     if Kind = "goal" or else Kind = "strategy" or else Kind = "context"
+                       or else Kind = "solution" or else Kind = "assumption"
+                       or else Kind = "justification"
+                     then
+                        N.Kind := To_Unbounded_String (Kind);
+                     else
+                        Findings.Append
+                          (Make_Finding
+                             (Rule_Id     => "GSN002",
+                              Severity    => Warning,
+                              Message     =>
+                                "GSN node """ & Id & """ has an unrecognised or missing " &
+                                """type"" (expected goal/strategy/context/solution/" &
+                                "assumption/justification) in " & Safety_Case_File,
+                              Loc         => Make_Location (Safety_Case_File),
+                              Category    => Fusa.Safety,
+                              Remediation =>
+                                "set type to one of goal, strategy, context, solution, " &
+                                "assumption, justification"));
+                     end if;
+                     declare
+                        SB : constant Fusa.Json.Value_Access :=
+                          Fusa.Json.Get_Array (Item, "supportedBy");
+                     begin
+                        for J in 1 .. Fusa.Json.Array_Length (SB) loop
+                           N.Supported_By.Append
+                             (Fusa.Json.As_String (Fusa.Json.Array_Item (SB, J)));
+                        end loop;
+                     end;
+                     declare
+                        IC : constant Fusa.Json.Value_Access :=
+                          Fusa.Json.Get_Array (Item, "inContextOf");
+                     begin
+                        for J in 1 .. Fusa.Json.Array_Length (IC) loop
+                           N.In_Context_Of.Append
+                             (Fusa.Json.As_String (Fusa.Json.Array_Item (IC, J)));
+                        end loop;
+                     end;
+                     Result.Append (N);
+                  end if;
+               end;
+            end loop;
+         end;
+      end;
+
+      --  Second pass: every supportedBy/inContextOf reference must resolve
+      --  to a real node id -- a dangling reference is a genuinely broken
+      --  argument, not just an incomplete field.
+      declare
+         procedure Check_Refs (N : Gsn_Node; Refs : String_List) is
+         begin
+            for Ref of Refs loop
+               declare
+                  Resolved : Boolean := False;
+               begin
+                  for Other of Result loop
+                     if To_String (Other.Id) = Ref then
+                        Resolved := True;
+                        exit;
+                     end if;
+                  end loop;
+                  if not Resolved then
+                     Findings.Append
+                       (Make_Finding
+                          (Rule_Id     => "GSN003",
+                           Severity    => Error,
+                           Message     =>
+                             "GSN node """ & To_String (N.Id) & """ references """ & Ref &
+                             """, which does not resolve to any node id in " &
+                             Safety_Case_File,
+                           Loc         => Make_Location (Safety_Case_File),
+                           Category    => Fusa.Safety,
+                           Remediation =>
+                             "fix the dangling reference, or add the missing node"));
+                  end if;
+               end;
+            end loop;
+         end Check_Refs;
+      begin
+         for N of Result loop
+            Check_Refs (N, N.Supported_By);
+            Check_Refs (N, N.In_Context_Of);
+         end loop;
+      end;
+
+      return Result;
+   end Load_Safety_Case;
+
+   procedure Scaffold_Safety_Case (Project_Root : String) is
+   begin
+      if not Safety_Case_Exists (Project_Root) then
+         Fusa.Files.Write_File
+           (Fusa.Files.Join (Project_Root, Safety_Case_File), "{" & ASCII.LF &
+              "  ""rootGoal"": ""G1""," & ASCII.LF &
+              "  ""nodes"": []" & ASCII.LF & "}" & ASCII.LF);
+      end if;
+   end Scaffold_Safety_Case;
 
 end Fusa.Config;

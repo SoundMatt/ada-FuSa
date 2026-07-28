@@ -235,6 +235,27 @@ repro steps and rationale on each.
   <file...>` resolves each file to its unit and reverse-BFS's the graph for every unit that
   (directly or transitively) depends on it — deliberately conservative, since most files transitively
   reach the shared root package. Both always exit 0. 3 new requirements (REQ-102–REQ-104).
+- **`coupling`/`fmea`/`safety-case` commands** (#26, complete): the final three commands from the
+  issue's evidence-and-verification family.
+  - `coupling`: reuses `Fusa.Deps`'s graph to report each unit's fan-in/fan-out/total, sorted
+    most-coupled-first. Explicitly documented as a structural proxy metric, **not** a full DO-178C
+    §6.4.4.3 data/control coupling analysis (which needs source-level parameter/global-data flow
+    analysis this tool doesn't perform). Always exits 0.
+  - `fmea`: input-file-driven validator for `.fusa-fmea.json` (new `Fusa.Config` `Fmea_Entry`
+    type), same rationale as `hara`/`tara` — failure-mode identification and
+    severity/occurrence/detection ratings are a human safety engineer's judgement this tool cannot
+    generate. Computes RPN = severity × occurrence × detection when not given; flags (never
+    silently overwrites) an explicit `rpn` that disagrees. Supports text/json/csv. Gates only on a
+    missing id.
+  - `safety-case`: input-file-driven validator/renderer for `.fusa-safety-case.json` (new
+    `Fusa.Config` `Gsn_Node` type) — a GSN goal/strategy/context/solution/assumption/justification
+    graph with `supportedBy`/`inContextOf` edges. Validates only *structural* well-formedness
+    (unique non-empty ids; every edge resolves to a real node — a dangling reference is an ERROR,
+    since it's a genuinely broken argument, not just an incomplete field) and renders a
+    cycle-safe text/Markdown outline or a Mermaid diagram (goal/strategy/context/solution get
+    distinct GSN-ish node shapes); never claims the argument itself is sound or complete. Gates on
+    a missing id or a dangling reference.
+  - 3 new requirements (REQ-105–REQ-107); 472 checks passing (was 436). **Closes #26.**
 
 ## v0.1.0 — 2026-07-27
 

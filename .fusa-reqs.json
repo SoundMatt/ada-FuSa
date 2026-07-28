@@ -623,6 +623,24 @@
       "title": "impact command (change-impact analysis)",
       "text": "impact <file...> resolves each given file to its unit via Fusa.Deps.Find_By_File, then unions Reverse_Reachable across all resolved units to report which other units would be affected. A file that isn't a recognised project unit is reported as such rather than erroring, since not every changed file is Ada source. Always exits 0.",
       "level": "SW"
+    },
+    {
+      "id": "REQ-105",
+      "title": "coupling command (structural fan-in/fan-out metric)",
+      "text": "coupling reuses Fusa.Deps.Analyze's dependency graph to report each unit's fan-in (direct dependents), fan-out (direct dependencies), and total, sorted descending by total. This is a STRUCTURAL proxy via the with-clause graph, not a full DO-178C section 6.4.4.3 data/control coupling analysis (which requires source-level parameter and global-data flow analysis this tool does not perform). Always exits 0.",
+      "level": "SW"
+    },
+    {
+      "id": "REQ-106",
+      "title": "fmea command (design FMEA)",
+      "text": "fmea loads/validates .fusa-fmea.json (failure mode, effect, cause, severity/occurrence/detection ratings 1-10, mitigation) following the hara/tara input-file pattern, since failure-mode identification and ratings are a human safety engineer's judgement this tool cannot generate. It computes RPN = severity*occurrence*detection when not explicitly given, and flags (but does not overwrite) an explicit rpn that disagrees with the computed value. Supports text/json/csv output. Gates only on a missing id.",
+      "level": "SW"
+    },
+    {
+      "id": "REQ-107",
+      "title": "safety-case command (GSN safety case)",
+      "text": "safety-case loads/validates .fusa-safety-case.json (a GSN goal/strategy/context/solution/assumption/justification node graph with supportedBy/inContextOf edges) following the same input-file pattern -- argument soundness is a certification engineer's judgement this tool cannot make, so it validates only structural well-formedness (unique non-empty ids; every reference resolves to a real node) and renders the graph as a text/md outline or a Mermaid diagram, never claiming the argument itself is valid or complete. Gates on a missing id or a dangling reference.",
+      "level": "SW"
     }
   ]
 }

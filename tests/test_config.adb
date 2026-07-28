@@ -319,5 +319,94 @@ begin
              & "produces exactly one WARNING finding, and is still returned");
    end;
 
+   --  fusa:test REQ-106
+   Check (not Fusa.Config.Fmea_Exists (Root), "no .fusa-fmea.json initially");
+   Fusa.Config.Scaffold_Fmea (Root);
+   Check (Fusa.Config.Fmea_Exists (Root), ".fusa-fmea.json exists after Scaffold_Fmea");
+
+   Fusa.Files.Write_File
+     (Root & "/" & Fusa.Config.Fmea_File,
+      "{""entries"":[" &
+      "{""id"":""FMEA-001"",""severity"":8,""occurrence"":3,""detection"":4}," &
+      "{""id"":""FMEA-002"",""severity"":11,""occurrence"":2,""detection"":2}," &
+      "{""id"":""FMEA-003"",""severity"":5,""occurrence"":5,""detection"":5,""rpn"":999}," &
+      "{""title"":""no id at all""}" &
+      "]}");
+   declare
+      Findings : Finding_List;
+      Entries  : constant Fusa.Config.Fmea_Entry_List := Fusa.Config.Load_Fmea (Root, Findings);
+      Errors, Warnings : Natural := 0;
+   begin
+      Check (Natural (Entries.Length) = 3,
+             "only the three entries with a non-empty id are returned");
+      Check (Entries.Element (1).Rpn = 96,
+             "RPN is computed as severity*occurrence*detection when not given (8*3*4=96)");
+      Check (Entries.Element (2).Severity = 0,
+             "a severity outside 1..10 is treated as invalid (0), not clamped or accepted");
+      Check (Entries.Element (2).Rpn = 0,
+             "RPN is not computed when any of the three ratings is invalid");
+      Check (Entries.Element (3).Rpn = 999,
+             "an explicit rpn is preserved verbatim even when it disagrees with "
+             & "severity*occurrence*detection (5*5*5=125)");
+      for F of Findings loop
+         case F.Severity is
+            when Error   => Errors := Errors + 1;
+            when Warning => Warnings := Warnings + 1;
+            when Info    => null;
+         end case;
+      end loop;
+      Check (Errors = 1, "an entry with no id produces exactly one ERROR finding");
+      Check (Warnings = 2,
+             "the out-of-range rating and the rpn mismatch each produce their own "
+             & "WARNING finding (2 total)");
+   end;
+
+   --  fusa:test REQ-107
+   Check (not Fusa.Config.Safety_Case_Exists (Root), "no .fusa-safety-case.json initially");
+   Fusa.Config.Scaffold_Safety_Case (Root);
+   Check (Fusa.Config.Safety_Case_Exists (Root),
+          ".fusa-safety-case.json exists after Scaffold_Safety_Case");
+   declare
+      Findings  : Finding_List;
+      Root_Goal : Unbounded_String;
+      Empty     : constant Fusa.Config.Gsn_Node_List :=
+        Fusa.Config.Load_Safety_Case (Root, Findings, Root_Goal);
+   begin
+      Check (Natural (Empty.Length) = 0, "a freshly scaffolded safety case has no nodes");
+      Check (Natural (Findings.Length) = 0, "no validation findings against an empty template");
+   end;
+
+   Fusa.Files.Write_File
+     (Root & "/" & Fusa.Config.Safety_Case_File,
+      "{""rootGoal"":""G1"",""nodes"":[" &
+      "{""id"":""G1"",""type"":""goal"",""text"":""top"",""supportedBy"":[""S1""]}," &
+      "{""id"":""S1"",""type"":""bogus-type"",""text"":""strat"",""supportedBy"":[""NOPE""]}," &
+      "{""text"":""no id at all""}" &
+      "]}");
+   declare
+      Findings  : Finding_List;
+      Root_Goal : Unbounded_String;
+      Nodes     : constant Fusa.Config.Gsn_Node_List :=
+        Fusa.Config.Load_Safety_Case (Root, Findings, Root_Goal);
+      Errors, Warnings : Natural := 0;
+   begin
+      Check (Natural (Nodes.Length) = 2,
+             "only the two nodes with a non-empty id are returned");
+      Check (To_String (Root_Goal) = "G1", "rootGoal round-trips verbatim");
+      for F of Findings loop
+         case F.Severity is
+            when Error   => Errors := Errors + 1;
+            when Warning => Warnings := Warnings + 1;
+            when Info    => null;
+         end case;
+      end loop;
+      Check (Errors = 2,
+             "the missing-id entry and S1's dangling supportedBy reference to ""NOPE"" "
+             & "each produce their own ERROR finding (2 total)");
+      Check (Warnings = 1,
+             "S1's unrecognised type ""bogus-type"" produces exactly one WARNING finding, "
+             & "and S1 is still returned rather than excluded");
+   end;
+
    Ada.Directories.Delete_Tree (Root);
 end Test_Config;
