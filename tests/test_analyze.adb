@@ -77,5 +77,37 @@ begin
       end;
    end;
 
+   --  Regression: Count_Params split the parameter-profile text on every
+   --  literal ';'/':' with no awareness of string-literal quoting, so a
+   --  single-parameter default value like "a;b:c" was misparsed into
+   --  phantom extra parameters. This procedure genuinely has only one
+   --  parameter -- it must not trip ANAL002's >6 threshold.
+   Fusa.Files.Write_File
+     (Root & "/src/stringparam.adb",
+      "procedure Stringparam" & ASCII.LF &
+      "  (Msg : String := ""a;b:c;d:e;f:g;h:i;j:k;l:m"")" & ASCII.LF &
+      "is" & ASCII.LF &
+      "begin" & ASCII.LF & "   null;" & ASCII.LF & "end Stringparam;" & ASCII.LF);
+   declare
+      Files : String_List;
+   begin
+      Files.Append ("src/stringparam.adb");
+      declare
+         Findings : constant Finding_List := Fusa.Analyze.Analyze (Root, Files);
+         Anal002  : Natural := 0;
+      begin
+         for F of Findings loop
+            if To_String (F.Rule_Id) = "ANAL002" then
+               Anal002 := Anal002 + 1;
+            end if;
+         end loop;
+         Check (Anal002 = 0,
+                "ANAL002 does not fire on a single real parameter whose "
+                & "default-value string literal contains several "
+                & "';'/':' characters -- those must not be misparsed as "
+                & "additional parameter-group/name-type separators");
+      end;
+   end;
+
    Ada.Directories.Delete_Tree (Root);
 end Test_Analyze;

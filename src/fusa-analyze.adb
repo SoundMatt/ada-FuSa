@@ -81,12 +81,36 @@ package body Fusa.Analyze is
       return 0;
    end Matching_Paren;
 
+   --  Replaces every character inside a double-quoted string literal
+   --  (the quotes themselves included) with a space, same length and
+   --  position as the input. Used before scanning Text for structural
+   --  ';'/':' delimiters -- without this, a default-value string literal
+   --  containing either character (e.g. `X : String := "a;b:c"`) is
+   --  indistinguishable from a real parameter-group separator or
+   --  name/type colon, inflating the parameter count with phantom
+   --  entries parsed out of the literal's own contents.
+   function Mask_String_Literals (S : String) return String is
+      Result    : String (S'Range) := S;
+      In_String : Boolean := False;
+   begin
+      for I in S'Range loop
+         if S (I) = '"' then
+            In_String := not In_String;
+            Result (I) := ' ';
+         elsif In_String then
+            Result (I) := ' ';
+         end if;
+      end loop;
+      return Result;
+   end Mask_String_Literals;
+
    --  Number of individual formal-parameter names in a parenthesised
    --  parameter-profile's interior text, e.g. "A, B : Integer; C : Float"
    --  -> 3. Each ';'-separated group may declare several comma-separated
    --  names sharing one mode/type.
-   function Count_Params (Text : String) return Natural is
-      Count      : Natural := 0;
+   function Count_Params (Raw_Text : String) return Natural is
+      Text        : constant String := Mask_String_Literals (Raw_Text);
+      Count       : Natural := 0;
       Group_Start : Positive := Text'First;
 
       procedure Count_Group (Group : String) is
