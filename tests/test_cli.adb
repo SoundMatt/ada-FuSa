@@ -869,6 +869,67 @@ begin
       Ada.Directories.Delete_Tree (Sas_Root);
    end;
 
+   --  fusa:test REQ-115
+   Check (Fusa.Cli.Run (Args ("template")) = Exit_Usage,
+          "template with no subcommand exits 2");
+   Check (Fusa.Cli.Run (Args ("template", "bogus")) = Exit_Usage,
+          "template with an unknown subcommand exits 2");
+   declare
+      Exit_Code : Integer;
+      Out_Text  : constant String :=
+        Run_Capturing_Stdout (Args ("template", "list"), Exit_Code);
+   begin
+      Check (Exit_Code = Exit_Ok, "template list exits 0");
+      Check (Ada.Strings.Fixed.Index (Out_Text, "default:") > 0,
+             "template list mentions the default template");
+   end;
+   declare
+      Tmpl_Root : constant String := "tmp_test_cli_template";
+   begin
+      if Ada.Directories.Exists (Tmpl_Root) then
+         Ada.Directories.Delete_Tree (Tmpl_Root);
+      end if;
+      Check (Fusa.Cli.Run (Args ("template", "apply")) = Exit_Usage,
+             "template apply with no name exits 2");
+      Check (Fusa.Cli.Run
+               (Args ("template", "apply", "bogus", "--dir", Tmpl_Root)) = Exit_Usage,
+             "template apply with an unknown template name exits 2");
+      Check (Fusa.Cli.Run
+               (Args ("template", "apply", "default", "--dir", Tmpl_Root,
+                      "--project-name", "demoapp")) = Exit_Ok,
+             "template apply default exits 0");
+      Check (Fusa.Files.Exists (Tmpl_Root & "/demoapp.gpr")
+             and then Fusa.Files.Exists (Tmpl_Root & "/README.md")
+             and then Fusa.Files.Exists (Tmpl_Root & "/.github/workflows/ci.yml")
+             and then Fusa.Files.Is_Directory (Tmpl_Root & "/src")
+             and then Fusa.Files.Is_Directory (Tmpl_Root & "/tests"),
+             "template apply default scaffolds the .gpr, README, CI workflow, "
+             & "and src/tests directories");
+      Check (not Fusa.Files.Exists (Tmpl_Root & "/LICENSE"),
+             "template apply never writes a LICENSE file -- that's the "
+             & "user's own legal/business decision");
+      declare
+         Readme : constant String := Fusa.Files.Read_File (Tmpl_Root & "/README.md");
+      begin
+         Check (Ada.Strings.Fixed.Index (Readme, "choose and add a LICENSE") > 0,
+                "the scaffolded README explicitly tells the user to add a LICENSE");
+      end;
+      Fusa.Files.Write_File (Tmpl_Root & "/demoapp.gpr", "-- customised by the user");
+      Check (Fusa.Cli.Run
+               (Args ("template", "apply", "default", "--dir", Tmpl_Root,
+                      "--project-name", "demoapp")) = Exit_Ok,
+             "re-applying the template without --force still exits 0");
+      Check (Fusa.Files.Read_File (Tmpl_Root & "/demoapp.gpr") = "-- customised by the user",
+             "re-applying without --force leaves an already-customised file untouched");
+      Check (Fusa.Cli.Run
+               (Args ("template", "apply", "default", "--dir", Tmpl_Root,
+                      "--project-name", "demoapp", "--force")) = Exit_Ok,
+             "re-applying with --force exits 0");
+      Check (Fusa.Files.Read_File (Tmpl_Root & "/demoapp.gpr") /= "-- customised by the user",
+             "re-applying with --force overwrites the customised file");
+      Ada.Directories.Delete_Tree (Tmpl_Root);
+   end;
+
    --  fusa:test REQ-090
    Check (Fusa.Cli.Run (Args ("req")) = Exit_Usage, "req with no subcommand exits 2");
    Check (Fusa.Cli.Run (Args ("req", "bogus")) = Exit_Usage,

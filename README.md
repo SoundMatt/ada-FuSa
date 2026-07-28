@@ -109,6 +109,7 @@ the simplest route, since GNAT is not distributed via Homebrew.
 | `adafusa analyze [--dir] [--strict]` | Deeper own-pass static analysis (unused with-clauses, long parameter lists), separate from `check` | text, json |
 | `adafusa lint [--dir] [--strict]` | General-correctness/formatting hygiene (trailing whitespace, blank-line runs, trailing newline) | text, json |
 | `adafusa sas [--dir] [--output-dir]` | Software Accomplishment Summary, aggregated from existing evidence; always writes both `sas.json` and `sas.md`; always exits 0 | json, md |
+| `adafusa template list\|apply <name> [--dir] [--project-name] [--force]` | Scaffold a source-tree/build/CI skeleton (`.gpr`, `src/`, `tests/`, README, CI workflow) complementary to `init`; never writes a LICENSE | text, json |
 
 **Shared flags:** `--dir <path>` (project root, default `.`), `--output <file>` (write instead of
 stdout), `--no-color` (accepted; ada-FuSa does not currently emit ANSI colour), `--format <fmt>`.

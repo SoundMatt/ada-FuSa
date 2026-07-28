@@ -5,7 +5,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
-### Added (sas -- command-catalog completeness, part 2 of 3)
+### Added (template -- command-catalog completeness, part 3 of 4)
+
+- **`template list`/`template apply <name>`** (§9.3 MAY): scaffolds a source-tree/build/CI
+  skeleton (`.gpr`, `src/`, `tests/`, `README.md`, `.github/workflows/ci.yml`) complementary to
+  `init` (which only ever writes `.fusa.json`/`.fusa-reqs.json`). Only one template, `default`,
+  exists rather than several with only cosmetic differences between them. Deliberately never
+  writes a LICENSE file -- choosing a license is a legal/business decision this tool must never
+  make on a user's behalf; the scaffolded README explicitly tells the user to add one. Each file
+  is created only if absent, or unconditionally with `--force`, mirroring `init`'s existing
+  per-file behaviour. 1 new requirement (REQ-115); 548 checks passing (was 534).
+
+`fix` remains -- it needs more care since it would be the first command to modify a user's actual
+source files.
+
+### Added (sas -- command-catalog completeness, part 2 of 4)
 
 - **`sas`** (§9.3 MAY, Software Accomplishment Summary): always writes both `sas.json` (envelope +
   tool-defined body, per the spec's own note on this command's shape) and `sas.md`. Every figure
@@ -19,7 +33,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 `template`/`fix` remain -- `fix` in particular needs more care since it would be the first command
 to modify a user's actual source files.
 
-### Added (cyber, sci, analyze, lint -- command-catalog completeness, part 1 of 2)
+### Added (cyber, sci, analyze, lint -- command-catalog completeness, part 1 of 4)
 
 Four of the seven remaining spec §9.2/§9.3 commands (`sas`/`template`/`fix` follow separately --
 each needed more design work or, for `fix`, more care since it would be the first command to
