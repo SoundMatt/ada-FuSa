@@ -101,6 +101,9 @@ the simplest route, since GNAT is not distributed via Homebrew.
 | `adafusa badge [--dir] [--label] [--message] [--color]` | SVG status badge (red/yellow/green from `check`, or a custom `--message`/`--color`); always exits 0 | svg |
 | `adafusa boundary [--dir] [--format dot\|mermaid]` | Package/unit dependency graph from `with`-clause scanning; always exits 0 | dot, mermaid |
 | `adafusa impact <file...> [--dir]` | Which project units are (transitively) affected by changing the given files; always exits 0 | text, json |
+| `adafusa coupling [--dir]` | Structural fan-in/fan-out coupling metric per unit; always exits 0 | text, json |
+| `adafusa fmea [--dir]` | Load/validate `.fusa-fmea.json` design FMEA; scaffolds a template if absent | text, json, csv |
+| `adafusa safety-case [--dir]` | Load/validate/render `.fusa-safety-case.json` GSN safety case; scaffolds a template if absent | text, json, md, mermaid |
 
 **Shared flags:** `--dir <path>` (project root, default `.`), `--output <file>` (write instead of
 stdout), `--no-color` (accepted; ada-FuSa does not currently emit ANSI colour), `--format <fmt>`.
@@ -323,6 +326,24 @@ own objective list.
   broad transitive impact set through that shared root, the same way a real Ada compiler would
   reconsider all of those units' dependencies. Both always exit `0` (purely descriptive; a file that
   isn't a recognised project unit is reported as such, not treated as an error).
+- **`coupling`** reuses the same `Fusa.Deps` graph to report each unit's fan-in (units that depend
+  on it), fan-out (units it depends on), and total, sorted with the most-coupled units first. This
+  is an honest **structural proxy** via the `with`-clause graph — it is explicitly *not* a full
+  DO-178C §6.4.4.3 data/control coupling analysis, which requires source-level parameter and
+  global-data flow analysis this tool does not perform. Treat high-coupling units as a starting
+  point for manual review, not a certification artifact on its own. Always exits `0`.
+- **`fmea`**/**`safety-case`** are, like `hara`/`tara`, input-file-driven validators — a Design
+  FMEA's failure modes and severity/occurrence/detection ratings, and a GSN safety-case argument's
+  soundness, are a human safety/certification engineer's judgement calls that ada-FuSa has no way to
+  generate or verify. `fmea` loads/validates `.fusa-fmea.json`; the one thing it *does* compute is
+  RPN = severity × occurrence × detection when not explicitly given, flagging (never silently
+  overwriting) an explicit `rpn` that disagrees. `safety-case` loads/validates
+  `.fusa-safety-case.json` (GSN goal/strategy/context/solution/assumption/justification nodes with
+  `supportedBy`/`inContextOf` edges), checking only *structural* well-formedness — every id unique,
+  every edge resolving to a real node — and renders the argument as a text/Markdown outline or a
+  Mermaid diagram; it never claims the argument itself is valid or complete. Both scaffold an empty
+  template on first run and gate only on structural errors (missing id; for `safety-case`, also a
+  dangling `supportedBy`/`inContextOf` reference).
 
 ## Evidence Artifacts
 
@@ -337,6 +358,8 @@ own objective list.
 | `vuln.json` | `adafusa vuln --format json` / `release --full` | Dependency vulnerability finding-list (always clean — see limitations) |
 | `badge.svg` | `adafusa badge --output badge.svg` | Status badge for READMEs/dashboards |
 | `boundary.dot`/`boundary.mermaid` | `adafusa boundary --output` | Package/unit dependency graph |
+| `fmea.json`/`fmea.csv` | `adafusa fmea --output` | Design FMEA |
+| `safety-case.json`/`safety-case.md`/`safety-case.mermaid` | `adafusa safety-case --output` | GSN safety case |
 
 ## Docker
 

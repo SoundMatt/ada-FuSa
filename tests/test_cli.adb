@@ -581,6 +581,92 @@ begin
       Ada.Directories.Delete_Tree (Deps_Root);
    end;
 
+   --  fusa:test REQ-105
+   Check (Fusa.Cli.Run (Args ("coupling", "--dir", Root, "--format", "bogus")) = Exit_Usage,
+          "coupling --format bogus exits 2");
+   declare
+      Exit_Code : Integer;
+      Out_Text  : constant String :=
+        Run_Capturing_Stdout (Args ("coupling", "--dir", Root), Exit_Code);
+   begin
+      Check (Exit_Code = Exit_Ok, "coupling exits 0");
+      Check (Ada.Strings.Fixed.Index (Out_Text, "fan-in=") > 0
+             and then Ada.Strings.Fixed.Index (Out_Text, "fan-out=") > 0,
+             "coupling's text output reports fan-in/fan-out per unit");
+   end;
+
+   --  fusa:test REQ-106
+   Check (not Fusa.Files.Exists (Root & "/.fusa-fmea.json"), "no .fusa-fmea.json initially");
+   Check (Fusa.Cli.Run (Args ("fmea", "--dir", Root)) = Exit_Ok,
+          "fmea with no .fusa-fmea.json scaffolds a template and exits 0");
+   Check (Fusa.Files.Exists (Root & "/.fusa-fmea.json"), "fmea created .fusa-fmea.json");
+   Fusa.Files.Write_File
+     (Root & "/.fusa-fmea.json",
+      "{""entries"":[{""id"":""FMEA-001"",""severity"":8,""occurrence"":3,""detection"":4," &
+        """failureMode"":""overflow""}]}");
+   declare
+      Exit_Code : Integer;
+      Out_Text  : constant String :=
+        Run_Capturing_Stdout (Args ("fmea", "--dir", Root), Exit_Code);
+   begin
+      Check (Exit_Code = Exit_Ok, "fmea against a well-formed entry exits 0");
+      Check (Ada.Strings.Fixed.Index (Out_Text, "RPN=96") > 0,
+             "fmea's text output shows the computed RPN (8*3*4=96)");
+   end;
+   declare
+      Exit_Code : Integer;
+      Out_Csv   : constant String :=
+        Run_Capturing_Stdout (Args ("fmea", "--dir", Root, "--format", "csv"), Exit_Code);
+   begin
+      Check (Ada.Strings.Fixed.Index (Out_Csv, "id,item,function") = 1,
+             "fmea --format csv starts with the expected header row");
+      Check (Ada.Strings.Fixed.Index (Out_Csv, "FMEA-001") > 0, "the entry appears in the CSV");
+   end;
+   Fusa.Files.Write_File
+     (Root & "/.fusa-fmea.json", "{""entries"":[{""failureMode"":""no id""}]}");
+   Check (Fusa.Cli.Run (Args ("fmea", "--dir", Root)) = Exit_Gate_Fail,
+          "fmea gate-fails once an entry with no id is present (ERROR finding)");
+
+   --  fusa:test REQ-107
+   Check (not Fusa.Files.Exists (Root & "/.fusa-safety-case.json"),
+          "no .fusa-safety-case.json initially");
+   Check (Fusa.Cli.Run (Args ("safety-case", "--dir", Root)) = Exit_Ok,
+          "safety-case with no file scaffolds a template and exits 0");
+   Check (Fusa.Files.Exists (Root & "/.fusa-safety-case.json"),
+          "safety-case created .fusa-safety-case.json");
+   Fusa.Files.Write_File
+     (Root & "/.fusa-safety-case.json",
+      "{""rootGoal"":""G1"",""nodes"":[" &
+        "{""id"":""G1"",""type"":""goal"",""text"":""top"",""supportedBy"":[""Sn1""]}," &
+        "{""id"":""Sn1"",""type"":""solution"",""text"":""evidence""}]}");
+   declare
+      Exit_Code : Integer;
+      Out_Text  : constant String :=
+        Run_Capturing_Stdout (Args ("safety-case", "--dir", Root), Exit_Code);
+   begin
+      Check (Exit_Code = Exit_Ok, "safety-case against a well-formed argument exits 0");
+      Check (Ada.Strings.Fixed.Index (Out_Text, "[goal] G1") > 0
+             and then Ada.Strings.Fixed.Index (Out_Text, "[solution] Sn1") > 0,
+             "safety-case's text outline shows both the root goal and its supporting solution");
+   end;
+   declare
+      Exit_Code : Integer;
+      Out_Mmd   : constant String :=
+        Run_Capturing_Stdout
+          (Args ("safety-case", "--dir", Root, "--format", "mermaid"), Exit_Code);
+   begin
+      Check (Ada.Strings.Fixed.Index (Out_Mmd, "graph TD") = 1,
+             "safety-case --format mermaid emits a Mermaid graph");
+      Check (Ada.Strings.Fixed.Index (Out_Mmd, "G1 --> Sn1") > 0,
+             "safety-case --format mermaid shows the supportedBy edge");
+   end;
+   Fusa.Files.Write_File
+     (Root & "/.fusa-safety-case.json",
+      "{""nodes"":[{""id"":""G1"",""supportedBy"":[""NOPE""]}]}");
+   Check (Fusa.Cli.Run (Args ("safety-case", "--dir", Root)) = Exit_Gate_Fail,
+          "safety-case gate-fails once a dangling supportedBy reference is present "
+          & "(ERROR finding)");
+
    --  fusa:test REQ-090
    Check (Fusa.Cli.Run (Args ("req")) = Exit_Usage, "req with no subcommand exits 2");
    Check (Fusa.Cli.Run (Args ("req", "bogus")) = Exit_Usage,

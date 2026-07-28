@@ -312,4 +312,99 @@ package Fusa.Config is
    procedure Scaffold_Gap_Objectives
      (Project_Root, Standard_Id : String; Starter : Gap_Objective_List);
 
+   ------------------------------------------------------------------
+   --  .fusa-fmea.json (`fmea` command, #26: design FMEA). Same
+   --  input-file-driven pattern as .fusa-hara.json/.fusa-tara.json --
+   --  failure-mode identification and severity/occurrence/detection
+   --  ratings are a human safety engineer's judgement, not something
+   --  this tool can determine. The one thing it DOES compute is the RPN
+   --  (severity * occurrence * detection) when the three ratings are all
+   --  present, so a human never has to keep that arithmetic in sync by
+   --  hand; a human-supplied "rpn" that disagrees with the computed value
+   --  is flagged, not silently overwritten.
+   ------------------------------------------------------------------
+
+   Fmea_File : constant String := ".fusa-fmea.json";
+
+   type Fmea_Entry is record
+      Id           : Unbounded_String;
+      Item         : Unbounded_String;
+      Func         : Unbounded_String;
+      Failure_Mode : Unbounded_String;
+      Effect       : Unbounded_String;
+      Cause        : Unbounded_String;
+      Severity     : Natural := 0; --  0 = absent/invalid (valid range is 1..10)
+      Occurrence   : Natural := 0;
+      Detection    : Natural := 0;
+      Rpn          : Natural := 0; --  Severity * Occurrence * Detection when all three are set
+      Mitigation   : Unbounded_String;
+   end record;
+
+   package Fmea_Entry_Vectors is new
+     Ada.Containers.Indefinite_Vectors (Positive, Fmea_Entry);
+   subtype Fmea_Entry_List is Fmea_Entry_Vectors.Vector;
+
+   --  fusa:req REQ-106
+   function Fmea_Exists (Project_Root : String) return Boolean;
+
+   --  Loads .fusa-fmea.json. Returns an empty list if absent. An entry
+   --  missing "id" is an ERROR finding (category safety) and excluded; an
+   --  entry whose severity/occurrence/detection is absent or outside
+   --  1..10 is a WARNING (entry still returned, with that rating left at
+   --  0 and no RPN computed); an explicit "rpn" that disagrees with the
+   --  computed Severity*Occurrence*Detection is a WARNING.
+   --  fusa:req REQ-106
+   function Load_Fmea
+     (Project_Root : String; Findings : in out Finding_List) return Fmea_Entry_List;
+
+   --  fusa:req REQ-106
+   procedure Scaffold_Fmea (Project_Root : String);
+
+   ------------------------------------------------------------------
+   --  .fusa-safety-case.json (`safety-case` command, #26: GSN goal
+   --  structuring notation). Same input-file-driven pattern again --
+   --  whether a safety-case argument is actually sound is a certification
+   --  engineer's judgement this tool cannot make. It validates only
+   --  structural well-formedness (every id unique and non-empty; every
+   --  supportedBy/inContextOf reference resolves to a real node) and
+   --  renders the argument graph; it never claims the argument itself is
+   --  valid or complete.
+   ------------------------------------------------------------------
+
+   Safety_Case_File : constant String := ".fusa-safety-case.json";
+
+   type Gsn_Node is record
+      Id             : Unbounded_String;
+      Kind           : Unbounded_String; --  goal|strategy|context|solution|assumption|justification
+      Text           : Unbounded_String;
+      Supported_By   : String_List;
+      In_Context_Of  : String_List;
+   end record;
+
+   package Gsn_Node_Vectors is new
+     Ada.Containers.Indefinite_Vectors (Positive, Gsn_Node);
+   subtype Gsn_Node_List is Gsn_Node_Vectors.Vector;
+
+   --  fusa:req REQ-107
+   function Safety_Case_Exists (Project_Root : String) return Boolean;
+
+   --  Loads .fusa-safety-case.json. Returns an empty list (and
+   --  Root_Goal left blank) if absent. A node missing "id" is an ERROR
+   --  and excluded; a "supportedBy"/"inContextOf" entry naming an id that
+   --  doesn't resolve to any node in the file is an ERROR (a genuinely
+   --  broken argument reference, not just an incomplete field) but does
+   --  not remove the referencing node itself; an unrecognised/missing
+   --  "kind" is a WARNING (the node is still returned, rendered
+   --  generically). Root_Goal is the file's "rootGoal" field verbatim,
+   --  even if it names an id that doesn't (yet) resolve -- callers that
+   --  render a tree from it are expected to handle that gracefully.
+   --  fusa:req REQ-107
+   function Load_Safety_Case
+     (Project_Root : String;
+      Findings     : in out Finding_List;
+      Root_Goal    : out Unbounded_String) return Gsn_Node_List;
+
+   --  fusa:req REQ-107
+   procedure Scaffold_Safety_Case (Project_Root : String);
+
 end Fusa.Config;

@@ -192,6 +192,9 @@ package body Fusa.Cli is
       W.Value ("badge");
       W.Value ("boundary");
       W.Value ("impact");
+      W.Value ("coupling");
+      W.Value ("fmea");
+      W.Value ("safety-case");
       W.Array_End;
 
       W.Key ("formats");
@@ -227,6 +230,9 @@ package body Fusa.Cli is
       W.Key ("badge");        W.Array_Start; W.Value ("svg"); W.Array_End;
       W.Key ("boundary");     W.Array_Start; W.Value ("dot"); W.Value ("mermaid"); W.Array_End;
       W.Key ("impact");       W.Array_Start; W.Value ("text"); W.Value ("json"); W.Array_End;
+      W.Key ("coupling");     W.Array_Start; W.Value ("text"); W.Value ("json"); W.Array_End;
+      W.Key ("fmea");         W.Array_Start; W.Value ("text"); W.Value ("json"); W.Value ("csv"); W.Array_End;
+      W.Key ("safety-case");  W.Array_Start; W.Value ("text"); W.Value ("json"); W.Value ("md"); W.Value ("mermaid"); W.Array_End;
       W.Object_End;
 
       W.Key ("standards");
@@ -3535,6 +3541,441 @@ package body Fusa.Cli is
    end Cmd_Impact;
 
    ----------------------------------------------------------------------
+   --  coupling -- structural fan-in/fan-out coupling metric (#26)
+   ----------------------------------------------------------------------
+
+   --  fusa:req REQ-105
+   function Cmd_Coupling (Args : String_List) return Integer is
+      Dir    : constant String := Dir_Of (Args);
+      Format : constant String := Flag_Value (Args, "--format", "text");
+   begin
+      if Format /= "text" and then Format /= "json" then
+         Ada.Text_IO.Put_Line
+           (Ada.Text_IO.Standard_Error,
+            "ada-FuSa: coupling: unsupported --format '" & Format &
+            "' (supported: text, json)");
+         return Exit_Usage;
+      end if;
+
+      declare
+         Cfg : Fusa.Config.Project_Config;
+      begin
+         begin
+            Cfg := Fusa.Config.Load (Dir);
+         exception
+            when Fusa.Config.No_Config_Error =>
+               return Emit_Runtime_Error
+                 (Args, "coupling", "no-config", "no .fusa.json found in " & Dir);
+            when Fusa.Config.Invalid_Config_Error =>
+               return Emit_Runtime_Error
+                 (Args, "coupling", "invalid-config", "invalid .fusa.json in " & Dir);
+         end;
+
+         declare
+            Files : constant String_List := Fusa.Source_Scan.Find_Source_Files (Dir, Cfg);
+            Nodes : constant Fusa.Deps.Dep_Node_List := Fusa.Deps.Analyze (Dir, Files);
+
+            --  Direct (one-hop) fan-in: how many other units name this one
+            --  in their own Deps -- unlike `impact`'s Reverse_Reachable,
+            --  coupling is a per-unit structural metric, not a transitive
+            --  change-impact set.
+            function Fan_In (Name : String) return Natural is
+               Count : Natural := 0;
+            begin
+               for N of Nodes loop
+                  for D of N.Deps loop
+                     if D = Name then
+                        Count := Count + 1;
+                        exit;
+                     end if;
+                  end loop;
+               end loop;
+               return Count;
+            end Fan_In;
+
+            --  Ordered by descending total coupling (most-coupled first --
+            --  the units most worth a closer manual review), via a plain
+            --  insertion sort since the unit count is small.
+            Order : array (1 .. Natural (Nodes.Length)) of Positive;
+            Totals : array (1 .. Natural (Nodes.Length)) of Natural;
+         begin
+            for I in Order'Range loop
+               Order (I) := I;
+               Totals (I) :=
+                 Natural (Nodes.Element (I).Deps.Length) + Fan_In (To_String (Nodes.Element (I).Name));
+            end loop;
+            for I in Order'First + 1 .. Order'Last loop
+               declare
+                  Key_Idx   : constant Positive := Order (I);
+                  Key_Total : constant Natural := Totals (Key_Idx);
+                  J         : Integer := I - 1;
+               begin
+                  while J >= Order'First and then Totals (Order (J)) < Key_Total loop
+                     Order (J + 1) := Order (J);
+                     J := J - 1;
+                  end loop;
+                  Order (J + 1) := Key_Idx;
+               end;
+            end loop;
+
+            if Format = "json" then
+               declare
+                  W : Fusa.Json.Writer.Instance;
+               begin
+                  W.Object_Start;
+                  Fusa.Report.Write_Header (W, "coupling-report");
+                  W.Key ("units");
+                  W.Array_Start;
+                  for Idx of Order loop
+                     declare
+                        N : constant Fusa.Deps.Dep_Node := Nodes.Element (Idx);
+                        In_C  : constant Natural := Fan_In (To_String (N.Name));
+                        Out_C : constant Natural := Natural (N.Deps.Length);
+                     begin
+                        W.Object_Start;
+                        W.Field ("name", To_String (N.Name));
+                        W.Field ("fanIn", In_C);
+                        W.Field ("fanOut", Out_C);
+                        W.Field ("total", In_C + Out_C);
+                        W.Object_End;
+                     end;
+                  end loop;
+                  W.Array_End;
+                  W.Object_End;
+                  Emit (Args, Fusa.Json.Writer.To_String (W));
+               end;
+            else
+               declare
+                  Buf : Unbounded_String := Null_Unbounded_String;
+               begin
+                  for Idx of Order loop
+                     declare
+                        N : constant Fusa.Deps.Dep_Node := Nodes.Element (Idx);
+                        In_C  : constant Natural := Fan_In (To_String (N.Name));
+                        Out_C : constant Natural := Natural (N.Deps.Length);
+                     begin
+                        Append (Buf, To_String (N.Name) & ": fan-in=" & Trim_Img (In_C) &
+                                  " fan-out=" & Trim_Img (Out_C) &
+                                  " total=" & Trim_Img (In_C + Out_C) & ASCII.LF);
+                     end;
+                  end loop;
+                  Append (Buf, Trim_Img (Natural (Nodes.Length)) & " units");
+                  Emit (Args, To_String (Buf));
+               end;
+            end if;
+            return Exit_Ok;
+         end;
+      end;
+   end Cmd_Coupling;
+
+   ----------------------------------------------------------------------
+   --  fmea -- design FMEA (#26)
+   ----------------------------------------------------------------------
+
+   function Csv_Field (S : String) return String is
+      Needs_Quoting : Boolean := False;
+   begin
+      for C of S loop
+         if C = ',' or else C = '"' or else C = ASCII.LF or else C = ASCII.CR then
+            Needs_Quoting := True;
+            exit;
+         end if;
+      end loop;
+      if not Needs_Quoting then
+         return S;
+      end if;
+      declare
+         Buf : Unbounded_String := Null_Unbounded_String;
+      begin
+         Append (Buf, '"');
+         for C of S loop
+            if C = '"' then
+               Append (Buf, """""");
+            else
+               Append (Buf, C);
+            end if;
+         end loop;
+         Append (Buf, '"');
+         return To_String (Buf);
+      end;
+   end Csv_Field;
+
+   --  fusa:req REQ-106
+   function Cmd_Fmea (Args : String_List) return Integer is
+      Dir    : constant String := Dir_Of (Args);
+      Format : constant String := Flag_Value (Args, "--format", "text");
+   begin
+      if Format /= "text" and then Format /= "json" and then Format /= "csv" then
+         Ada.Text_IO.Put_Line
+           (Ada.Text_IO.Standard_Error,
+            "ada-FuSa: fmea: unsupported --format '" & Format &
+            "' (supported: text, json, csv)");
+         return Exit_Usage;
+      end if;
+
+      if not Fusa.Config.Fmea_Exists (Dir) then
+         Fusa.Config.Scaffold_Fmea (Dir);
+         Ada.Text_IO.Put_Line
+           ("created " & Fusa.Files.Join (Dir, Fusa.Config.Fmea_File) &
+              " (template) -- fill in your FMEA entries and re-run");
+         return Exit_Ok;
+      end if;
+
+      declare
+         Findings : Finding_List;
+         Entries  : constant Fusa.Config.Fmea_Entry_List := Fusa.Config.Load_Fmea (Dir, Findings);
+      begin
+         if Format = "json" then
+            declare
+               W : Fusa.Json.Writer.Instance;
+            begin
+               W.Object_Start;
+               Fusa.Report.Write_Header (W, "fmea-report");
+               W.Key ("entries");
+               W.Array_Start;
+               for E of Entries loop
+                  W.Object_Start;
+                  W.Field ("id", To_String (E.Id));
+                  W.Field_If_Non_Blank ("item", To_String (E.Item));
+                  W.Field_If_Non_Blank ("function", To_String (E.Func));
+                  W.Field_If_Non_Blank ("failureMode", To_String (E.Failure_Mode));
+                  W.Field_If_Non_Blank ("effect", To_String (E.Effect));
+                  W.Field_If_Non_Blank ("cause", To_String (E.Cause));
+                  W.Field ("severity", E.Severity);
+                  W.Field ("occurrence", E.Occurrence);
+                  W.Field ("detection", E.Detection);
+                  W.Field ("rpn", E.Rpn);
+                  W.Field_If_Non_Blank ("mitigation", To_String (E.Mitigation));
+                  W.Object_End;
+               end loop;
+               W.Array_End;
+               Fusa.Report.Write_Findings_Array (W, Findings);
+               Fusa.Report.Write_Summary (W, Findings);
+               W.Object_End;
+               Emit (Args, Fusa.Json.Writer.To_String (W));
+            end;
+         elsif Format = "csv" then
+            declare
+               Buf : Unbounded_String := Null_Unbounded_String;
+            begin
+               Append (Buf, "id,item,function,failureMode,effect,cause,severity,occurrence," &
+                         "detection,rpn,mitigation" & ASCII.LF);
+               for E of Entries loop
+                  Append (Buf, Csv_Field (To_String (E.Id)) & "," &
+                            Csv_Field (To_String (E.Item)) & "," &
+                            Csv_Field (To_String (E.Func)) & "," &
+                            Csv_Field (To_String (E.Failure_Mode)) & "," &
+                            Csv_Field (To_String (E.Effect)) & "," &
+                            Csv_Field (To_String (E.Cause)) & "," &
+                            Trim_Img (E.Severity) & "," & Trim_Img (E.Occurrence) & "," &
+                            Trim_Img (E.Detection) & "," & Trim_Img (E.Rpn) & "," &
+                            Csv_Field (To_String (E.Mitigation)) & ASCII.LF);
+               end loop;
+               Emit (Args, To_String (Buf));
+            end;
+         else
+            declare
+               Buf : Unbounded_String := Null_Unbounded_String;
+            begin
+               for E of Entries loop
+                  Append (Buf, To_String (E.Id) & ": " & To_String (E.Failure_Mode) &
+                            " (RPN=" & Trim_Img (E.Rpn) & ")" & ASCII.LF);
+               end loop;
+               Append (Buf, Trim_Img (Natural (Entries.Length)) & " entries, " &
+                         Trim_Img (Natural (Findings.Length)) & " validation findings");
+               Emit (Args, To_String (Buf));
+            end;
+         end if;
+
+         if Fusa.Report.Has_Gate_Failure (Findings, False) then
+            return Exit_Gate_Fail;
+         end if;
+         return Exit_Ok;
+      end;
+   end Cmd_Fmea;
+
+   ----------------------------------------------------------------------
+   --  safety-case -- GSN safety case (#26)
+   ----------------------------------------------------------------------
+
+   --  fusa:req REQ-107
+   function Cmd_Safety_Case (Args : String_List) return Integer is
+      Dir    : constant String := Dir_Of (Args);
+      Format : constant String := Flag_Value (Args, "--format", "text");
+   begin
+      if Format /= "text" and then Format /= "json" and then Format /= "md"
+        and then Format /= "mermaid"
+      then
+         Ada.Text_IO.Put_Line
+           (Ada.Text_IO.Standard_Error,
+            "ada-FuSa: safety-case: unsupported --format '" & Format &
+            "' (supported: text, json, md, mermaid)");
+         return Exit_Usage;
+      end if;
+
+      if not Fusa.Config.Safety_Case_Exists (Dir) then
+         Fusa.Config.Scaffold_Safety_Case (Dir);
+         Ada.Text_IO.Put_Line
+           ("created " & Fusa.Files.Join (Dir, Fusa.Config.Safety_Case_File) &
+              " (template) -- build your GSN argument and re-run");
+         return Exit_Ok;
+      end if;
+
+      declare
+         Findings  : Finding_List;
+         Root_Goal : Unbounded_String;
+         Nodes     : constant Fusa.Config.Gsn_Node_List :=
+           Fusa.Config.Load_Safety_Case (Dir, Findings, Root_Goal);
+
+         function Find_Node (Id : String) return Fusa.Config.Gsn_Node is
+            Empty : Fusa.Config.Gsn_Node;
+         begin
+            for N of Nodes loop
+               if To_String (N.Id) = Id then
+                  return N;
+               end if;
+            end loop;
+            return Empty;
+         end Find_Node;
+      begin
+         if Format = "json" then
+            declare
+               W : Fusa.Json.Writer.Instance;
+            begin
+               W.Object_Start;
+               Fusa.Report.Write_Header (W, "safety-case");
+               W.Field_If_Non_Blank ("rootGoal", To_String (Root_Goal));
+               W.Key ("nodes");
+               W.Array_Start;
+               for N of Nodes loop
+                  W.Object_Start;
+                  W.Field ("id", To_String (N.Id));
+                  W.Field_If_Non_Blank ("type", To_String (N.Kind));
+                  W.Field_If_Non_Blank ("text", To_String (N.Text));
+                  W.Key ("supportedBy");
+                  W.Array_Start;
+                  for R of N.Supported_By loop
+                     W.Value (R);
+                  end loop;
+                  W.Array_End;
+                  W.Key ("inContextOf");
+                  W.Array_Start;
+                  for R of N.In_Context_Of loop
+                     W.Value (R);
+                  end loop;
+                  W.Array_End;
+                  W.Object_End;
+               end loop;
+               W.Array_End;
+               Fusa.Report.Write_Findings_Array (W, Findings);
+               Fusa.Report.Write_Summary (W, Findings);
+               W.Object_End;
+               Emit (Args, Fusa.Json.Writer.To_String (W));
+            end;
+         elsif Format = "mermaid" then
+            declare
+               Buf : Unbounded_String := Null_Unbounded_String;
+            begin
+               Append (Buf, "graph TD" & ASCII.LF);
+               for N of Nodes loop
+                  declare
+                     Kind : constant String := To_String (N.Kind);
+                     Nid  : constant String := Mermaid_Id (To_String (N.Id));
+                  begin
+                     if Kind = "strategy" then
+                        Append (Buf, "  " & Nid & "[/" & To_String (N.Id) & "/]" & ASCII.LF);
+                     elsif Kind = "solution" then
+                        Append (Buf, "  " & Nid & "((" & To_String (N.Id) & "))" & ASCII.LF);
+                     elsif Kind = "context" then
+                        Append (Buf, "  " & Nid & "(" & To_String (N.Id) & ")" & ASCII.LF);
+                     elsif Kind = "assumption" or else Kind = "justification" then
+                        Append (Buf, "  " & Nid & "{" & To_String (N.Id) & "}" & ASCII.LF);
+                     else
+                        Append (Buf, "  " & Nid & "[" & To_String (N.Id) & "]" & ASCII.LF);
+                     end if;
+                  end;
+               end loop;
+               for N of Nodes loop
+                  for R of N.Supported_By loop
+                     Append (Buf, "  " & Mermaid_Id (To_String (N.Id)) & " --> " &
+                               Mermaid_Id (R) & ASCII.LF);
+                  end loop;
+                  for R of N.In_Context_Of loop
+                     Append (Buf, "  " & Mermaid_Id (To_String (N.Id)) & " -.-> " &
+                               Mermaid_Id (R) & ASCII.LF);
+                  end loop;
+               end loop;
+               Emit (Args, To_String (Buf));
+            end;
+         else
+            declare
+               Buf     : Unbounded_String := Null_Unbounded_String;
+               Visited : String_List;
+
+               procedure Render_Node (Id : String; Indent : Natural) is
+                  N      : constant Fusa.Config.Gsn_Node := Find_Node (Id);
+                  Prefix : constant String (1 .. Indent * 2) := (others => ' ');
+               begin
+                  if Length (N.Id) = 0 then
+                     Append (Buf, Prefix & "- (unresolved reference: " & Id & ")" & ASCII.LF);
+                     return;
+                  end if;
+                  for V of Visited loop
+                     if V = Id then
+                        Append (Buf, Prefix & "- [" & To_String (N.Kind) & "] " & Id &
+                                  " (see above)" & ASCII.LF);
+                        return;
+                     end if;
+                  end loop;
+                  Visited.Append (Id);
+                  Append (Buf, Prefix & "- [" & To_String (N.Kind) & "] " & Id & ": " &
+                            To_String (N.Text) & ASCII.LF);
+                  for Ctx of N.In_Context_Of loop
+                     Append (Buf, Prefix & "    (context: " & Ctx & ")" & ASCII.LF);
+                  end loop;
+                  for Child of N.Supported_By loop
+                     Render_Node (Child, Indent + 1);
+                  end loop;
+               end Render_Node;
+            begin
+               if Format = "md" then
+                  Append (Buf, "# Safety Case" & ASCII.LF & ASCII.LF);
+               end if;
+               if Length (Root_Goal) > 0
+                 and then Length (Find_Node (To_String (Root_Goal)).Id) > 0
+               then
+                  Render_Node (To_String (Root_Goal), 0);
+               end if;
+               for N of Nodes loop
+                  declare
+                     Already : Boolean := False;
+                  begin
+                     for V of Visited loop
+                        if V = To_String (N.Id) then
+                           Already := True;
+                           exit;
+                        end if;
+                     end loop;
+                     if not Already then
+                        Render_Node (To_String (N.Id), 0);
+                     end if;
+                  end;
+               end loop;
+               Append (Buf, Trim_Img (Natural (Nodes.Length)) & " nodes, " &
+                         Trim_Img (Natural (Findings.Length)) & " validation findings" &
+                         ASCII.LF);
+               Emit (Args, To_String (Buf));
+            end;
+         end if;
+
+         if Fusa.Report.Has_Gate_Failure (Findings, False) then
+            return Exit_Gate_Fail;
+         end if;
+         return Exit_Ok;
+      end;
+   end Cmd_Safety_Case;
+
+   ----------------------------------------------------------------------
    --  Usage / dispatch
    ----------------------------------------------------------------------
 
@@ -3545,7 +3986,7 @@ package body Fusa.Cli is
         "commands: version capabilities init check trace qualify release audit-pack " &
         "report comp hara tara vuln req disposition pr metrics sign hooks " &
         "do178 iso26262 iso21434 iec61508 iec62443 unece slsa " &
-        "verify diff badge boundary impact");
+        "verify diff badge boundary impact coupling fmea safety-case");
    end Print_Usage;
 
    function Run (Args : String_List) return Integer is
@@ -3624,6 +4065,12 @@ package body Fusa.Cli is
             return Cmd_Boundary (Rest);
          elsif Cmd = "impact" then
             return Cmd_Impact (Rest);
+         elsif Cmd = "coupling" then
+            return Cmd_Coupling (Rest);
+         elsif Cmd = "fmea" then
+            return Cmd_Fmea (Rest);
+         elsif Cmd = "safety-case" then
+            return Cmd_Safety_Case (Rest);
          elsif Cmd = "--help" or else Cmd = "-h" or else Cmd = "help" then
             Print_Usage;
             return Exit_Ok;
