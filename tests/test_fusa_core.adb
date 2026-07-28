@@ -1,5 +1,7 @@
 with Ada.Strings.Unbounded; use Ada.Strings.Unbounded;
+with Ada.Strings.Fixed;
 with Fusa; use Fusa;
+with Fusa.Files;
 with Test_Framework; use Test_Framework;
 
 procedure Test_Fusa_Core is
@@ -81,5 +83,36 @@ begin
              "fingerprint is independent of line number (not part of the canonical input)");
       Check (F1.Fingerprint /= F3.Fingerprint,
              "fingerprint differs when ruleId differs");
+   end;
+
+   --  Regression: the Docker image build's SPEC_VERSION build-arg (an
+   --  OCI label only, io.x-fusa.spec-version -- it does not affect the
+   --  binary's own behaviour) drifted to "1.11" after Fusa.Spec_Version
+   --  had already moved to "1.15.0", so a built image would silently
+   --  misreport its own spec conformance to an orchestrator reading the
+   --  label. Read the actual repo files (this test runs from the
+   --  project root) rather than a fixture, so it fails the moment either
+   --  side of the pair moves without the other.
+   declare
+      Needle : constant String := "SPEC_VERSION=" & Fusa.Spec_Version;
+   begin
+      Check (Fusa.Files.Exists ("Dockerfile"),
+             "Dockerfile exists at the project root (sanity check for the "
+             & "read below)");
+      if Fusa.Files.Exists ("Dockerfile") then
+         Check (Ada.Strings.Fixed.Index
+                  (Fusa.Files.Read_File ("Dockerfile"), Needle) > 0,
+                "Dockerfile's ARG SPEC_VERSION default matches "
+                & "Fusa.Spec_Version (" & Fusa.Spec_Version & ")");
+      end if;
+      Check (Fusa.Files.Exists (".github/workflows/ci.yml"),
+             ".github/workflows/ci.yml exists at the project root");
+      if Fusa.Files.Exists (".github/workflows/ci.yml") then
+         Check (Ada.Strings.Fixed.Index
+                  (Fusa.Files.Read_File (".github/workflows/ci.yml"), Needle)
+                  > 0,
+                "ci.yml's Docker build-arg SPEC_VERSION matches "
+                & "Fusa.Spec_Version (" & Fusa.Spec_Version & ")");
+      end if;
    end;
 end Test_Fusa_Core;
