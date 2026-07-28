@@ -931,7 +931,8 @@ package body Fusa.Cli is
       if Format /= "text" and then Format /= "json" then
          Ada.Text_IO.Put_Line
            (Ada.Text_IO.Standard_Error,
-            "ada-FuSa: qualify: unsupported --format '" & Format & "'");
+            "ada-FuSa: qualify: unsupported --format '" & Format &
+            "' (supported: text, json)");
          return Exit_Usage;
       end if;
 
@@ -990,32 +991,43 @@ package body Fusa.Cli is
         "end P;" & ASCII.LF);
 
       --  fusa:test REQ-079
-      --  FUSA001-004 check Project_Root, not the single-file fixture
-      --  Check_Rule writes -- they can't be "triggered" the same way the
-      --  content-scanning rules above are, since qualify runs against
-      --  ada-FuSa's own real project root (which already has all four
-      --  markers). Their absence-of-false-positive behaviour is already
-      --  exercised on every qualify run (Run_All below runs every
-      --  registered rule, including these, against Dir); this just makes
-      --  that an explicit, named, reported known-answer case rather than
-      --  a silent side effect.
+      --  FUSA001-004 check Project_Root itself (LICENSE/README/*.gpr/
+      --  .github/workflows), not the single-file fixture Check_Rule
+      --  writes, so they can't be triggered the same way the
+      --  content-scanning rules above are. Regression: this used to run
+      --  them against Dir -- the project actually being qualified -- and
+      --  call it a PASS only if none of them fired. That makes the
+      --  "known answer" whatever markers Dir happens to have, which is
+      --  backwards for a self-test (a freshly-init'd project with no
+      --  LICENSE yet would report FUSA00x as FAILED, even though the
+      --  rule is working exactly as designed) and gives no positive-
+      --  detection coverage at all. Tmp is guaranteed to hold nothing
+      --  but the scratch fixture.adb the loop above just wrote (it was
+      --  freshly emptied and recreated at the top of this command), so
+      --  using it as Project_Root gives a real, Dir-independent known
+      --  answer: every one of FUSA001-004 MUST fire against it.
       declare
          Empty_Files : String_List;
-         Findings    : constant Finding_List := Fusa.Engine.Run_All (Dir, Empty_Files);
-         Fusa_Hit    : Boolean := False;
+         Findings    : constant Finding_List := Fusa.Engine.Run_All (Tmp, Empty_Files);
+
+         procedure Check_Fusa_Rule (Rule_Id : String) is
+            Hit : Boolean := False;
+         begin
+            for F of Findings loop
+               if To_String (F.Rule_Id) = Rule_Id then
+                  Hit := True;
+               end if;
+            end loop;
+            Cases.Append
+              (Case_Result'
+                 (Name   => To_Unbounded_String ("rule-" & Rule_Id & "-known-answer"),
+                  Result => To_Unbounded_String (if Hit then "PASS" else "FAIL")));
+         end Check_Fusa_Rule;
       begin
-         for F of Findings loop
-            if To_String (F.Rule_Id) = "FUSA001" or else To_String (F.Rule_Id) = "FUSA002"
-              or else To_String (F.Rule_Id) = "FUSA003" or else To_String (F.Rule_Id) = "FUSA004"
-            then
-               Fusa_Hit := True;
-            end if;
-         end loop;
-         Cases.Append
-           (Case_Result'
-              (Name   => To_Unbounded_String ("rule-FUSA00x-known-answer"),
-               Result => To_Unbounded_String
-                 (if not Fusa_Hit then "PASS" else "FAIL")));
+         Check_Fusa_Rule ("FUSA001");
+         Check_Fusa_Rule ("FUSA002");
+         Check_Fusa_Rule ("FUSA003");
+         Check_Fusa_Rule ("FUSA004");
       end;
 
       if Ada.Directories.Exists (Tmp) then

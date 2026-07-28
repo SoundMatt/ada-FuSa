@@ -213,6 +213,49 @@ begin
    Check (Fusa.Cli.Run (Args ("qualify", "--dir", Root, "--format", "bogus")) = Exit_Usage,
           "qualify rejects an unsupported --format with a usage error");
 
+   --  Regression: the FUSA00x known-answer case used to run FUSA001-004
+   --  against the real --dir being qualified, PASSing only when none of
+   --  them fired -- i.e. only when that project already happened to have
+   --  a LICENSE, README, *.gpr, and .github/workflows (exactly why Root
+   --  above was seeded with all four at fixture setup, purely to make
+   --  the self-test pass). A project missing any of those markers --
+   --  which is completely normal, e.g. right after `adafusa init` --
+   --  would report qualify as FAILED even though nothing about the tool
+   --  itself is broken. It must now use an internal scratch directory
+   --  that deliberately has none of the four markers, so qualify passes
+   --  (and correctly demonstrates FUSA001-004 firing) regardless of
+   --  whatever project it's actually run against.
+   declare
+      Marker_Free_Root : constant String := "tmp_test_cli_qualify_no_markers";
+   begin
+      if Ada.Directories.Exists (Marker_Free_Root) then
+         Ada.Directories.Delete_Tree (Marker_Free_Root);
+      end if;
+      Ada.Directories.Create_Path (Marker_Free_Root & "/src");
+      Fusa.Files.Write_File
+        (Marker_Free_Root & "/.fusa.json",
+         "{""project"":{""name"":""t"",""version"":""0.1.0""},""standard"":""generic""}");
+      declare
+         Exit_Code : Integer;
+         Out_Text  : constant String :=
+           Run_Capturing_Stdout
+             (Args ("qualify", "--dir", Marker_Free_Root, "--format", "json"), Exit_Code);
+      begin
+         Check (Exit_Code = Exit_Ok,
+                "qualify still exits 0 against a project with no LICENSE, README, "
+                & "*.gpr, or .github/workflows of its own -- the FUSA00x "
+                & "known-answer case no longer depends on the qualified "
+                & "project's own state");
+         Check (Ada.Strings.Fixed.Index (Out_Text, """name"": ""rule-FUSA001-known-answer""") > 0
+                and then Ada.Strings.Fixed.Index
+                  (Out_Text, """name"": ""rule-FUSA004-known-answer""") > 0,
+                "FUSA001 and FUSA004 are now reported as individual, named "
+                & "known-answer cases (not one combined ""FUSA00x"" bucket), "
+                & "giving real positive-detection coverage per rule");
+      end;
+      Ada.Directories.Delete_Tree (Marker_Free_Root);
+   end;
+
    --  fusa:test REQ-077
    --  section 6 MAY: hash is present, "sha256:"-prefixed, and -- since it's
    --  computed with generatedAt blanked before hashing -- byte-identical
