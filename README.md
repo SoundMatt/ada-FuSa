@@ -107,7 +107,7 @@ the simplest route, since GNAT is not distributed via Homebrew.
 | `adafusa fmea [--dir] [--min-coverage N]` | Load/validate `.fusa-fmea.json` design FMEA (IEC 60812 / AIAG-VDA, section 9.2 canonical shape); scaffolds a template if absent | text, json, csv |
 | `adafusa safety-case [--dir]` | Load/validate/render `.fusa-safety-case.json` GSN safety case; scaffolds a template if absent | text, json, md, mermaid |
 | `adafusa cyber [--dir] [--strict]` | `check`'s findings narrowed to `security` category, as a dedicated `cyber-report` | text, json |
-| `adafusa sci [--dir]` | Software Configuration Index: every source file + evidence artifact, SHA-256 + size; always exits 0 | text, json |
+| `adafusa sci [--dir]` | Software Configuration Index: every source file + evidence artifact, `sha256:`-prefixed hash + version + size; always exits 0 | text, json |
 | `adafusa analyze [--dir] [--strict]` | Deeper own-pass static analysis (unused with-clauses, long parameter lists), separate from `check` | text, json |
 | `adafusa lint [--dir] [--strict]` | General-correctness/formatting hygiene (trailing whitespace, blank-line runs, trailing newline) | text, json |
 | `adafusa sas [--dir] [--output-dir]` | Software Accomplishment Summary (DO-178C section 11.20): a `checklist[]` of the section 11 data items, `present` set only from real artifacts this tool can see on disk; always writes both `sas.json` and `sas.md`; always exits 0 | json, md |

@@ -4689,7 +4689,7 @@ package body Fusa.Cli is
                begin
                   W.Object_Start;
                   Fusa.Report.Write_Header (W, "sci");
-                  W.Key ("items");
+                  W.Key ("artifacts");
                   W.Array_Start;
                   for Item of Items loop
                      declare
@@ -4698,7 +4698,10 @@ package body Fusa.Cli is
                      begin
                         W.Object_Start;
                         W.Field ("file", Item);
-                        W.Field ("sha256", Fusa.Sha256.Hex_Digest (Content));
+                        W.Field
+                          ("hash",
+                           "sha256:" & Fusa.Sha256.Hex_Digest (Content));
+                        W.Field ("version", To_String (Cfg.Version));
                         W.Field ("sizeBytes", Content'Length);
                         W.Object_End;
                      end;

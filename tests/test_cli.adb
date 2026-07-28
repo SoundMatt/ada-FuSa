@@ -1088,8 +1088,14 @@ begin
    begin
       Check (Exit_Code = Exit_Ok, "sci always exits 0");
       Check (Ada.Strings.Fixed.Index (Out_Json, """kind"": ""sci""") > 0
-             and then Ada.Strings.Fixed.Index (Out_Json, """sha256"":") > 0,
-             "sci --format json reports the sci kind and a sha256 digest per item");
+             and then Ada.Strings.Fixed.Index (Out_Json, """artifacts"":") > 0,
+             "sci --format json reports the sci kind and the canonical "
+             & "artifacts[] array (not ""items"")");
+      Check (Ada.Strings.Fixed.Index (Out_Json, """hash"": ""sha256:") > 0,
+             "sci's per-artifact hash field is sha256:-prefixed per section 2.7's "
+             & "field-named-""hash"" rule (not a bare ""sha256"" field)");
+      Check (Ada.Strings.Fixed.Index (Out_Json, """version"":") > 0,
+             "sci reports the project's version per artifact");
    end;
 
    --  fusa:test REQ-112
