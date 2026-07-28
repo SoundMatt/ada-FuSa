@@ -61,6 +61,13 @@ package body Fusa.Cli is
    function Dir_Of (Args : String_List) return String is
      (Flag_Value (Args, "--dir", "."));
 
+   --  fusa:req REQ-021
+   --  §3.2 SHOULD: projectRoot is reported resolved to an absolute path,
+   --  even though --dir itself keeps accepting (and is used elsewhere as)
+   --  a relative path for file I/O -- only the reported value changes.
+   function Absolute_Path (Dir : String) return String is
+     (Ada.Directories.Full_Name (Dir));
+
    function Is_TTY return Boolean is
       function C_Isatty (FD : Interfaces.C.int) return Interfaces.C.int;
       pragma Import (C, C_Isatty, "isatty");
@@ -339,8 +346,9 @@ package body Fusa.Cli is
                   W.Object_Start;
                   Fusa.Report.Write_Header (W, "check-report");
                   Fusa.Report.Write_Report_Extension
-                    (W, Dir, To_String (Cfg.Name), To_String (Cfg.Standard),
-                     To_String (Cfg.Asil), To_String (Cfg.Sil), To_String (Cfg.Dal));
+                    (W, Absolute_Path (Dir), To_String (Cfg.Name),
+                     To_String (Cfg.Standard), To_String (Cfg.Asil),
+                     To_String (Cfg.Sil), To_String (Cfg.Dal));
                   Fusa.Report.Write_Findings_Array (W, Findings);
                   Fusa.Report.Write_Summary (W, Findings);
                   W.Object_End;
@@ -946,8 +954,9 @@ package body Fusa.Cli is
                   W.Object_Start;
                   Fusa.Report.Write_Header (W, "report");
                   Fusa.Report.Write_Report_Extension
-                    (W, Dir, To_String (Cfg.Name), To_String (Cfg.Standard),
-                     To_String (Cfg.Asil), To_String (Cfg.Sil), To_String (Cfg.Dal));
+                    (W, Absolute_Path (Dir), To_String (Cfg.Name),
+                     To_String (Cfg.Standard), To_String (Cfg.Asil),
+                     To_String (Cfg.Sil), To_String (Cfg.Dal));
                   Fusa.Report.Write_Findings_Array (W, Findings);
                   Fusa.Report.Write_Summary (W, Findings);
                   W.Object_End;
