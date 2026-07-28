@@ -617,25 +617,44 @@ begin
           "an unrecognised severity code fails safe to blank");
 
    --  fusa:test REQ-083
-   --  Determine_Tara_Risk: risk tracks the worse of attackFeasibility and
-   --  the highest SFOP impact level.
+   --  Determine_Tara_Risk: the section 9.2 (v1.14.1) canonical feasibility
+   --  x impact -> risk combination table. impact.* uses the closed enum
+   --  critical|major|moderate|negligible -- a DISTINCT scale from
+   --  attackFeasibility's high|medium|low|very-low, not the same
+   --  high/medium/low vocabulary reused (that was this codebase's own
+   --  pre-v1.14.1 bug, since fixed).
    declare
-      High_Impact : constant Fusa.Config.Sfop_Impact :=
-        (Safety => To_Unbounded_String ("high"), Financial => To_Unbounded_String ("low"),
-         Operational => To_Unbounded_String ("low"), Privacy => To_Unbounded_String ("low"));
-      Low_Impact  : constant Fusa.Config.Sfop_Impact :=
-        (Safety => To_Unbounded_String ("low"), Financial => To_Unbounded_String ("negligible"),
-         Operational => To_Unbounded_String ("low"), Privacy => To_Unbounded_String ("low"));
+      Critical_Impact : constant Fusa.Config.Sfop_Impact :=
+        (Safety => To_Unbounded_String ("critical"),
+         Financial => To_Unbounded_String ("negligible"),
+         Operational => To_Unbounded_String ("negligible"),
+         Privacy => To_Unbounded_String ("negligible"));
+      Moderate_Impact : constant Fusa.Config.Sfop_Impact :=
+        (Safety => To_Unbounded_String ("moderate"),
+         Financial => To_Unbounded_String ("negligible"),
+         Operational => To_Unbounded_String ("moderate"),
+         Privacy => To_Unbounded_String ("negligible"));
    begin
-      Check (Fusa.Config.Determine_Tara_Risk ("very-low", Low_Impact) = "low",
-             "very-low feasibility + all-low impact -> low risk");
-      Check (Fusa.Config.Determine_Tara_Risk ("very-low", High_Impact) = "high",
-             "even very-low feasibility is overridden by a high SFOP impact "
-             & "-- risk tracks the WORSE of the two inputs");
-      Check (Fusa.Config.Determine_Tara_Risk ("high", Low_Impact) = "high",
-             "high feasibility with low impact still yields high risk");
-      Check (Fusa.Config.Determine_Tara_Risk ("bogus", Low_Impact) = "",
+      Check (Fusa.Config.Determine_Tara_Risk ("very-low", Moderate_Impact) = "low",
+             "very-low feasibility + moderate-or-lower impact -> low risk");
+      Check (Fusa.Config.Determine_Tara_Risk ("very-low", Critical_Impact) = "medium",
+             "even very-low feasibility doesn't fully suppress a critical "
+             & "SFOP impact -- risk is still elevated to medium, not low");
+      Check (Fusa.Config.Determine_Tara_Risk ("high", Moderate_Impact) = "medium",
+             "high feasibility with only moderate-or-lower impact yields "
+             & "medium risk, not critical -- risk is a genuine table lookup "
+             & "on both inputs, not driven by feasibility alone");
+      Check (Fusa.Config.Determine_Tara_Risk ("high", Critical_Impact) = "critical",
+             "high feasibility with a critical SFOP impact yields critical risk");
+      Check (Fusa.Config.Determine_Tara_Risk ("bogus", Moderate_Impact) = "",
              "an unrecognised attackFeasibility fails safe to blank");
+      Check (Fusa.Config.Determine_Tara_Risk ("high", Fusa.Config.Sfop_Impact'
+               (Safety => To_Unbounded_String ("bogus"),
+                Financial => To_Unbounded_String ("bogus"),
+                Operational => To_Unbounded_String ("bogus"),
+                Privacy => To_Unbounded_String ("bogus"))) = "",
+             "when none of the four impact axes is a recognised value, "
+             & "risk fails safe to blank too, even with valid feasibility");
    end;
 
    Ada.Directories.Delete_Tree (Root);
