@@ -68,7 +68,14 @@ package body Fusa.Source_Scan is
             declare
                Full : constant String := Fusa.Files.Join (Project_Root, D);
             begin
-               if Fusa.Files.Is_Directory (Full) then
+               --  A sourceDirs entry that resolves outside Project_Root
+               --  (e.g. "../secret") is silently skipped, the same way a
+               --  non-existent directory already is -- never walked, so
+               --  it can never read (or, downstream via `fix --apply`,
+               --  write) anything outside the project.
+               if Fusa.Files.Is_Within (Project_Root, Full)
+                 and then Fusa.Files.Is_Directory (Full)
+               then
                   Walk (Full, Project_Root, Cfg, Result);
                end if;
             end;

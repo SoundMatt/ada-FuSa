@@ -35,4 +35,15 @@ package Fusa.Files is
    --  fusa:req REQ-062
    function Split_Lines (Content : String) return String_List;
 
+   --  True if Path is Root itself, or a genuine subdirectory/file inside
+   --  Root -- the same path-boundary rule Relative_To uses (a sibling
+   --  directory that is merely a string-prefix of Root, e.g.
+   --  Root="/foo/bar" and Path="/foo/barbaz", is NOT "within"). Both
+   --  arguments are expected to already be lexically normalised (e.g. via
+   --  Join, which resolves ".." segments) -- this is a string-boundary
+   --  check, not a filesystem canonicalisation, so it does not protect
+   --  against a symlink inside Root pointing outside it.
+   --  fusa:req REQ-117
+   function Is_Within (Root, Path : String) return Boolean;
+
 end Fusa.Files;

@@ -55,13 +55,27 @@ package body Fusa.Files is
    end Write_File;
 
    --  Removes "." path segments (a bare "." segment, e.g. from "./src" or
-   --  "src/./sub") and collapses repeated "/" separators, so a sourceDirs
-   --  entry like "./src" produces the same relative paths as plain "src"
-   --  would, rather than leaking a literal "./" into every Loc.File value
-   --  built from it.
+   --  "src/./sub"), RESOLVES ".." segments by popping the preceding real
+   --  segment (so "src/./sub" -> "src/sub" and "a/b/../c" -> "a/c"), and
+   --  collapses repeated "/" separators. A ".." with nothing left to pop
+   --  (i.e. one that would climb above Path's own starting point) is kept
+   --  literally, matching ordinary lexical path-normalisation semantics
+   --  (no filesystem access, so a symlink can still defeat this -- see
+   --  Fusa.Source_Scan's separate root-boundary check for the actual
+   --  security guarantee against a sourceDirs/exclude entry escaping the
+   --  project root).
+   --
+   --  This is what makes Join's ".." resolution real rather than
+   --  cosmetic: Join(Project_Root, "../outside") used to produce the
+   --  literal string "Project_Root/../outside", which Relative_To's
+   --  purely-lexical prefix check would then WRONGLY treat as "inside"
+   --  Project_Root (the string does start with "Project_Root/"), stripping
+   --  the prefix and returning "../outside" -- an escaped path silently
+   --  presented as project-relative. Resolving ".." here, before any
+   --  Relative_To call ever sees the string, removes that entire class of
+   --  bug at the source.
    function Normalize_Dot_Segments (Path : String) return String is
-      Result        : String (1 .. Path'Length);
-      Out_Len       : Natural := 0;
+      Segments      : String_List;
       I             : Positive;
       Leading_Slash : constant Boolean :=
         Path'Length > 0 and then Path (Path'First) = '/';
@@ -69,13 +83,7 @@ package body Fusa.Files is
       if Path'Length = 0 then
          return Path;
       end if;
-      if Leading_Slash then
-         Out_Len := 1;
-         Result (1) := '/';
-         I := Path'First + 1;
-      else
-         I := Path'First;
-      end if;
+      I := (if Leading_Slash then Path'First + 1 else Path'First);
       while I <= Path'Last loop
          declare
             Seg_Start : constant Positive := I;
@@ -86,13 +94,19 @@ package body Fusa.Files is
             declare
                Seg : constant String := Path (Seg_Start .. I - 1);
             begin
-               if Seg /= "." and then Seg'Length > 0 then
-                  if Out_Len > 0 and then Result (Out_Len) /= '/' then
-                     Out_Len := Out_Len + 1;
-                     Result (Out_Len) := '/';
+               if Seg = ".." then
+                  if not Segments.Is_Empty
+                    and then Segments.Element (Natural (Segments.Length)) /= ".."
+                  then
+                     Segments.Delete_Last;
+                  elsif not Leading_Slash then
+                     --  Nothing real to pop and this is a relative path:
+                     --  keep the ".." (a rooted "/../.." has no parent
+                     --  above "/" to climb to, so it is simply dropped).
+                     Segments.Append (Seg);
                   end if;
-                  Result (Out_Len + 1 .. Out_Len + Seg'Length) := Seg;
-                  Out_Len := Out_Len + Seg'Length;
+               elsif Seg /= "." and then Seg'Length > 0 then
+                  Segments.Append (Seg);
                end if;
             end;
             if I <= Path'Last then
@@ -100,7 +114,21 @@ package body Fusa.Files is
             end if;
          end;
       end loop;
-      return Result (1 .. Out_Len);
+
+      declare
+         Buf : Unbounded_String := Null_Unbounded_String;
+      begin
+         if Leading_Slash then
+            Append (Buf, '/');
+         end if;
+         for J in 1 .. Natural (Segments.Length) loop
+            if J > 1 then
+               Append (Buf, '/');
+            end if;
+            Append (Buf, Segments.Element (J));
+         end loop;
+         return To_String (Buf);
+      end;
    end Normalize_Dot_Segments;
 
    function Join (Dir, Name : String) return String is
@@ -126,6 +154,12 @@ package body Fusa.Files is
       end if;
       return Path;
    end Relative_To;
+
+   function Is_Within (Root, Path : String) return Boolean is
+     (Path = Root
+      or else (Path'Length > Root'Length
+               and then Path (Path'First .. Path'First + Root'Length - 1) = Root
+               and then Path (Path'First + Root'Length) = '/'));
 
    function Split_Lines (Content : String) return String_List is
       Result     : String_List;

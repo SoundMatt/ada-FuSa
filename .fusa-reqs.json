@@ -695,6 +695,12 @@
       "title": "fix command and Fusa.Fix module (safe auto-fix)",
       "text": "Fusa.Fix.Fix_Content applies, in one pass: tabs to single spaces (ADA006), trailing whitespace stripped (LINT001), a run of 2+ consecutive blank lines collapsed to one (LINT002), and the file normalised to end with exactly one trailing newline (LINT003). Verified idempotent (Fix_Content(Fix_Content(S)) = Fix_Content(S)) via a standalone debug harness before wiring in. The fix CLI command defaults to a dry run -- without --apply it never writes to disk and gate-fails if any file would change (the gofmt -l / prettier --check CI pattern); --apply actually rewrites files. Deliberately scoped to ONLY whitespace/formatting -- never a finding requiring a judgement call (an unjustified pragma Suppress, a line-length violation needing re-wrapping, any security finding), since 'safe to auto-apply' and 'safe to auto-decide' are different claims and this tool only ever makes the first one. The first ada-FuSa command that writes to a user's actual source files rather than a .fusa-*.json sidecar or a generated report.",
       "level": "SW"
+    },
+    {
+      "id": "REQ-117",
+      "title": "Fusa.Files.Is_Within (path-boundary check)",
+      "text": "Is_Within(Root, Path) is a pure string-boundary predicate (Path = Root, or Path starts with Root & a path separator, with the same off-by-string-prefix guard Relative_To already uses) used by Fusa.Source_Scan.Find_Source_Files to reject a sourceDirs entry that resolves outside the project root, closing a path-traversal vulnerability (a crafted .fusa.json could otherwise make ada-FuSa read, and via fix --apply write, files outside the project). Not a filesystem canonicalisation -- does not protect against a symlink inside Root pointing outside it.",
+      "level": "SW"
     }
   ]
 }

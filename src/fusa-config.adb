@@ -375,8 +375,19 @@ package body Fusa.Config is
             return False;
          end if;
          if Length (E.File) > 0 then
-            return E.Line = 0
-              or else (E.File = F.Loc.File and then E.Line = F.Loc.Line);
+            --  A file-scoped entry (no "line") matches only within that
+            --  file, at any line; a file+line-scoped entry matches only
+            --  that exact location. Regression: this used to be
+            --  "E.Line = 0 or else (...)", which short-circuited to
+            --  True for ANY finding once Line was omitted, without ever
+            --  consulting E.File -- silently broadening a file-scoped
+            --  waiver into a project-wide one and defeating the gate for
+            --  every other file.
+            if E.Line = 0 then
+               return E.File = F.Loc.File;
+            else
+               return E.File = F.Loc.File and then E.Line = F.Loc.Line;
+            end if;
          end if;
          --  Rule-level fallback: ruleId only, no file/line -- matches
          --  every finding for that rule project-wide.

@@ -5,6 +5,37 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+### Fixed (deep-audit PR1/11 -- critical security)
+
+A full multi-agent audit (8 independent dimensions, every finding adversarially verified by 3
+skeptic reviewers before being trusted) found 41 confirmed issues. Fixing them in grouped PRs,
+starting with the two critical security bugs:
+
+- **Path traversal via `sourceDirs`** (CRITICAL): `Fusa.Files.Normalize_Dot_Segments` stripped bare
+  `"."` segments but never resolved `".."`, so `Join(Project_Root, "../secret")` produced the
+  literal string `"Project_Root/../secret"` — which `Relative_To`'s purely-lexical prefix check then
+  WRONGLY treated as "inside" `Project_Root` (the string genuinely does start with
+  `"Project_Root/"`), silently letting a crafted `.fusa.json`'s `sourceDirs` entry escape the
+  project root for reads, and — via `fix --apply` — **writes**, since `fix` resolves its write
+  target the same way. Fixed at the source: `Normalize_Dot_Segments` now properly resolves `".."`
+  by popping the preceding real segment (verified against a dozen cases including multi-level and
+  non-absolute paths via a standalone debug harness before wiring in), and a new
+  `Fusa.Files.Is_Within` predicate makes `Find_Source_Files` reject (silently skip, like a
+  non-existent directory already was) any `sourceDirs` entry that still resolves outside the
+  project root — defense in depth, not reliant on the string-level fix alone. Verified end-to-end
+  with a reproduction harness: the write target for the crafted `fix --apply` scenario is now
+  provably inside the project root, and the scan now returns zero files for an escaping entry.
+- **Disposition file-scope bypass** (CRITICAL): `Apply_Dispositions`'s `Matches` function had
+  `return E.Line = 0 or else (E.File = F.Loc.File and then E.Line = F.Loc.Line);` — when a
+  disposition entry named a `file` but omitted `line` (a legitimate, documented file-scoped
+  waiver), `E.Line = 0` short-circuited to `True` for *any* finding of that rule, without ever
+  consulting `E.File`. A waiver meant for one file silently suppressed the same rule
+  project-wide, defeating `check --strict`'s gate everywhere else. Fixed to check `E.File` in both
+  branches.
+
+1 new requirement (REQ-117, for `Is_Within`); 579 checks passing (was 566). 10 more PRs to follow
+covering the remaining 39 confirmed findings.
+
 ### Added (fix -- command-catalog completeness, part 4 of 4 -- full §9 catalog)
 
 The final spec §9.3 command, completing ada-FuSa's implementation of every applicable MUST/SHOULD/
