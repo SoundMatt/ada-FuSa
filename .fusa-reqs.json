@@ -125,6 +125,12 @@
       "title": "Absolute projectRoot in report output",
       "text": "The projectRoot field emitted by check/trace/report JSON output is resolved to an absolute path, regardless of whether --dir was given as relative or absolute (spec section 3.2, SHOULD).",
       "level": "SW"
+    },
+    {
+      "id": "REQ-022",
+      "title": "SARIF result.properties carries category/standard/clause",
+      "text": "SARIF output includes a properties object on each result with category, and standard/clause when non-blank, so format-invariant identifiers stay consistent between the json and sarif formats (spec section 2.9, SHOULD).",
+      "level": "SW"
     }
   ]
 }

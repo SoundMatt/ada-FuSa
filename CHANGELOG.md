@@ -86,6 +86,9 @@ repro steps and rationale on each.
 - `projectRoot` in `check`/`trace`/`report` JSON output is now resolved to an absolute path
   (spec §3.2, SHOULD) instead of echoing `--dir` verbatim; `--dir` itself keeps accepting relative
   paths for file I/O unchanged (#35).
+- SARIF output (`check`/`report --format sarif`) now carries a `properties` object on each result
+  with `category`, and `standard`/`clause` when non-blank, so format-invariant identifiers stay
+  consistent between the `json` and `sarif` formats (spec §2.9, SHOULD) (#36).
 
 ## v0.1.0 — 2026-07-27
 
