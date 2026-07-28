@@ -119,6 +119,12 @@
       "title": "Zero-dependency ZIP writer",
       "text": "A STORED-method ZIP archive writer is implemented against the Ada standard library only, producing archives that pass standard unzip integrity checks.",
       "level": "SW"
+    },
+    {
+      "id": "REQ-021",
+      "title": "Absolute projectRoot in report output",
+      "text": "The projectRoot field emitted by check/trace/report JSON output is resolved to an absolute path, regardless of whether --dir was given as relative or absolute (spec section 3.2, SHOULD).",
+      "level": "SW"
     }
   ]
 }

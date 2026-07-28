@@ -81,6 +81,12 @@ repro steps and rationale on each.
   `continue-on-error: true`) — a regression in either ada-FuSa's own lint cleanliness or its
   requirement traceability now fails the build.
 
+### Added (spec-parity backlog)
+
+- `projectRoot` in `check`/`trace`/`report` JSON output is now resolved to an absolute path
+  (spec §3.2, SHOULD) instead of echoing `--dir` verbatim; `--dir` itself keeps accepting relative
+  paths for file I/O unchanged (#35).
+
 ## v0.1.0 — 2026-07-27
 
 Initial release. Implements the x-FuSa spec v1.11 §9.1 MUST command set end to end.

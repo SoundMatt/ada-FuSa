@@ -86,6 +86,20 @@ begin
    Check (Fusa.Cli.Run (Args ("check", "--dir", Root)) = Exit_Ok,
           "check on a clean project exits 0");
 
+   --  fusa:test REQ-021
+   declare
+      Exit_Code : Integer;
+      Out_Text  : constant String :=
+        Run_Capturing_Stdout
+          (Args ("check", "--dir", Root, "--format", "json"), Exit_Code);
+      Idx : constant Natural :=
+        Ada.Strings.Fixed.Index (Out_Text, """projectRoot"": """);
+   begin
+      Check (Idx > 0
+             and then Out_Text (Idx + 16) = '/',
+             "projectRoot in check --format json output is an absolute path");
+   end;
+
    Fusa.Files.Write_File
      (Root & "/src/bad.adb",
       "procedure Bad is" & ASCII.LF & "begin" & ASCII.LF & "   null;" & ASCII.LF &
