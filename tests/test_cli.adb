@@ -282,6 +282,51 @@ begin
    Check (Fusa.Cli.Run (Args ("tara", "--dir", Root)) = Exit_Gate_Fail,
           "tara gate-fails once a threat with no id is present (ERROR finding)");
 
+   --  fusa:test REQ-097
+   Check (not Fusa.Files.Exists (Root & "/.fusa-do178c-objectives.json"),
+          "no .fusa-do178c-objectives.json initially");
+   Check (Fusa.Cli.Run (Args ("do178", "--dir", Root)) = Exit_Ok,
+          "do178 with no objectives file scaffolds a non-empty starter template and exits 0");
+   Check (Fusa.Files.Exists (Root & "/.fusa-do178c-objectives.json"),
+          "do178 created .fusa-do178c-objectives.json");
+   declare
+      Exit_Code : Integer;
+      Out_Text  : constant String :=
+        Run_Capturing_Stdout (Args ("do178", "--dir", Root, "--format", "json"), Exit_Code);
+   begin
+      Check (Exit_Code = Exit_Ok,
+             "do178 against the scaffolded starter template (all status ""gap"") exits 0 -- "
+             & "gap status alone must never gate");
+      Check (Ada.Strings.Fixed.Index (Out_Text, """kind"": ""do178c-gap-report""") > 0
+             and then Ada.Strings.Fixed.Index (Out_Text, """standard"": ""do178c""") > 0,
+             "do178 --format json reports the do178c-gap-report kind and standard fields");
+   end;
+   Fusa.Files.Write_File
+     (Root & "/.fusa-do178c-objectives.json", "{""objectives"":[{""title"":""no id""}]}");
+   Check (Fusa.Cli.Run (Args ("do178", "--dir", Root)) = Exit_Gate_Fail,
+          "do178 gate-fails once an objective with no id is present (ERROR finding)");
+
+   Check (not Fusa.Files.Exists (Root & "/.fusa-iso26262-objectives.json"),
+          "no .fusa-iso26262-objectives.json initially");
+   Check (Fusa.Cli.Run (Args ("iso26262", "--dir", Root)) = Exit_Ok,
+          "iso26262 with no objectives file scaffolds an empty template and exits 0");
+   Check (Fusa.Cli.Run (Args ("iso21434", "--dir", Root)) = Exit_Ok,
+          "iso21434 with no objectives file scaffolds an empty template and exits 0");
+   Check (Fusa.Cli.Run (Args ("iec61508", "--dir", Root)) = Exit_Ok,
+          "iec61508 with no objectives file scaffolds an empty template and exits 0");
+   Check (Fusa.Cli.Run (Args ("iec62443", "--dir", Root)) = Exit_Ok,
+          "iec62443 with no objectives file scaffolds an empty template and exits 0");
+   Check (Fusa.Files.Exists (Root & "/.fusa-iec62443-4-1-objectives.json"),
+          "iec62443 uses the canonical standard id iec62443-4-1 for its objectives filename");
+   Check (Fusa.Cli.Run (Args ("unece", "--dir", Root)) = Exit_Ok,
+          "unece with no objectives file scaffolds an empty template and exits 0");
+   Check (Fusa.Files.Exists (Root & "/.fusa-unece-r155-objectives.json"),
+          "unece uses the canonical standard id unece-r155 for its objectives filename");
+   Check (Fusa.Cli.Run (Args ("slsa", "--dir", Root)) = Exit_Ok,
+          "slsa with no objectives file scaffolds an empty template and exits 0");
+   Check (Fusa.Cli.Run (Args ("iso26262", "--dir", Root, "--format", "bogus")) = Exit_Usage,
+          "iso26262 --format bogus exits Exit_Usage");
+
    --  fusa:test REQ-086
    Check (Fusa.Cli.Run (Args ("vuln", "--dir", Root)) = Exit_Ok,
           "vuln exits 0 when no alire.toml is present (nothing to scan)");

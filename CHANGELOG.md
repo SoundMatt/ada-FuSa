@@ -192,6 +192,27 @@ repro steps and rationale on each.
     Sets the executable bit via a direct `chmod()` C import (mirroring the existing `isatty()`
     import already used for TTY detection) — Ada has no portable file-permission API.
   - 9 new requirements (REQ-087–REQ-095).
+- **Standards gap-report commands** (§9.2/§9.3, #27) — `do178`, `iso26262`, `iso21434`, `iec61508`,
+  `iec62443`, `unece`, `slsa`:
+  - Same input-file-driven pattern as `hara`/`tara`, extended to a generic `Cmd_Gap_Report` helper
+    shared across all seven: load/validate `.fusa-<standard-id>-objectives.json` (canonical ids
+    `do178c`/`iso26262`/`iso21434`/`iec61508`/`iec62443-4-1`/`unece-r155`/`slsa`, new `Fusa.Config`
+    `Gap_Objective` type and `Load_Gap_Objectives`/`Scaffold_Gap_Objectives`), scaffolding a template
+    on first run. A missing `id` is an ERROR (excludes the entry and gates); an unrecognised
+    `status` is a WARNING (entry still returned). Deliberately does **not** gate on the mere
+    presence of `gap`-status objectives — that's the expected steady state of in-progress compliance
+    work, not a failure.
+  - ada-FuSa has no way to determine whether a project actually satisfies a standard's objectives —
+    that's a human assessor's call backed by real evidence — so these commands only validate
+    structure and render whatever assessment a human recorded, never fabricate a compliance verdict.
+  - `do178`'s starter template ships a small, explicitly non-authoritative checklist using
+    ada-FuSa's own id scheme (`DO178-PLAN-1`, `DO178-REQ-1`, …) rather than claiming to reproduce
+    RTCA's official Annex A objective numbering, which this tool has not verified against the
+    official text. The other six standards scaffold an empty template.
+  - `capabilities`'s `standards` array (previously always empty) now lists all seven canonical
+    standard ids, per the spec's requirement that capabilities be accurate.
+  - `sas`/`sci` (a differently-shaped follow-up per the issue's own phasing) deferred.
+  - 2 new requirements (REQ-096/REQ-097).
 
 ## v0.1.0 — 2026-07-27
 

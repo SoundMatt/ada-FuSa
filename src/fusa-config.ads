@@ -264,4 +264,52 @@ package Fusa.Config is
    --  fusa:req REQ-094
    procedure Save_Metrics (Project_Root : String; Snapshots : Metric_Snapshot_List);
 
+   ------------------------------------------------------------------
+   --  .fusa-<standard>-objectives.json (spec section 9.2/9.3 standards
+   --  gap-report commands: do178/iso26262/iso21434/iec61508/iec62443/
+   --  unece/slsa). Like .fusa-hara.json/.fusa-tara.json, these are input
+   --  files a human assessor fills in -- ada-FuSa has no way to
+   --  automatically determine whether a given standard's objective is
+   --  actually satisfied, so it validates/reports on whatever assessment
+   --  a human has recorded rather than fabricating one.
+   ------------------------------------------------------------------
+
+   type Gap_Objective is record
+      Id       : Unbounded_String;
+      Title    : Unbounded_String;
+      Clause   : Unbounded_String;
+      Status   : Unbounded_String; --  "satisfied" | "partial" | "gap"
+      Evidence : String_List;
+      Findings : String_List;      --  rule ids
+   end record;
+
+   package Gap_Objective_Vectors is new
+     Ada.Containers.Indefinite_Vectors (Positive, Gap_Objective);
+   subtype Gap_Objective_List is Gap_Objective_Vectors.Vector;
+
+   --  ".fusa-<standard-id>-objectives.json", e.g. ".fusa-do178c-objectives.json".
+   --  fusa:req REQ-096
+   function Gap_Objectives_File (Standard_Id : String) return String;
+
+   --  fusa:req REQ-096
+   function Gap_Objectives_Exist (Project_Root, Standard_Id : String) return Boolean;
+
+   --  Loads the objectives file for Standard_Id. Returns an empty list if
+   --  absent. An objective missing "id" is an ERROR finding (category
+   --  requirement) and excluded from the returned list; an objective with
+   --  an id but a "status" that isn't satisfied/partial/gap is a WARNING
+   --  finding but the entry is still returned with Status left as given
+   --  (the caller's summary counting simply won't recognise it).
+   --  fusa:req REQ-096
+   function Load_Gap_Objectives
+     (Project_Root, Standard_Id : String;
+      Findings                  : in out Finding_List) return Gap_Objective_List;
+
+   --  Writes Starter as the objectives file for Standard_Id if it does not
+   --  already exist (a no-op otherwise) -- Starter may be an empty list
+   --  (the general case) or a tool-specific reference scaffold (do178).
+   --  fusa:req REQ-096
+   procedure Scaffold_Gap_Objectives
+     (Project_Root, Standard_Id : String; Starter : Gap_Objective_List);
+
 end Fusa.Config;
