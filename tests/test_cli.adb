@@ -907,10 +907,68 @@ begin
       Out_Csv   : constant String :=
         Run_Capturing_Stdout (Args ("fmea", "--dir", Root, "--format", "csv"), Exit_Code);
    begin
-      Check (Ada.Strings.Fixed.Index (Out_Csv, "id,item,function") = 1,
+      Check (Ada.Strings.Fixed.Index (Out_Csv, "id,item,file") = 1,
              "fmea --format csv starts with the expected header row");
       Check (Ada.Strings.Fixed.Index (Out_Csv, "FMEA-001") > 0, "the entry appears in the CSV");
    end;
+   --  Regression: fmea's JSON output used to have no "summary" block at
+   --  all (no componentsInProject/coveragePct), and its generic
+   --  errors/warnings/infos validation tally used the same "summary" key
+   --  the section 9.2 canonical coverage block now needs -- same
+   --  collision gap-report/tara had, fixed the same way (findingsSummary).
+   declare
+      Fmea_Cov_Root : constant String := "tmp_test_cli_fmea_coverage";
+   begin
+      if Ada.Directories.Exists (Fmea_Cov_Root) then
+         Ada.Directories.Delete_Tree (Fmea_Cov_Root);
+      end if;
+      Ada.Directories.Create_Path (Fmea_Cov_Root & "/src");
+      Fusa.Files.Write_File
+        (Fmea_Cov_Root & "/.fusa.json",
+         "{""project"":{""name"":""t""},""standard"":""generic""}");
+      Fusa.Files.Write_File (Fmea_Cov_Root & "/.fusa-reqs.json", "{""requirements"":[]}");
+      --  Exactly 2 public functions -> a known componentsInProject
+      --  denominator to check coveragePct's arithmetic against.
+      Fusa.Files.Write_File
+        (Fmea_Cov_Root & "/src/pkg.ads",
+         "package Pkg is" & ASCII.LF &
+         "   function A return Integer;" & ASCII.LF &
+         "   function B return Integer;" & ASCII.LF &
+         "end Pkg;" & ASCII.LF);
+      Fusa.Files.Write_File
+        (Fmea_Cov_Root & "/.fusa-fmea.json",
+         "{""entries"":[{""id"":""FMEA-001"",""item"":""Pkg.A"",""file"":""src/pkg.ads""," &
+         """failureMode"":""fm"",""effect"":""ef""," &
+         """severity"":8,""occurrence"":3,""detection"":4}]}");
+      declare
+         Exit_Code : Integer;
+         Out_Text  : constant String :=
+           Run_Capturing_Stdout (Args ("fmea", "--dir", Fmea_Cov_Root, "--format", "json"),
+                                  Exit_Code);
+      begin
+         Check (Ada.Strings.Fixed.Index (Out_Text, """summary"": {") > 0
+                and then Ada.Strings.Fixed.Index (Out_Text, """componentsAnalyzed"": 1") > 0
+                and then Ada.Strings.Fixed.Index (Out_Text, """componentsInProject"": 2") > 0
+                and then Ada.Strings.Fixed.Index (Out_Text, """coveragePct"": 50") > 0,
+                "fmea --format json's summary block reports the correct "
+                & "1/2 = 50% coveragePct against the real public-function count");
+         Check (Ada.Strings.Fixed.Index (Out_Text, """findingsSummary""") > 0
+                and then Ada.Strings.Fixed.Index (Out_Text, """ratingScale""") > 0,
+                "the config-validation findings tally is under ""findingsSummary"", "
+                & "and ratingScale is present since occurrence/detection were emitted");
+      end;
+      Check (Fusa.Cli.Run
+               (Args ("fmea", "--dir", Fmea_Cov_Root, "--min-coverage", "60")) = Exit_Gate_Fail,
+             "fmea --min-coverage 60 gate-fails when coveragePct (50) is below it");
+      Check (Fusa.Cli.Run
+               (Args ("fmea", "--dir", Fmea_Cov_Root, "--min-coverage", "40")) = Exit_Ok,
+             "fmea --min-coverage 40 exits 0 when coveragePct (50) meets it");
+      Check (Fusa.Cli.Run
+               (Args ("fmea", "--dir", Fmea_Cov_Root, "--min-coverage", "bogus")) = Exit_Usage,
+             "fmea --min-coverage bogus exits 2 (usage), not a crash");
+      Ada.Directories.Delete_Tree (Fmea_Cov_Root);
+   end;
+
    Fusa.Files.Write_File
      (Root & "/.fusa-fmea.json", "{""entries"":[{""failureMode"":""no id""}]}");
    Check (Fusa.Cli.Run (Args ("fmea", "--dir", Root)) = Exit_Gate_Fail,

@@ -104,7 +104,7 @@ the simplest route, since GNAT is not distributed via Homebrew.
 | `adafusa boundary [--dir] [--format dot\|mermaid]` | Package/unit dependency graph from `with`-clause scanning; always exits 0 | dot, mermaid |
 | `adafusa impact <file...> [--dir]` | Which project units are (transitively) affected by changing the given files; always exits 0 | text, json |
 | `adafusa coupling [--dir]` | Structural fan-in/fan-out coupling metric per unit; always exits 0 | text, json |
-| `adafusa fmea [--dir]` | Load/validate `.fusa-fmea.json` design FMEA; scaffolds a template if absent | text, json, csv |
+| `adafusa fmea [--dir] [--min-coverage N]` | Load/validate `.fusa-fmea.json` design FMEA (IEC 60812 / AIAG-VDA, section 9.2 canonical shape); scaffolds a template if absent | text, json, csv |
 | `adafusa safety-case [--dir]` | Load/validate/render `.fusa-safety-case.json` GSN safety case; scaffolds a template if absent | text, json, md, mermaid |
 | `adafusa cyber [--dir] [--strict]` | `check`'s findings narrowed to `security` category, as a dedicated `cyber-report` | text, json |
 | `adafusa sci [--dir]` | Software Configuration Index: every source file + evidence artifact, SHA-256 + size; always exits 0 | text, json |
