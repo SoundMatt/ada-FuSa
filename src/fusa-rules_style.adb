@@ -76,6 +76,22 @@ package body Fusa.Rules_Style is
    --  Scan_Exception_Handler.
    Exception_Lookback : constant := 6;
 
+   --  fusa:req REQ-023
+   --  Derive_Category's blanket ADA -> Safety mapping (spec section 1.5.1)
+   --  is too coarse for a consumer filtering "show me only safety-relevant
+   --  findings": ADA005 (line length), ADA006 (tabs), and ADA008 (compiler
+   --  diagnostic suppression) read as style/lint concerns, not safety
+   --  concerns, unlike e.g. ADA001/ADA003/ADA004 (unjustified
+   --  check-disabling, strong-typing-bypassing, or manual-deallocation
+   --  constructs). This overrides the category for just those three rule
+   --  ids rather than renumbering them, which would be a breaking change
+   --  for anyone already referencing ADA005/ADA006 in a
+   --  .fusa-dispositions.json or CI allowlist.
+   function Rule_Category (Rule_Id : String) return Category_Kind is
+     (if Rule_Id = "ADA005" or else Rule_Id = "ADA006" or else Rule_Id = "ADA008"
+      then Style
+      else Derive_Category (Rule_Id));
+
    function Scan_Substring
      (Project_Root      : String;
       Files             : String_List;
@@ -131,7 +147,7 @@ package body Fusa.Rules_Style is
                                        Severity    => Severity,
                                        Message     => Message,
                                        Loc         => Make_Location (Rel, I),
-                                       Category    => Derive_Category (Rule_Id),
+                                       Category    => Rule_Category (Rule_Id),
                                        Remediation => Remediation));
                               end if;
                            end;
@@ -214,7 +230,7 @@ package body Fusa.Rules_Style is
                                                "blanket ""when others"" handler " &
                                                "may hide unanticipated exceptions",
                                              Loc      => Make_Location (Rel, I),
-                                             Category => Derive_Category ("ADA002"),
+                                             Category => Rule_Category ("ADA002"),
                                              Remediation =>
                                                "handle specific exceptions, or " &
                                                "justify with a trailing " &
@@ -258,7 +274,7 @@ package body Fusa.Rules_Style is
                                 "line exceeds" & Max_Line_Length'Image &
                                 " characters (" & Line'Length'Image & ")",
                               Loc         => Make_Location (Rel, Line_No),
-                              Category    => Derive_Category ("ADA005"),
+                              Category    => Rule_Category ("ADA005"),
                               Remediation => "wrap or split the line to fit within " &
                                 Max_Line_Length'Image & " characters"));
                      end if;
@@ -294,7 +310,7 @@ package body Fusa.Rules_Style is
                               Severity    => Warning,
                               Message     => "line contains a tab character",
                               Loc         => Make_Location (Rel, Line_No),
-                              Category    => Derive_Category ("ADA006"),
+                              Category    => Rule_Category ("ADA006"),
                               Remediation => "use spaces, not tabs, for indentation"));
                      end if;
                      Line_No := Line_No + 1;

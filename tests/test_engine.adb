@@ -154,5 +154,44 @@ begin
       end;
    end;
 
+   --  fusa:test REQ-023
+   Fusa.Files.Write_File
+     (Root & "/src/u.adb",
+      "procedure U is" & ASCII.LF &
+      "   pragma Suppress (All_Checks);" & ASCII.LF &
+      "   pragma Warnings (Off, ""x"");" & ASCII.LF &
+      "   X : Integer := 1234567890123456789012345678901234567890123456789012345678901234567890;" & ASCII.LF &
+      "begin" & ASCII.LF & ASCII.HT & "null;" & ASCII.LF & "end U;" & ASCII.LF);
+
+   declare
+      Cfg      : constant Fusa.Config.Project_Config := Fusa.Config.Default_Config ("t");
+      Files    : String_List;
+   begin
+      Files.Append ("src/u.adb");
+      declare
+         Findings : constant Finding_List := Fusa.Engine.Run_All (Root, Files);
+         Style_Category_Count, Safety_Category_Count : Natural := 0;
+      begin
+         for Fnd of Findings loop
+            if (To_String (Fnd.Rule_Id) = "ADA005"
+                or else To_String (Fnd.Rule_Id) = "ADA006"
+                or else To_String (Fnd.Rule_Id) = "ADA008")
+              and then Fnd.Category = Style
+            then
+               Style_Category_Count := Style_Category_Count + 1;
+            elsif To_String (Fnd.Rule_Id) = "ADA001" and then Fnd.Category = Safety then
+               Safety_Category_Count := Safety_Category_Count + 1;
+            end if;
+         end loop;
+         Check (Style_Category_Count = 3,
+                "ADA005 (line length), ADA006 (tabs), and ADA008 (Warnings "
+                & "suppression) report category 'style', not the blanket "
+                & "ADA -> safety mapping (#37)");
+         Check (Safety_Category_Count = 1,
+                "ADA001 (unjustified pragma Suppress) still reports category "
+                & "'safety', unaffected by the ADA005/ADA006/ADA008 override");
+      end;
+   end;
+
    Ada.Directories.Delete_Tree (Root);
 end Test_Engine;

@@ -131,6 +131,12 @@
       "title": "SARIF result.properties carries category/standard/clause",
       "text": "SARIF output includes a properties object on each result with category, and standard/clause when non-blank, so format-invariant identifiers stay consistent between the json and sarif formats (spec section 2.9, SHOULD).",
       "level": "SW"
+    },
+    {
+      "id": "REQ-023",
+      "title": "Style-only starter rules report category 'style', not 'safety'",
+      "text": "ADA005 (line length), ADA006 (tab character), and ADA008 (Warnings suppression) report category 'style' rather than the blanket ADA-prefix 'safety' mapping, so a consumer filtering by category does not see style nits bundled in with safety-relevant findings.",
+      "level": "SW"
     }
   ]
 }
