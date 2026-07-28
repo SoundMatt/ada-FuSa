@@ -5,6 +5,34 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+### Fixed (deep-audit PR9/11 -- cross-command consistency)
+
+Continuing the multi-agent audit fix series. Four consistency gaps across commands:
+
+- **Inconsistent `--format` validation**: ~21 commands reject an unsupported `--format` value with
+  exit 2, but `req list`, `disposition list`, `pr list`, and `template list` silently fell through
+  to plain text for anything that wasn't exactly `"json"`. Fixed by adding the same rejection guard
+  every other `--format`-taking command already has. (`sas`/`badge` were also flagged, but neither
+  has a selectable output format to validate against -- `badge` only ever emits SVG and `sas`
+  always writes both `sas.json` and `sas.md` unconditionally -- so no fix applies there.)
+- **`.fusa.json`'s `"strict"` field only honoured by `check`/`cyber`**: `trace`, `diff`, `analyze`,
+  and `lint` all accept a `--strict` CLI flag but never OR'd in the project-wide config value, so a
+  team that set `"strict": true` project-wide still needed every individual invocation (including
+  ad hoc/CI ones that forgot the flag) to separately pass `--strict`. Fixed by computing an
+  `Effective_Strict := Strict or else Cfg.Strict` in all four, matching `check`/`cyber`'s existing
+  pattern.
+- **Non-constant-time signature comparison**: `sign verify` compared the stored and computed
+  HMAC-SHA256 digests with plain Ada string equality, which short-circuits at the first mismatched
+  character -- a timing side channel on MAC verification (CWE-208). Fixed with a new
+  `Fusa.Hmac.Constant_Time_Equal` that always iterates the full length of the longer input.
+- **`chmod()`'s return code discarded**: `Make_Executable` (used by `hooks install`) ignored
+  whether `chmod` actually succeeded, so a failure (read-only filesystem, file vanished between
+  write and chmod) would silently leave a non-executable hook that git skips, while `hooks install`
+  still reported success. Fixed by returning and checking the result.
+
+15 new regression tests, including one that installs a hook and asserts it's actually executable
+(not just present) via `GNAT.OS_Lib.Is_Executable_File`; 650/650 checks passing (was 634).
+
 ### Fixed (deep-audit PR8/11 -- rule-engine correctness)
 
 Continuing the multi-agent audit fix series. Six issues in the ADA00x/SEC00x/ANAL00x rule packs:

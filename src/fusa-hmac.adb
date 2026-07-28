@@ -63,4 +63,27 @@ package body Fusa.Hmac is
       end;
    end Sha256_Hex;
 
+   function Constant_Time_Equal (A, B : String) return Boolean is
+      Max_Len  : constant Natural := Natural'Max (A'Length, B'Length);
+      Mismatch : Boolean := A'Length /= B'Length;
+   begin
+      --  Always iterates the full Max_Len regardless of where (or
+      --  whether) a mismatch occurs -- no early "exit", unlike a plain
+      --  "=" comparison, which stops at the first differing character
+      --  and so leaks how many leading characters matched via timing.
+      for I in 0 .. Max_Len - 1 loop
+         declare
+            Ca : constant Character :=
+              (if I < A'Length then A (A'First + I) else Character'Val (0));
+            Cb : constant Character :=
+              (if I < B'Length then B (B'First + I) else Character'Val (0));
+         begin
+            if Ca /= Cb then
+               Mismatch := True;
+            end if;
+         end;
+      end loop;
+      return not Mismatch;
+   end Constant_Time_Equal;
+
 end Fusa.Hmac;

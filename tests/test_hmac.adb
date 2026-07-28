@@ -32,4 +32,25 @@ begin
           "the same message under different keys produces different HMACs");
    Check (Fusa.Hmac.Sha256_Hex ("k", "m")'Length = 64,
           "the digest is exactly 64 hex characters");
+
+   --  fusa:test REQ-087
+   --  Constant_Time_Equal: functional correctness (the constant-time
+   --  *property* itself -- always iterating the full length regardless
+   --  of where a mismatch occurs -- isn't something a black-box Check
+   --  can observe via timing, so this exercises only that it computes
+   --  the right Boolean in every case).
+   Check (Fusa.Hmac.Constant_Time_Equal ("abcdef", "abcdef"),
+          "identical strings compare equal");
+   Check (not Fusa.Hmac.Constant_Time_Equal ("abcdef", "abcdeg"),
+          "a difference in the last character is still detected");
+   Check (not Fusa.Hmac.Constant_Time_Equal ("abcdef", "xbcdef"),
+          "a difference in the first character is still detected");
+   Check (not Fusa.Hmac.Constant_Time_Equal ("abc", "abcd"),
+          "different-length strings (shorter first) are never equal");
+   Check (not Fusa.Hmac.Constant_Time_Equal ("abcd", "abc"),
+          "different-length strings (longer first) are never equal");
+   Check (Fusa.Hmac.Constant_Time_Equal ("", ""),
+          "two empty strings compare equal");
+   Check (not Fusa.Hmac.Constant_Time_Equal ("a", ""),
+          "a non-empty string never equals an empty one");
 end Test_Hmac;
