@@ -1,4 +1,6 @@
 with Ada.Directories;
+with Interfaces.C; use Interfaces.C;
+with Interfaces.C.Strings;
 with Fusa; use Fusa;
 with Fusa.Files;
 with Test_Framework; use Test_Framework;
@@ -107,5 +109,62 @@ begin
       Check (Fusa.Files.Relative_To ("/proj", Fusa.Files.Join (Full, "x.adb")) = "src/x.adb",
              "a './'-prefixed sourceDirs entry produces the same relative "
              & "path as the plain form would");
+   end;
+
+   --  fusa:test REQ-118
+   --  Regression: Write_File used to be the only overwrite primitive,
+   --  meaning `fix --apply` wrote directly through whatever Path
+   --  currently resolved to at the moment of the call -- a TOCTOU window
+   --  between the earlier Read_File and the write. Write_File_Atomic
+   --  writes to a temp file and renames onto Path instead.
+   declare
+      Atomic_Root : constant String := "tmp_test_files_atomic";
+   begin
+      if Ada.Directories.Exists (Atomic_Root) then
+         Ada.Directories.Delete_Tree (Atomic_Root);
+      end if;
+      Ada.Directories.Create_Path (Atomic_Root);
+
+      Fusa.Files.Write_File (Atomic_Root & "/target.txt", "original content");
+      Fusa.Files.Write_File_Atomic (Atomic_Root & "/target.txt", "replacement content");
+      Check (Fusa.Files.Read_File (Atomic_Root & "/target.txt") = "replacement content",
+             "Write_File_Atomic overwrites an existing file's content, "
+             & "same observable result as Write_File");
+      Check (not Fusa.Files.Exists (Atomic_Root & "/target.txt.fusa-fix-tmp"),
+             "the temp file used internally is renamed away, not left behind");
+
+      --  The actual security property: even if Path has become a symlink
+      --  since it was last read, Write_File_Atomic must never write
+      --  through it -- POSIX rename() replaces the symlink *entry*
+      --  itself, not whatever it points to.
+      declare
+         function C_Symlink
+           (Target, Linkpath : Interfaces.C.Strings.chars_ptr) return Interfaces.C.int;
+         pragma Import (C, C_Symlink, "symlink");
+
+         Sensitive_Path : constant String := Atomic_Root & "/sensitive.txt";
+         Link_Path      : constant String := Atomic_Root & "/link.txt";
+         Target_C, Link_C : Interfaces.C.Strings.chars_ptr;
+         Rc               : Interfaces.C.int;
+      begin
+         Fusa.Files.Write_File (Sensitive_Path, "SENSITIVE - must not be overwritten");
+         Target_C := Interfaces.C.Strings.New_String ("sensitive.txt");
+         Link_C   := Interfaces.C.Strings.New_String (Link_Path);
+         Rc := C_Symlink (Target_C, Link_C);
+         Interfaces.C.Strings.Free (Target_C);
+         Interfaces.C.Strings.Free (Link_C);
+         Check (Rc = 0, "test setup: symlink() succeeded");
+
+         Fusa.Files.Write_File_Atomic (Link_Path, "attacker-controlled content");
+
+         Check (Fusa.Files.Read_File (Sensitive_Path) = "SENSITIVE - must not be overwritten",
+                "the symlink's TARGET is untouched -- Write_File_Atomic never "
+                & "wrote through it, unlike a plain Create/Write to the same path");
+         Check (Fusa.Files.Read_File (Link_Path) = "attacker-controlled content",
+                "the path that was a symlink now holds the new content directly "
+                & "-- rename() replaced the symlink entry itself with a regular file");
+      end;
+
+      Ada.Directories.Delete_Tree (Atomic_Root);
    end;
 end Test_Files;

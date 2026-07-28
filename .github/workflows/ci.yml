@@ -13,24 +13,44 @@ jobs:
   dco:
     name: DCO Check
     runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Verify Signed-off-by on all PR commits
+      - name: Verify Signed-off-by on all commits
         run: |
-          base="${{ github.event.pull_request.base.sha }}"
-          head="${{ github.event.pull_request.head.sha }}"
+          # README documents DCO enforcement as universal, but this job
+          # used to run only "if: github.event_name == 'pull_request'" --
+          # a direct push (allowed by the push trigger's branch list
+          # above) skipped it entirely. Runs on both events now; a push
+          # event has no pull_request.base/head context, so it uses
+          # before/after instead, falling back to checking just the
+          # pushed commit when "before" is the all-zeros SHA (a brand
+          # new branch's first push, where there is no prior commit to
+          # diff against).
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            base="${{ github.event.pull_request.base.sha }}"
+            head="${{ github.event.pull_request.head.sha }}"
+          else
+            base="${{ github.event.before }}"
+            head="${{ github.event.after }}"
+          fi
+          zero="0000000000000000000000000000000000000000"
+          if [ "$base" = "$zero" ] || [ -z "$base" ]; then
+            commits="$head"
+          else
+            commits=$(git log --format='%H' "${base}".."${head}")
+          fi
           failed=0
           while IFS= read -r sha; do
+            [ -z "$sha" ] && continue
             body=$(git log --format=%B -1 "$sha")
             if ! printf '%s\n' "$body" | grep -qE '^Signed-off-by: .+ <.+>'; then
               echo "ERROR: commit $sha missing Signed-off-by trailer"
               git log --oneline -1 "$sha"
               failed=1
             fi
-          done < <(git log --format='%H' "${base}".."${head}")
+          done <<< "$commits"
           exit $failed
 
   # Windows GNAT/Alire toolchain viability in GitHub Actions is still an

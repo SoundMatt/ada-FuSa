@@ -701,6 +701,12 @@
       "title": "Fusa.Files.Is_Within (path-boundary check)",
       "text": "Is_Within(Root, Path) is a pure string-boundary predicate (Path = Root, or Path starts with Root & a path separator, with the same off-by-string-prefix guard Relative_To already uses) used by Fusa.Source_Scan.Find_Source_Files to reject a sourceDirs entry that resolves outside the project root, closing a path-traversal vulnerability (a crafted .fusa.json could otherwise make ada-FuSa read, and via fix --apply write, files outside the project). Not a filesystem canonicalisation -- does not protect against a symlink inside Root pointing outside it.",
       "level": "SW"
+    },
+    {
+      "id": "REQ-118",
+      "title": "Fusa.Files.Write_File_Atomic (TOCTOU-safe overwrite)",
+      "text": "Write_File_Atomic writes to a temp file then atomically renames onto the target, closing the read-then-write TOCTOU window used by fix --apply.",
+      "level": "SW"
     }
   ]
 }

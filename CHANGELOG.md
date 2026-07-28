@@ -5,6 +5,37 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+### Fixed (deep-audit PR11/11 -- docs, CI, and a TOCTOU write race)
+
+Concluding the multi-agent audit fix series (all 11 planned PRs, all 41 confirmed findings).
+
+- **README's "Features" section claimed "8 commands"** (and, on closer reading, actually listed
+  9), directly contradicted three paragraphs later by its own 35-row/41-command Commands table --
+  leftover v0.1.0-release text a reader would hit before ever reaching the accurate table. Fixed to
+  state the real count and point at the table.
+- **Evidence Artifacts table's `comp-report.json` row omitted the required `--output` flag** that
+  every sibling row (`badge.svg`, `boundary.dot`, `fmea.json`, ...) already documents -- `comp
+  --format json` alone only prints to stdout; the file is never actually written without `--output`.
+- **CI's DCO check only ran on `pull_request` events**, skipping it entirely for a direct push
+  (allowed by the same workflow's own `push:` trigger for `main`/`develop`/`feat/**`/`fix/**`),
+  contrary to the README's claim that DCO is CI-enforced universally. Fixed to run on both event
+  types, using `before`/`after` instead of `pull_request.base/head` for a push, with a fallback to
+  checking just the pushed commit when `before` is the all-zeros SHA (a new branch's first push).
+- **TOCTOU race between `fix --apply`'s read and write**: it read a file, computed a fix, and wrote
+  the result back with the same plain create-or-truncate every other command uses -- which writes
+  through whatever the path currently resolves to at the moment of the call. If the path became a
+  symlink between the read and the write, the fix would be written to wherever the symlink pointed,
+  not the original file. Fixed with a new `Fusa.Files.Write_File_Atomic` (write to a temp file in
+  the same directory, then `rename()` onto the target -- POSIX `rename()`, imported directly the
+  same way `Make_Executable` already imports `chmod()`, replaces the destination *entry* itself,
+  never writing through a pre-existing symlink there). `Ada.Directories.Rename` was tried first and
+  confirmed, empirically, to raise `Use_Error` rather than overwrite an existing destination, which
+  is why this needed a direct `rename(2)` import rather than the standard-library primitive.
+
+5 new regression tests, including one that creates a real symlink via a direct `symlink(2)` import
+and proves both halves of the property: the symlink's target is untouched, and the path that was a
+symlink now holds a regular file with the new content; 665/665 checks passing (was 660).
+
 ### Added (deep-audit PR10/11 -- test-quality gaps)
 
 Continuing the multi-agent audit fix series. No production code changed in this PR -- three tests

@@ -17,8 +17,10 @@ spec-conformant CLI contract for that to build on.
 
 ## Features
 
-- **8 commands**: `version`, `capabilities`, `init`, `check`, `trace`, `qualify`, `release`,
-  `audit-pack`, `report` — the full §9.1 MUST command set of the x-FuSa spec.
+- **41 commands** spanning the full x-FuSa spec surface (see the [Commands](#commands) table
+  below): `version`, `capabilities`, `init`, `check`, `trace`, `qualify`, `release`, `audit-pack`,
+  `report` are the §9.1 MUST set; the rest are §9.2 SHOULD/§9.3 MAY evidence, risk-analysis, and
+  hygiene commands.
 - **Zero runtime dependencies** — pure Ada 2022 standard library. JSON, SHA-256, CRC-32, and ZIP
   are all hand-rolled, since none of them are part of the Ada standard library. GNAT is a build/dev
   dependency only.
@@ -412,7 +414,7 @@ anything else this tool does, so its scope is deliberately narrow:
 | `provenance.json`, `artifact-manifest.json` | `adafusa release --full` | Minimal provenance/manifest documents |
 | `<name>-<version>.spdx.json` | `adafusa release --spdx-version` | SPDX 2.2/2.3 software bill of materials (opt-in) |
 | `audit-pack.zip` | `adafusa audit-pack` | All existing evidence artifacts, bundled |
-| `comp-report.json` | `adafusa comp --format json` | Per-function cyclomatic complexity (consumed by FuSaOps v1.70.0+) |
+| `comp-report.json` | `adafusa comp --format json --output comp-report.json` | Per-function cyclomatic complexity (consumed by FuSaOps v1.70.0+) |
 | `vuln.json` | `adafusa vuln --format json` / `release --full` | Dependency vulnerability finding-list (always clean — see limitations) |
 | `badge.svg` | `adafusa badge --output badge.svg` | Status badge for READMEs/dashboards |
 | `boundary.dot`/`boundary.mermaid` | `adafusa boundary --output` | Package/unit dependency graph |
