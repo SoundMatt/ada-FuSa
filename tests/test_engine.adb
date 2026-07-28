@@ -37,6 +37,21 @@ begin
       Check (Ok, "registered rules are ordered by ascending id");
    end;
 
+   --  Description isn't consumed by any command yet (no `check --list-rules`
+   --  or similar exists), so without this test every concrete rule's
+   --  override of it would go completely unexercised.
+   --  fusa:test REQ-038
+   declare
+      All_Non_Empty : Boolean := True;
+   begin
+      for I in 1 .. Fusa.Engine.Rule_Count loop
+         if Fusa.Engine.Get_Rule (I).Description'Length = 0 then
+            All_Non_Empty := False;
+         end if;
+      end loop;
+      Check (All_Non_Empty, "every registered rule's Description is non-empty");
+   end;
+
    declare
       --  Fusa.Engine's registry is a process-lifetime singleton, so a Rule
       --  handed to Register must outlive this test procedure -- allocate

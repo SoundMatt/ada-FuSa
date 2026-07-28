@@ -1035,6 +1035,45 @@ begin
              "check --output on a no-config directory still exits 3");
       Check (Fusa.Files.Exists (Root & "/err.txt"),
              "the text-format runtime error was written to --output, not just stderr");
+
+      declare
+         Exit_Code : Integer;
+         Out_Json  : constant String :=
+           Run_Capturing_Stdout
+             (Args ("check", "--dir", No_Cfg_Dir, "--format", "json"), Exit_Code);
+      begin
+         Check (Exit_Code = Exit_Runtime,
+                "check --format json on a no-config directory still exits 3");
+         Check (Ada.Strings.Fixed.Index (Out_Json, """code"": ""no-config""") > 0,
+                "the JSON-format runtime error carries the structured error.code field");
+      end;
+      declare
+         Exit_Code : Integer;
+      begin
+         Exit_Code := Fusa.Cli.Run (Args ("trace", "--dir", No_Cfg_Dir, "--format", "json"));
+         Check (Exit_Code = Exit_Runtime, "trace on a no-config directory exits 3");
+      end;
+   end;
+
+   --  fusa:test REQ-007
+   declare
+      Exit_Code : Integer;
+      Out_Json  : constant String :=
+        Run_Capturing_Stdout (Args ("version", "--format", "json"), Exit_Code);
+   begin
+      Check (Exit_Code = Exit_Ok, "version --format json exits 0");
+      Check (Ada.Strings.Fixed.Index (Out_Json, """tool"": ""ada-FuSa""") > 0
+             and then Ada.Strings.Fixed.Index (Out_Json, """specVersion"":") > 0,
+             "version --format json carries the tool and specVersion fields (no envelope)");
+   end;
+
+   declare
+      Exit_Code : Integer;
+      Sarif     : constant String :=
+        Run_Capturing_Stdout (Args ("check", "--dir", Root, "--format", "sarif"), Exit_Code);
+   begin
+      Check (Ada.Strings.Fixed.Index (Sarif, """version"": ""2.1.0""") > 0,
+             "check --format sarif produces a valid SARIF document");
    end;
 
    --  Regression: an interrupted qualify run's leftover

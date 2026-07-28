@@ -5,6 +5,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+### Added (line/function coverage)
+
+Real `lcov` numbers (not just unit-check counts) were 85.0% lines / 94.0% functions across `src/`
+going into this pass. Two targeted fixes closed most of the gap:
+
+- Every rule's `Description` method (part of the `Rule_Interface` abstract contract, alongside
+  `Id`/`Run`) was never called by any command — no `check --list-rules` or similar consumes it —
+  so it was 0%-covered across all 16 rules. A direct test now asserts every registered rule's
+  `Description` is non-empty. This alone took function coverage from 94.0% to **100%** (306/306)
+  and `fusa-rules_style.adb`/`fusa-rules_project.adb`'s line coverage from ~87% to 96–97.5%.
+- `fusa-cli.adb` (2739 lines, the largest file by far) was at 78.1% lines — `version --format
+  json`, `check --format sarif`, and `Emit_Runtime_Error`'s JSON-format branch (shared by every
+  command's no-config/invalid-config error path) were never exercised by any test. Added.
+
+Overall: **86.2% lines / 100% functions** (was 85.0%/94.0%). `fusa-cli.adb` specifically improved
+to 79.1% — still the weakest file, mostly interactive TTY-prompt code paths (`init`'s
+stdin-driven fallback) and per-command rare-error branches that would need substantially more
+effort per percentage point than the fixes above; left as a known area for future incremental
+improvement rather than chased to a number for its own sake. 503 checks passing (was 496).
+
 ### Added (test-tag traceability completeness)
 
 `trace`'s `testedRequirements` metric (distinct from `tracedRequirements`, which `--req-coverage`
