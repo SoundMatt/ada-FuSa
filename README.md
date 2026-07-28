@@ -237,10 +237,10 @@ with the other six x-FuSa tools:
 - Only 8 starter rules ship, versus 40+ in the more mature sibling tools.
 - `init`'s interactive TTY prompting only asks for name/standard; ASIL/SIL/DAL must be passed as
   flags even when run interactively.
-- CI currently targets **Linux only**. macOS and Windows GNAT toolchain availability has not been
-  verified for this tool (unlike the other six, which run their CI matrix on macOS too) — GNAT is
-  not distributed via Homebrew, and the local development toolchain for this release was assembled
-  via [Alire](https://alire.ada.dev) rather than a native package manager.
+- CI runs a Linux + macOS matrix (macOS bootstraps GNAT via [Alire](https://alire.ada.dev), since
+  GNAT is not distributed via Homebrew). **Windows** GNAT/Alire toolchain viability in GitHub
+  Actions' `windows-latest` runner is still unverified and tracked as an open gap
+  ([#33](https://github.com/SoundMatt/ada-FuSa/issues/33)).
 - JSON string handling assumes ASCII or already-UTF-8-encoded byte content; Unicode NFC
   normalisation ahead of fingerprint computation (spec §4.2, only relevant to non-ASCII messages)
   is not implemented.

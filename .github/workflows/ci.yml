@@ -33,19 +33,43 @@ jobs:
           done < <(git log --format='%H' "${base}".."${head}")
           exit $failed
 
-  # macOS/Windows GNAT toolchain availability has not been verified for
-  # ada-FuSa (see README "Known limitations") -- CI targets Linux only
-  # for now, unlike the other six x-FuSa tools' macOS+Linux matrices.
+  # Windows GNAT/Alire toolchain viability in GitHub Actions is still an
+  # open question (see #33) -- CI matrix is Linux+macOS for now, one leg
+  # short of the other six x-FuSa tools' Linux+macOS+Windows matrices.
   build-and-test:
-    name: Build & Test (Ubuntu)
-    runs-on: ubuntu-latest
+    name: Build & Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install GNAT toolchain
+      - name: Install GNAT toolchain (Linux)
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y gnat gprbuild gcovr
+
+      - name: Install GNAT toolchain via Alire (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          # GNAT is not distributed via Homebrew, so bootstrap via Alire
+          # instead -- the same toolchain-management approach this
+          # project's local macOS development setup already uses.
+          gh release download --repo alire-project/alire \
+            --pattern '*universal-macos.zip' --output /tmp/alr.zip
+          unzip -q /tmp/alr.zip -d /tmp/alr
+          echo "/tmp/alr/bin" >> "$GITHUB_PATH"
+          export PATH="/tmp/alr/bin:$PATH"
+          alr toolchain --select gnat_native gprbuild
+          for d in "$HOME/.local/share/alire/toolchains"/*/bin; do
+            echo "$d" >> "$GITHUB_PATH"
+          done
+          brew install gcovr
+        env:
+          GH_TOKEN: ${{ github.token }}
 
       - name: Build
         run: gprbuild -p -P adafusa.gpr
@@ -83,7 +107,7 @@ jobs:
       - name: Upload evidence artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: evidence-artifacts
+          name: evidence-artifacts-${{ matrix.os }}
           path: |
             fusa-report.json
             qualify-report.json
