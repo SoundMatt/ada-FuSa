@@ -103,6 +103,34 @@ begin
    Check (not Fusa.Files.Is_Within ("/proj", "/outside/x.adb"),
           "a completely unrelated path is not within Root");
 
+   --  Regression (fusa#96): Is_Within used to compare Path against the
+   --  literal, un-normalised Root string. Root = "." -- Dir_Of's own
+   --  default, i.e. the *default*, no-"--dir"-flag invocation, which is
+   --  by far the most common real-world one -- never matched any Path
+   --  built via Join, because Join runs its result through
+   --  Normalize_Dot_Segments, which drops a leading "." segment entirely
+   --  (Join(".", "src") = "src", with no "./" prefix left to compare
+   --  against). Every sourceDirs/audit-pack/SPDX boundary check built on
+   --  Is_Within therefore silently rejected everything as "outside" the
+   --  project root whenever the default relative "." was in play,
+   --  producing a false-clean (zero files scanned, exit 0) result.
+   --  fusa:test REQ-117
+   Check (Fusa.Files.Is_Within (".", Fusa.Files.Join (".", "src")),
+          "Root ""."" (the default --dir) is within itself once Join's "
+          & "own normalisation is accounted for");
+   Check (Fusa.Files.Is_Within (".", Fusa.Files.Join (".", "src/x.adb")),
+          "a nested relative path under the default ""."" root is within it");
+   Check (not Fusa.Files.Is_Within (".", Fusa.Files.Join (".", "../outside")),
+          "an escaping '..' sourceDirs-style entry is still rejected when "
+          & "Root is the default ""."" ");
+   Check (not Fusa.Files.Is_Within (".", ".."),
+          "a bare '..' is rejected as escaping the default ""."" root");
+   Check (not Fusa.Files.Is_Within (".", "/etc/passwd"),
+          "an absolute Path is never within a relative ""."" root");
+   Check (Fusa.Files.Is_Within ("", Fusa.Files.Join ("", "src")),
+          "an empty-string Root behaves the same as ""."" (both normalise "
+          & "away to nothing)");
+
    declare
       Full : constant String := Fusa.Files.Join ("/proj", "./src");
    begin
