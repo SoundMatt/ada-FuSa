@@ -7,10 +7,19 @@
 
 package Fusa.Stub_Detect is
 
-   --  Rule A (MUST): bracket-wrapped instructional text ("[Foo bar]") or
-   --  a case-insensitive match against the deny-listed substrings
-   --  "replace with" / "example hazard" / "TBD" / "lorem ipsum" /
-   --  "fill in".
+   --  Rule A (MUST): the exact canonical deny-list, byte-for-byte -- a
+   --  match against \[[A-Za-z ][^\]]*\] (bracket-wrapped text starting
+   --  with a letter or space), or a case-insensitive substring match
+   --  against "replace with" / "example hazard" / "TBD" / "lorem ipsum"
+   --  / "fill in". Deliberately unqualified substring/bracket matching,
+   --  not word-boundary-aware -- the spec explicitly anticipates and
+   --  accepts this ("a legitimate ... description that happens to
+   --  contain a deny-listed string is rare enough to warrant an
+   --  explicit, individually-justified waiver rather than a blanket
+   --  pass"), i.e. a false positive here is meant to be resolved via
+   --  `disposition add`, not by narrowing the detector -- narrowing it
+   --  would itself be a conformance deviation (two tools disagreeing on
+   --  what counts as a Rule A match undermines the "canonical" part).
    --  fusa:req REQ-119
    function Is_Placeholder (Text : String) return Boolean;
 

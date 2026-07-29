@@ -29,6 +29,22 @@ begin
    Check (not Fusa.Stub_Detect.Is_Placeholder ("array index [3] out of range"),
           "a bracketed non-letter-led token (an index, not instructional "
           & "text) is not a placeholder");
+   --  Regression: the canonical regex is \[[A-Za-z ][^\]]*\] -- the
+   --  character right after '[' is a letter *or a space*, not letters
+   --  only.
+   Check (Fusa.Stub_Detect.Is_Placeholder ("[ describe hazard]"),
+          "bracket-wrapped instructional text starting with a space "
+          & "after '[' is still a placeholder, per the exact canonical "
+          & "regex");
+   --  Regression: buffer[i]-style single-token bracket usage IS flagged
+   --  by the letter-led branch of the same canonical regex -- this is
+   --  spec-intended (the spec explicitly accepts this class of false
+   --  positive, to be resolved via disposition, not a narrower
+   --  detector), not a bug to fix here.
+   Check (Fusa.Stub_Detect.Is_Placeholder
+            ("buffer[i] causes memory corruption"),
+          "a letter-led bracketed token still matches the canonical "
+          & "regex exactly as specified");
 
    --  fusa:test REQ-119
    declare
