@@ -5,6 +5,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+### Fixed (deep-audit G/8 -- sign --dir now actually resolves paths)
+
+`sign`'s argument scanner recognized and skipped `--dir <value>` (to avoid misparsing it as the
+positional `<file>`), but never actually used it: `<file>`, `--sig`, and `--key-file` were always
+resolved verbatim against the process's cwd, unlike every other command. Fixed with a new
+`Resolve_Path (Dir, Path)` helper (joins `Path` onto `Dir` unless `Path` is already absolute, since
+`Fusa.Files.Join` has no absolute-path awareness of its own) applied to all three; the derived
+default `--sig` path (`<file>.sig`) is built from the already-resolved `<file>` rather than being
+re-resolved, avoiding a double-join. README's `sign` row, which didn't document `--dir` at all
+(matching its previous no-op status), now documents it.
+
+2 new regression tests; 765/765 checks passing (was 763).
+
 ### Fixed (deep-audit F/8 -- analyze/lint disposition wiring)
 
 `analyze` and `lint` were the only 2 of 11 gating commands that never applied
