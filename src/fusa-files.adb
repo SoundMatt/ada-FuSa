@@ -188,10 +188,41 @@ package body Fusa.Files is
    end Relative_To;
 
    function Is_Within (Root, Path : String) return Boolean is
-     (Path = Root
-      or else (Path'Length > Root'Length
-               and then Path (Path'First .. Path'First + Root'Length - 1) = Root
-               and then Path (Path'First + Root'Length) = '/'));
+      --  Regression (fusa#96): Root must be run through the same
+      --  Normalize_Dot_Segments pass that Join already applies to its
+      --  result, or every relative Root that is exactly "." (Dir_Of's
+      --  own default, and the single most common real-world invocation:
+      --  no --dir at all) normalises to the empty string while Join(".",
+      --  X) produces the bare, un-prefixed "X" -- so the raw-string
+      --  comparison below would find no common prefix and wrongly report
+      --  every in-tree Path as outside Root.
+      Norm_Root   : constant String := Normalize_Dot_Segments (Root);
+      Is_Absolute : constant Boolean :=
+        Path'Length > 0 and then Path (Path'First) = '/';
+      --  When Root normalises away entirely, Path itself is the only
+      --  place an escape could still show up: Join's own
+      --  Normalize_Dot_Segments leaves a leading ".." segment literal
+      --  exactly when it ran out of real segments belonging to Root to
+      --  pop (see that function's header comment) -- i.e. Name climbed
+      --  above Root's own starting point.
+      Escapes     : constant Boolean :=
+        Path = ".."
+        or else (Path'Length >= 3
+                 and then Path (Path'First .. Path'First + 2) = "../");
+   begin
+      if Norm_Root'Length = 0 then
+         return not Is_Absolute and then not Escapes;
+      end if;
+      declare
+         Root_Len : constant Natural := Norm_Root'Length;
+      begin
+         return Path = Norm_Root
+           or else (Path'Length > Root_Len
+                    and then Path (Path'First .. Path'First + Root_Len - 1) =
+                             Norm_Root
+                    and then Path (Path'First + Root_Len) = '/');
+      end;
+   end Is_Within;
 
    function Split_Lines (Content : String) return String_List is
       Result     : String_List;

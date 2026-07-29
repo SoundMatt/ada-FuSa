@@ -462,6 +462,72 @@ begin
       Ada.Directories.Delete_File (Outside_File);
    end;
 
+   --  Regression (fusa#96): Fusa.Files.Is_Within compared Path against
+   --  the literal, un-normalised Root string, so the DEFAULT --dir value
+   --  "." (used whenever no --dir flag is given at all -- by far the
+   --  most common real invocation) never matched anything Join produced,
+   --  because Join normalises the leading "." away. sourceDirs scanning,
+   --  audit-pack bundling, and release --spdx-version's output-path
+   --  safety check all silently treated every real, in-tree path as
+   --  "outside" the project root -- a false-clean result (zero findings,
+   --  exit 0). Every other test in this file passes an explicit --dir
+   --  (Root, an already-relative-but-not-"." directory name), which
+   --  never exercised this. This block genuinely changes the process's
+   --  current directory and omits --dir entirely, which is exactly the
+   --  invocation style that was silently broken.
+   --  fusa:test REQ-117
+   declare
+      Rel_Root  : constant String := "tmp_test_cli_relative_dir";
+      Saved_Cwd : constant String := Ada.Directories.Current_Directory;
+   begin
+      if Ada.Directories.Exists (Rel_Root) then
+         Ada.Directories.Delete_Tree (Rel_Root);
+      end if;
+      Ada.Directories.Create_Path (Rel_Root & "/src");
+      Fusa.Files.Write_File
+        (Rel_Root & "/.fusa.json",
+         "{""configVersion"":""1.0"",""project"":{""name"":""relrepro""," &
+           """version"":""0.1.0""},""standard"":""generic""," &
+           """sourceDirs"":[""src""]}");
+      Fusa.Files.Write_File (Rel_Root & "/.fusa-reqs.json", "{""requirements"":[]}");
+      Fusa.Files.Write_File
+        (Rel_Root & "/src/bad.adb",
+         "procedure Bad is" & ASCII.LF &
+         "   pragma Suppress (All_Checks);" & ASCII.LF &
+         "begin" & ASCII.LF & "   null;" & ASCII.LF & "end Bad;" & ASCII.LF);
+
+      Ada.Directories.Set_Directory (Rel_Root);
+      declare
+         Exit_Code : Integer;
+         Out1      : constant String :=
+           Run_Capturing_Stdout (Args ("check", "--format", "json"), Exit_Code);
+      begin
+         Check (Ada.Strings.Fixed.Index (Out1, "ADA001") > 0,
+                "check with the DEFAULT (no --dir) relative root actually "
+                & "scans sourceDirs and finds the ADA001 finding, instead "
+                & "of silently reporting zero findings via a false-clean "
+                & "exit 0");
+      end;
+
+      Check (Fusa.Cli.Run (Args ("release", "--spdx-version", "2.3")) = Exit_Ok,
+             "release --spdx-version with the default relative root exits 0 "
+             & "instead of erroring out over a spurious path-escape check");
+      Check (Fusa.Files.Exists ("relrepro-0.1.0.spdx.json"),
+             "release --spdx-version with the default relative root "
+             & "actually writes the SPDX document");
+
+      Check (Fusa.Cli.Run (Args ("audit-pack")) = Exit_Ok,
+             "audit-pack with the default relative root exits 0");
+      Check (Ada.Strings.Fixed.Index
+               (Fusa.Files.Read_File ("audit-pack.zip"), ".fusa.json") > 0,
+             "audit-pack with the default relative root actually bundles "
+             & "the project's real evidence files, not just an empty "
+             & "manifest.json");
+
+      Ada.Directories.Set_Directory (Saved_Cwd);
+      Ada.Directories.Delete_Tree (Rel_Root);
+   end;
+
    --  fusa:test REQ-081
    Check (Fusa.Cli.Run (Args ("comp", "--dir", Root)) = Exit_Ok,
           "comp with the default threshold (10) exits 0 for this fixture's "
