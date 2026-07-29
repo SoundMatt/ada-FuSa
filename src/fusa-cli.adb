@@ -1155,7 +1155,8 @@ package body Fusa.Cli is
                end loop;
             end;
             Append (Canon, "]");
-            Append (Canon, "," & Q & "schemaVersion" & Q & ":" & Jstr (Fusa.Schema_Version));
+            Append (Canon, "," & Q & "schemaVersion" & Q & ":" &
+                      Jstr (Fusa.Spec_Version));
             Append (Canon, "," & Q & "tool" & Q & ":" & Jstr (Fusa.Tool_Name));
             Append (Canon, "," & Q & "toolVersion" & Q & ":" & Jstr (Fusa.Version));
             Append (Canon, "," & Q & "total" & Q & ":" & Trim_Img (Total));

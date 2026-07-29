@@ -14,17 +14,17 @@ package Fusa is
    Tool_Name    : constant String := "ada-FuSa";
    Version      : constant String := "0.1.0";
 
-   --  §2.8: two DISTINCT keys, never conflate them. Schema_Version is
-   --  MAJOR.MINOR only (spec §3.1 "schemaVersion" field on report
-   --  documents); Spec_Version is the full spec release ada-FuSa
-   --  implements (§9.1 "specVersion" field on `version`/`capabilities`),
-   --  matching the sibling tools' convention of tracking the full patch
-   --  version in their SpecVersion/SPEC_VERSION constants (e.g.
-   --  go-FuSa/c-FuSa/cpp-FuSa/rust-FuSa/py-FuSa all correct theirs to
-   --  strings like "1.10.4", not truncated to "1.10").
+   --  §2.8/§3.2 "schemaVersion semantics" (MUST, clarified in spec
+   --  v1.15.1): schemaVersion (report documents, §3.1) and specVersion
+   --  (`version`/`capabilities`, §9.1) are DISTINCT keys that MUST NOT be
+   --  conflated, but both carry the SAME value -- the tool's full
+   --  MAJOR.MINOR.PATCH SpecVersion constant, emitted verbatim. A
+   --  consumer still only compares the MAJOR.MINOR prefix for
+   --  compatibility; PATCH is never itself a compatibility signal. One
+   --  constant serves both fields; there is no separate MAJOR.MINOR-only
+   --  form.
    --  fusa:req REQ-003
-   Schema_Version : constant String := "1.15";
-   Spec_Version   : constant String := "1.15.0";
+   Spec_Version : constant String := "1.15.2";
 
    --  §2.3 exit codes
    --  fusa:req REQ-001

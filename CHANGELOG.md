@@ -5,6 +5,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+### Changed (adopt spec v1.15.2: schemaVersion/specVersion unification)
+
+Spec v1.15.1 clarified §3.2 "schemaVersion semantics": `schemaVersion` (report documents, §3.1) and
+`specVersion` (`version`/`capabilities`, §9.1) are distinct keys that MUST NOT be conflated, but both
+MUST carry the tool's full `MAJOR.MINOR.PATCH` `SpecVersion` constant verbatim -- a consumer still
+only compares the `MAJOR.MINOR` prefix for compatibility. ada-FuSa previously emitted `schemaVersion`
+as a truncated `Fusa.Schema_Version` ("1.15", MAJOR.MINOR-only), which is now non-conformant. Removed
+`Fusa.Schema_Version` and unified both fields onto the existing `Fusa.Spec_Version` constant, bumped
+to `"1.15.2"` (the current spec release, which also clarified Rule A's deny-list false-positive
+tradeoff in §1.6.1 -- see the deep-audit D entry below -- filed as SoundMatt/FuSaOps#101). Also
+bumped the Docker `SPEC_VERSION` build-arg to match. Pure version-string/doc-comment change, no
+behavior or schema-shape change; 778/778 checks passing.
+
 ### Fixed (deep-audit H/8 -- five test-suite quality gaps)
 
 The deep audit's test-quality pass flagged five assertions that were either missing entirely or too
