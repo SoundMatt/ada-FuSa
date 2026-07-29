@@ -442,6 +442,71 @@ begin
              & "purpose is to scan comment text");
    end;
 
+   --  Regression: ADA007's "TODO" needle used to be matched against the
+   --  whole line (comments stripped would hide the marker it exists to
+   --  find), which also matched any identifier merely containing "TODO",
+   --  e.g. "Todo_List". Comment_Only now confines the search to the
+   --  comment text specifically.
+   Fusa.Files.Write_File
+     (Root & "/src/todo_ident.adb",
+      "procedure Todo_Ident is" & ASCII.LF &
+      "   Todo_List : array (1 .. 3) of Integer := (others => 0);" &
+      ASCII.LF &
+      "begin" & ASCII.LF & "   null;" & ASCII.LF & "end Todo_Ident;" &
+      ASCII.LF);
+   declare
+      Files       : String_List;
+      Findings    : Finding_List;
+      Ada007_Hits : Natural := 0;
+   begin
+      Files.Append ("src/todo_ident.adb");
+      Findings := Fusa.Engine.Run_All (Root, Files);
+      for F of Findings loop
+         if To_String (F.Rule_Id) = "ADA007" then
+            Ada007_Hits := Ada007_Hits + 1;
+         end if;
+      end loop;
+      Check (Ada007_Hits = 0,
+             "ADA007 does not fire on an identifier like ""Todo_List"" that "
+             & "merely contains ""TODO"" as a code token, not a comment "
+             & "marker");
+   end;
+
+   --  Regression: SEC001/SEC002's own Description says "identifier ending
+   --  in" the keyword, but a plain substring match also fired on any
+   --  identifier merely *containing* it, e.g. "Secretary_Name" (contains
+   --  "SECRET") or "Password_Hint" (contains "PASSWORD" but doesn't end
+   --  in it).
+   Fusa.Files.Write_File
+     (Root & "/src/sec_boundary.adb",
+      "procedure Sec_Boundary is" & ASCII.LF &
+      "   Secretary_Name : constant String := ""Jane Smith"";" & ASCII.LF &
+      "   Password_Hint  : constant String := ""your pet's name"";" &
+      ASCII.LF &
+      "   Db_Password    : constant String := ""hunter2"";" & ASCII.LF &
+      "begin" & ASCII.LF & "   null;" & ASCII.LF & "end Sec_Boundary;" &
+      ASCII.LF);
+   declare
+      Files       : String_List;
+      Findings    : Finding_List;
+      Hits        : Natural := 0;
+   begin
+      Files.Append ("src/sec_boundary.adb");
+      Findings := Fusa.Engine.Run_All (Root, Files);
+      for F of Findings loop
+         if To_String (F.Rule_Id) = "SEC001"
+           or else To_String (F.Rule_Id) = "SEC002"
+         then
+            Hits := Hits + 1;
+         end if;
+      end loop;
+      Check (Hits = 1,
+             "SEC001/SEC002 fire exactly once -- on Db_Password (a real "
+             & "identifier ending in ""password""), not on Secretary_Name "
+             & "(contains ""SECRET"" but doesn't end in it) or "
+             & "Password_Hint (contains ""PASSWORD"" but doesn't end in it)");
+   end;
+
    --  Regression: SEC004's "OS_LIB.SPAWN" needle never matched an
    --  unqualified call reachable via "use GNAT.OS_Lib;".
    Fusa.Files.Write_File

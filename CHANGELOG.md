@@ -5,6 +5,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+### Fixed (deep-audit E/8 -- SEC001/SEC002/ADA007 correctness)
+
+Unlike Rule A (finding D, above), SEC001/SEC002/ADA007 are ada-FuSa's own starter-rule-pack
+implementation choices, not spec-mandated algorithms -- these two findings are genuine bugs
+against each rule's own documented intent, not a tradeoff to preserve:
+
+- **SEC001/SEC002 matched a bare substring, contradicting their own `Description`** ("identifier
+  ending in ..."). `Secretary_Name` (contains `"SECRET"`) and `Password_Hint` (contains
+  `"PASSWORD"` but doesn't end in it) both false-positived as hardcoded credentials. Fixed with a
+  new suffix-boundary check: the keyword must not be immediately followed by another identifier
+  character (no check on what precedes it, since "ending in" allows any prefix -- a real
+  `DB_Password` must still match).
+- **ADA007 scanned the whole line, matching "TODO" inside a code identifier** like `Todo_List`,
+  not just inside a `-- TODO` comment. Fixed with a new `Comment_Only` mode for `Scan_Substring`
+  (and a `Comment_Portion` helper, the inverse of the existing `Code_Portion`) that confines the
+  search to the comment text specifically, rather than either stripping comments entirely (which
+  would blind ADA007 to the marker it exists to find) or scanning the raw line (which also matches
+  code).
+
+2 new regression tests; 758/758 checks passing (was 756).
+
 ### Fixed (deep-audit D/8 -- Rule A bracket regex conformance)
 
 The deep audit flagged Rule A (`FUSA-STUB001`) as over-triggering on legitimate technical prose
