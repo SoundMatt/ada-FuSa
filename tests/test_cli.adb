@@ -72,6 +72,27 @@ begin
    Check (Fusa.Cli.Run (Args ("version")) = Exit_Ok, "version exits 0");
    --  fusa:test REQ-008
    Check (Fusa.Cli.Run (Args ("capabilities")) = Exit_Ok, "capabilities exits 0");
+   declare
+      Exit_Code : Integer;
+      Out_Text  : constant String :=
+        Run_Capturing_Stdout (Args ("capabilities"), Exit_Code);
+   begin
+      Check (Ada.Strings.Fixed.Index
+               (Out_Text, """kind"": ""capabilities""") > 0,
+             "capabilities JSON output has kind = ""capabilities""");
+      Check (Ada.Strings.Fixed.Index (Out_Text, """specVersion"": """) > 0,
+             "capabilities JSON output includes specVersion");
+      Check (Ada.Strings.Fixed.Index (Out_Text, """commands"":") > 0
+             and then Ada.Strings.Fixed.Index (Out_Text, """check""") > 0
+             and then Ada.Strings.Fixed.Index (Out_Text, """trace""") > 0
+             and then Ada.Strings.Fixed.Index (Out_Text, """qualify""") > 0,
+             "capabilities JSON output lists commands including check/"
+             & "trace/qualify");
+      Check (Ada.Strings.Fixed.Index (Out_Text, """formats"":") > 0
+             and then Ada.Strings.Fixed.Index (Out_Text, """sarif""") > 0,
+             "capabilities JSON output lists per-command formats "
+             & "including sarif");
+   end;
 
    if Ada.Directories.Exists (Root) then
       Ada.Directories.Delete_Tree (Root);
@@ -125,6 +146,19 @@ begin
       Check (Idx > 0
              and then Out_Text (Idx + 16) = '/',
              "projectRoot in check --format json output is an absolute path");
+      --  Regression: an earlier version of this assertion only checked
+      --  the value's *shape* (leading '/'), which would still pass for
+      --  an absolute path to the wrong directory entirely. Assert the
+      --  value actually resolves to Root, and that the SHOULD "standard"
+      --  field carries the real configured value, not just any string.
+      Check (Ada.Strings.Fixed.Index (Out_Text, "/" & Root & """") > 0,
+             "projectRoot in check --format json output resolves to the "
+             & "actual project directory, not merely some absolute path");
+      Check (Ada.Strings.Fixed.Index
+               (Out_Text, """standard"": ""generic""") > 0,
+             "standard in check --format json output carries the "
+             & "project's actual configured standard (""generic""), not "
+             & "just any non-blank string");
    end;
 
    Fusa.Files.Write_File
@@ -236,6 +270,13 @@ begin
    begin
       Check (Ada.Strings.Fixed.Index (Out_Text, """projectRoot"": """) > 0,
              "qualify --format json now includes the MUST projectRoot field");
+      Check (Ada.Strings.Fixed.Index (Out_Text, "/" & Root & """") > 0,
+             "qualify --format json's projectRoot resolves to the actual "
+             & "project directory");
+      Check (Ada.Strings.Fixed.Index
+               (Out_Text, """standard"": ""generic""") > 0,
+             "qualify --format json's standard carries the project's "
+             & "actual configured value (""generic"")");
    end;
    Check (Fusa.Cli.Run (Args ("qualify", "--dir", Root, "--format", "bogus")) = Exit_Usage,
           "qualify rejects an unsupported --format with a usage error");
@@ -545,6 +586,34 @@ begin
              "hara gate-fails on a Rule A (FUSA-STUB001) placeholder hazard "
              & "description, even though it's a WARNING-free document "
              & "otherwise -- disposition-suppressible only, always-on");
+
+      --  Regression: unlike Rule B, a fresh/independent/hash-matching
+      --  attestation must NOT suppress Rule A -- section 1.6.1 only
+      --  wires Attestation_Suppresses into Check_Blanket_Fallback, never
+      --  into Check_Placeholder. A placeholder value is still a
+      --  placeholder no matter who reviewed it.
+      declare
+         Root_Val : constant Fusa.Json.Value_Access :=
+           Fusa.Json.Parse
+             (Fusa.Files.Read_File (Stub_Root & "/.fusa-hara.json"));
+         Hash : constant String :=
+           Fusa.Attestation.Canonical_Content_Hash (Root_Val);
+      begin
+         Fusa.Files.Write_File
+           (Stub_Root & "/.fusa-hara.json",
+            Hazards_With_Attestation
+              (One_Hazard ("H1", "[describe hazard]"), Hash));
+      end;
+      Check (Fusa.Cli.Run
+               (Args ("hara", "--dir", Stub_Root, "--require-attestation")) =
+               Exit_Gate_Fail,
+             "a fresh, independently-reviewed, hash-matching attestation "
+             & "does NOT suppress Rule A (FUSA-STUB001) -- placeholder "
+             & "descriptions gate-fail regardless of attestation, unlike "
+             & "Rule B");
+      Fusa.Files.Write_File
+        (Stub_Root & "/.fusa-hara.json",
+         Hazards_Json (One_Hazard ("H1", "[describe hazard]")));
 
       for I in 1 .. 11 loop
          if I > 1 then
@@ -1068,6 +1137,20 @@ begin
                 and then Ada.Strings.Fixed.Index (Out_Text, "Pkg_B") > 0,
                 "impact on pkg_a.ads reports Pkg_B as an impacted unit "
                 & "(Pkg_B directly depends on Pkg_A)");
+         --  Regression: a bare substring check for "Pkg_A"/"Pkg_B" would
+         --  still pass even if the changed unit wrongly listed itself as
+         --  impacted (self-inclusion), or if extra unrelated units leaked
+         --  in -- the "1 impacted unit(s):" summary line and the exact
+         --  "  Pkg_A" line (leading two-space indent used only by the
+         --  per-unit list, not the "pkg_a.ads -> Pkg_A" resolution line)
+         --  pin down both the count and the absence of self-inclusion.
+         Check (Ada.Strings.Fixed.Index (Out_Text, "1 impacted unit(s):") > 0,
+                "impact on pkg_a.ads reports exactly one impacted unit, "
+                & "not more");
+         Check (Ada.Strings.Fixed.Index
+                  (Out_Text, ASCII.LF & "  Pkg_A" & ASCII.LF) = 0,
+                "impact does not list the changed unit itself "
+                & "(Pkg_A) among its own impacted units");
       end;
       declare
          Exit_Code : Integer;
@@ -2076,8 +2159,16 @@ begin
    begin
       Check (Ada.Strings.Fixed.Index (Out_Text, """projectRoot"": """) > 0,
              "trace --format json now includes the MUST projectRoot field");
-      Check (Ada.Strings.Fixed.Index (Out_Text, """standard"": """) > 0,
-             "trace --format json now includes the SHOULD standard field");
+      --  Regression: presence-only checks would still pass for an
+      --  absolute path to the wrong directory, or a "standard" pulled
+      --  from a different source than the project's actual config.
+      Check (Ada.Strings.Fixed.Index (Out_Text, "/" & Root & """") > 0,
+             "trace --format json's projectRoot resolves to the actual "
+             & "project directory");
+      Check (Ada.Strings.Fixed.Index
+               (Out_Text, """standard"": ""generic""") > 0,
+             "trace --format json's standard carries the project's "
+             & "actual configured value (""generic"")");
    end;
    --  fusa:test REQ-011
    Check (Fusa.Cli.Run (Args ("trace", "--dir", Root, "--format", "html")) = Exit_Ok,

@@ -5,6 +5,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+### Fixed (deep-audit H/8 -- five test-suite quality gaps)
+
+The deep audit's test-quality pass flagged five assertions that were either missing entirely or too
+weak to catch a real regression: no test proved attestation does NOT suppress Rule A (FUSA-STUB001;
+only Rule B is attestation-suppressible per §1.6.1); `capabilities` had zero content assertions
+(exit-code-only); `projectRoot`/`standard` were checked for key-presence only, not value (a presence
+check would still pass for an absolute path to the wrong directory); `impact`'s test only
+substring-matched unit names, missing self-inclusion (the changed unit wrongly listing itself as
+impacted) and count checks; `Is_Fresh_Reviewed`'s blank-`independentReviewer` branch was untested.
+Added targeted regression tests for all five. Also removed a batch of stale, untracked iCloud
+"conflict copy" duplicate files that had accumulated in the working tree and were inflating
+`adafusa check`'s own findings output with line-length warnings against dead code. 13 new/updated
+regression tests; 778/778 checks passing (was 765).
+
 ### Fixed (deep-audit G/8 -- sign --dir now actually resolves paths)
 
 `sign`'s argument scanner recognized and skipped `--dir <value>` (to avoid misparsing it as the
