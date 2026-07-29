@@ -15,6 +15,7 @@ with Fusa.Func_Scan;
 with Fusa.Fmea_Analyze;
 with Fusa.Tara_Analyze;
 with Fusa.Safety_Case_Analyze;
+with Fusa.Proof_Analyze;
 with Fusa.Comp;
 with Fusa.Badge;
 with Fusa.Deps;
@@ -274,6 +275,10 @@ package body Fusa.Cli is
            ("--dir", "--format", "--force", "--project-name", "--output");
       elsif Cmd_Name = "fix" then
          return Flag_Set ("--dir", "--format", "--apply", "--output");
+      elsif Cmd_Name = "coverage" then
+         return Flag_Set
+           ("--dir", "--format", "--proof", "--proof-file",
+            "--proof-threshold", "--output");
       else
          --  Unknown command name: no flags recognised (Run's own
          --  "unknown command" branch handles this case before it would
@@ -417,6 +422,7 @@ package body Fusa.Cli is
       W.Value ("sas");
       W.Value ("template");
       W.Value ("fix");
+      W.Value ("coverage");
       W.Array_End;
 
       W.Key ("formats");
@@ -462,6 +468,7 @@ package body Fusa.Cli is
       W.Key ("sas");          W.Array_Start; W.Value ("json"); W.Value ("md"); W.Array_End;
       W.Key ("template");     W.Array_Start; W.Value ("text"); W.Value ("json"); W.Array_End;
       W.Key ("fix");          W.Array_Start; W.Value ("text"); W.Value ("json"); W.Array_End;
+      W.Key ("coverage");     W.Array_Start; W.Value ("text"); W.Value ("json"); W.Array_End;
       W.Object_End;
 
       W.Key ("standards");
@@ -6355,6 +6362,142 @@ package body Fusa.Cli is
    end Cmd_Fix;
 
    ----------------------------------------------------------------------
+   --  coverage --proof (#24: SPARK proof-coverage via gnatprove --
+   --  ada-FuSa's flagship differentiator; section 9.2/13 "draft" schema,
+   --  modelled on the family's --mcdc/--mcdc-file/--mcdc-threshold
+   --  pattern). No other coverage sub-mode (e.g. an eventual --mcdc for
+   --  Ada) is implemented yet, so --proof is currently required.
+   ----------------------------------------------------------------------
+
+   --  fusa:req REQ-124
+   function Cmd_Coverage (Args : String_List) return Integer is
+      Dir           : constant String := Dir_Of (Args);
+      Format        : constant String := Flag_Value (Args, "--format", "text");
+      Proof_Mode    : constant Boolean := Has_Flag (Args, "--proof");
+      Proof_File    : constant String := Flag_Value (Args, "--proof-file", "");
+      Threshold_Str : constant String := Flag_Value (Args, "--proof-threshold", "");
+   begin
+      if Format /= "text" and then Format /= "json" then
+         Ada.Text_IO.Put_Line
+           (Ada.Text_IO.Standard_Error,
+            "ada-FuSa: coverage: unsupported --format '" & Format &
+            "' (supported: text, json)");
+         return Exit_Usage;
+      end if;
+      if not Proof_Mode then
+         Ada.Text_IO.Put_Line
+           (Ada.Text_IO.Standard_Error,
+            "ada-FuSa: coverage: --proof is required (no other coverage " &
+            "mode is implemented yet)");
+         return Exit_Usage;
+      end if;
+      if Proof_File'Length = 0 then
+         Ada.Text_IO.Put_Line
+           (Ada.Text_IO.Standard_Error,
+            "ada-FuSa: coverage --proof: --proof-file <path> is required");
+         return Exit_Usage;
+      end if;
+
+      declare
+         --  section 13: "N = 0 disables the gate" -- absent entirely is
+         --  the same as an explicit 0, both mean "report only, never gate".
+         Threshold_Given : constant Boolean := Threshold_Str'Length > 0;
+         Threshold       : Long_Float := 0.0;
+      begin
+         if Threshold_Given then
+            begin
+               Threshold := Long_Float'Value (Threshold_Str);
+            exception
+               when Constraint_Error =>
+                  Ada.Text_IO.Put_Line
+                    (Ada.Text_IO.Standard_Error,
+                     "ada-FuSa: coverage --proof: --proof-threshold must be a number");
+                  return Exit_Usage;
+            end;
+         end if;
+
+         declare
+            Resolved_Path : constant String :=
+              (if Fusa.Files.Exists (Proof_File) then Proof_File
+               else Fusa.Files.Join (Dir, Proof_File));
+         begin
+            if not Fusa.Files.Exists (Resolved_Path) then
+               return Emit_Runtime_Error
+                 (Args, "proof-report", "invalid-config",
+                  "--proof-file " & Proof_File & " does not exist");
+            end if;
+
+            declare
+               Report : Fusa.Proof_Analyze.Proof_Report;
+            begin
+               begin
+                  Report := Fusa.Proof_Analyze.Parse_Proof_File (Resolved_Path);
+               exception
+                  when Fusa.Json.Json_Error =>
+                     return Emit_Runtime_Error
+                       (Args, "proof-report", "invalid-config",
+                        "--proof-file " & Proof_File & " is not valid gnatprove JSON output");
+               end;
+
+               declare
+                  Pct_Tenths  : constant Integer :=
+                    Fusa.Proof_Analyze.Proof_Pct_Tenths (Report);
+                  Gate_Passed : constant Boolean :=
+                    not Threshold_Given or else Threshold = 0.0
+                    or else Long_Float (Pct_Tenths) / 10.0 >= Threshold;
+               begin
+                  if Format = "json" then
+                     declare
+                        W : Fusa.Json.Writer.Instance;
+                     begin
+                        W.Object_Start;
+                        Fusa.Report.Write_Header (W, "proof-report");
+                        W.Field ("tool", To_String (Report.Tool));
+                        W.Field ("totalObligations", Report.Total_Obligations);
+                        W.Field ("provedObligations", Report.Proved_Obligations);
+                        W.Decimal_Field ("proofPct", Pct_Tenths);
+                        W.Field ("gatePassed", Gate_Passed);
+                        W.Key ("functions");
+                        W.Array_Start;
+                        for F of Report.Functions loop
+                           W.Object_Start;
+                           W.Field ("name", To_String (F.Name));
+                           W.Field ("file", To_String (F.File));
+                           W.Field ("totalObligations", F.Total_Obligations);
+                           W.Field ("provedObligations", F.Proved_Obligations);
+                           W.Field ("proved", Fusa.Proof_Analyze.Proved (F));
+                           W.Object_End;
+                        end loop;
+                        W.Array_End;
+                        W.Object_End;
+                        Emit (Args, Fusa.Json.Writer.To_String (W));
+                     end;
+                  else
+                     declare
+                        Buf : Unbounded_String := Null_Unbounded_String;
+                     begin
+                        Append
+                          (Buf,
+                           Trim_Img (Report.Proved_Obligations) & "/" &
+                           Trim_Img (Report.Total_Obligations) &
+                           " proof obligations discharged (" &
+                           Trim_Img (Pct_Tenths / 10) & "." & Trim_Img (abs (Pct_Tenths) mod 10) &
+                           "%), gate " & (if Gate_Passed then "passed" else "failed"));
+                        Emit (Args, To_String (Buf));
+                     end;
+                  end if;
+
+                  if Threshold_Given and then Threshold > 0.0 and then not Gate_Passed then
+                     return Exit_Gate_Fail;
+                  end if;
+                  return Exit_Ok;
+               end;
+            end;
+         end;
+      end;
+   end Cmd_Coverage;
+
+   ----------------------------------------------------------------------
    --  Usage / dispatch
    ----------------------------------------------------------------------
 
@@ -6486,6 +6629,8 @@ package body Fusa.Cli is
             return Cmd_Template (Rest);
          elsif Cmd = "fix" then
             return Cmd_Fix (Rest);
+         elsif Cmd = "coverage" then
+            return Cmd_Coverage (Rest);
          elsif Cmd = "--help" or else Cmd = "-h" or else Cmd = "help" then
             Print_Usage;
             return Exit_Ok;

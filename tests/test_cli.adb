@@ -3149,4 +3149,111 @@ begin
 
       Ada.Directories.Delete_Tree (Root4);
    end;
+
+   --  fusa#24: coverage --proof (SPARK proof-coverage via gnatprove).
+   --  fusa:test REQ-124
+   declare
+      Proof_Root : constant String := "tmp_test_cli_proof";
+      Proof_File : constant String := Proof_Root & "/sample.spark";
+   begin
+      if Ada.Directories.Exists (Proof_Root) then
+         Ada.Directories.Delete_Tree (Proof_Root);
+      end if;
+      Ada.Directories.Create_Path (Proof_Root);
+
+      Check (Fusa.Cli.Run (Args ("coverage")) = Exit_Usage,
+             "coverage with no --proof exits 2 (no other mode is implemented yet)");
+      Check (Fusa.Cli.Run (Args ("coverage", "--proof")) = Exit_Usage,
+             "coverage --proof with no --proof-file exits 2");
+      Check (Fusa.Cli.Run
+               (Args ("coverage", "--proof", "--proof-file", Proof_Root & "/missing.spark"))
+               = Exit_Runtime,
+             "coverage --proof with a nonexistent --proof-file exits 3");
+
+      --  A single per-unit .spark-shaped object (not wrapped in an
+      --  array) -- Fusa.Proof_Analyze must accept both shapes.
+      Fusa.Files.Write_File
+        (Proof_File,
+         "{""proof"":[" &
+           "{""entity"":{""name"":""Pkg.Compute"",""sloc"":[{""file"":""src/pkg.adb""," &
+             """line"":8}]}," &
+            """check_tree"":[{""proof_attempts"":{""CVC4"":{""result"":""Valid""}}}]}," &
+           "{""entity"":{""name"":""Pkg.Compute"",""sloc"":[{""file"":""src/pkg.adb""," &
+             """line"":8}]}," &
+            """check_tree"":[{""proof_attempts"":{""CVC4"":{""result"":""Unknown""}}}]}," &
+           "{""entity"":{""name"":""Pkg.Validate"",""sloc"":[{""file"":""src/pkg.adb""," &
+             """line"":28}]}," &
+            """check_tree"":[{""proof_attempts"":{""Z3"":{""result"":""Valid""}}}]}" &
+         "]}");
+      declare
+         Exit_Code : Integer;
+         Out_Text  : constant String :=
+           Run_Capturing_Stdout
+             (Args ("coverage", "--proof", "--proof-file", Proof_File, "--format", "json"),
+              Exit_Code);
+      begin
+         Check (Exit_Code = Exit_Ok,
+                "coverage --proof with no --proof-threshold never gates, exit 0");
+         Check (Ada.Strings.Fixed.Index (Out_Text, """kind"": ""proof-report""") > 0,
+                "coverage --proof reports kind ""proof-report""");
+         Check (Ada.Strings.Fixed.Index (Out_Text, """tool"": ""gnatprove""") > 0,
+                "coverage --proof reports tool ""gnatprove""");
+         Check (Ada.Strings.Fixed.Index (Out_Text, """totalObligations"": 3") > 0
+                and then Ada.Strings.Fixed.Index (Out_Text, """provedObligations"": 2") > 0,
+                "coverage --proof correctly counts 2 of the 3 real verification "
+                & "conditions as proved (only entries where every check_tree item "
+                & "has a ""Valid"" prover result)");
+         Check (Ada.Strings.Fixed.Index (Out_Text, """proofPct"": 66.7") > 0,
+                "proofPct is rounded to exactly one decimal place (2/3 = 66.7%), "
+                & "not truncated to an integer percentage");
+         Check (Ada.Strings.Fixed.Index (Out_Text, """name"": ""Pkg.Compute""") > 0
+                and then Ada.Strings.Fixed.Index (Out_Text, """name"": ""Pkg.Validate""") > 0,
+                "coverage --proof's functions[] breaks results down per real entity, "
+                & "not just a project-wide total");
+         Check (Ada.Strings.Fixed.Index (Out_Text, """proved"": false") > 0
+                and then Ada.Strings.Fixed.Index (Out_Text, """proved"": true") > 0,
+                "Pkg.Compute (1/2 obligations proved) is correctly marked ""proved"": "
+                & "false, while Pkg.Validate (1/1) is marked true");
+      end;
+
+      --  --proof-threshold gates correctly (66.7% actual).
+      Check (Fusa.Cli.Run
+               (Args ("coverage", "--proof", "--proof-file", Proof_File,
+                      "--proof-threshold", "80")) = Exit_Gate_Fail,
+             "coverage --proof-threshold 80 gate-fails when proofPct (66.7) is below it");
+      Check (Fusa.Cli.Run
+               (Args ("coverage", "--proof", "--proof-file", Proof_File,
+                      "--proof-threshold", "50")) = Exit_Ok,
+             "coverage --proof-threshold 50 exits 0 when proofPct (66.7) meets it");
+      Check (Fusa.Cli.Run
+               (Args ("coverage", "--proof", "--proof-file", Proof_File,
+                      "--proof-threshold", "0")) = Exit_Ok,
+             "coverage --proof-threshold 0 disables the gate entirely, per section 13");
+      Check (Fusa.Cli.Run
+               (Args ("coverage", "--proof", "--proof-file", Proof_File,
+                      "--proof-threshold", "bogus")) = Exit_Usage,
+             "coverage --proof-threshold bogus exits 2 (usage), not a crash");
+
+      --  A JSON ARRAY of per-unit .spark objects (the practical way to
+      --  feed a whole project's gnatprove results in one file) is
+      --  accepted too, and zero obligations fails safe to 100%/passed.
+      Fusa.Files.Write_File
+        (Proof_File, "[{""proof"":[]},{""proof"":[]}]");
+      declare
+         Exit_Code : Integer;
+         Out_Text  : constant String :=
+           Run_Capturing_Stdout
+             (Args ("coverage", "--proof", "--proof-file", Proof_File, "--format", "json"),
+              Exit_Code);
+      begin
+         Check (Ada.Strings.Fixed.Index (Out_Text, """totalObligations"": 0") > 0
+                and then Ada.Strings.Fixed.Index (Out_Text, """proofPct"": 100.0") > 0
+                and then Ada.Strings.Fixed.Index (Out_Text, """gatePassed"": true") > 0,
+                "a JSON array of per-unit objects (all with zero obligations) is "
+                & "accepted, and totalObligations=0 fails safe to proofPct 100/"
+                & "gatePassed true, per section 13's own MUST");
+      end;
+
+      Ada.Directories.Delete_Tree (Proof_Root);
+   end;
 end Test_Cli;

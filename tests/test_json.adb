@@ -1,3 +1,4 @@
+with Ada.Strings.Fixed;
 with Fusa.Json; use Fusa.Json;
 with Fusa.Json.Writer;
 with Test_Framework; use Test_Framework;
@@ -271,6 +272,43 @@ begin
                 "Field_If_Non_Blank emits the field when the value is non-empty");
          Check (not Fusa.Json.Has_Key (Reparsed, "absent"),
                 "Field_If_Non_Blank omits the field entirely when the value is empty");
+      end;
+   end;
+
+   --  fusa#24: Decimal_Value/Decimal_Field write a genuine unquoted JSON
+   --  number with exactly one decimal place (e.g. coverage --proof's
+   --  "proofPct"), not a quoted string and not Ada's default float image.
+   --  fusa:test REQ-124
+   declare
+      W : Fusa.Json.Writer.Instance;
+   begin
+      W.Object_Start;
+      W.Decimal_Field ("proofPct", 963);   --  96.3
+      W.Decimal_Field ("zero", 0);         --  0.0
+      W.Decimal_Field ("hundred", 1000);   --  100.0
+      W.Decimal_Field ("negative", -55);   --  -5.5
+      W.Object_End;
+      declare
+         Out_Text : constant String := Fusa.Json.Writer.To_String (W);
+      begin
+         Check (Ada.Strings.Fixed.Index (Out_Text, """proofPct"": 96.3") > 0,
+                "Decimal_Field writes an unquoted one-decimal number (96.3)");
+         Check (Ada.Strings.Fixed.Index (Out_Text, """zero"": 0.0") > 0,
+                "Decimal_Field writes a whole tenths value as X.0, not bare X");
+         Check (Ada.Strings.Fixed.Index (Out_Text, """hundred"": 100.0") > 0,
+                "Decimal_Field correctly renders the 1000-tenths (100.0) case");
+         Check (Ada.Strings.Fixed.Index (Out_Text, """negative"": -5.5") > 0,
+                "Decimal_Field correctly renders a negative value (-5.5)");
+         --  Round-trips through the JSON reader as a genuine number, not
+         --  a string.
+         declare
+            Reparsed : constant Fusa.Json.Value_Access := Fusa.Json.Parse (Out_Text);
+            Member   : constant Fusa.Json.Value_Access :=
+              Fusa.Json.Get_Member (Reparsed, "proofPct");
+         begin
+            Check (Member /= null and then Member.Kind = Fusa.Json.Json_Number,
+                   "the written value re-parses as a genuine JSON number, not a string");
+         end;
       end;
    end;
 

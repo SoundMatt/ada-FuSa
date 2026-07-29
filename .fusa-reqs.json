@@ -737,6 +737,12 @@
       "title": "Fusa.Safety_Case_Analyze (safety-case derives a real GSN skeleton from actual evidence, fusa#83)",
       "text": "When .fusa-safety-case.json's own nodes array is empty, safety-case derives a real goal/strategy/solution GSN skeleton citing only the evidence artifacts (fusa-report.json, qualify-report.json, comp-report.json, sbom.json, vuln.json, fmea.json, sci.json, sas.json) that actually exist on disk for this project right now, rather than reporting an empty argument -- never a fabricated claim about an artifact that doesn't exist. If no evidence artifact exists yet, the derived argument is honestly empty. A project with a hand-authored real GSN argument keeps it completely unchanged.",
       "level": "SW"
+    },
+    {
+      "id": "REQ-124",
+      "title": "coverage --proof (fusa#24: SPARK proof-coverage via gnatprove)",
+      "text": "New coverage --proof --proof-file <path> [--proof-threshold N] command, modelled on the family's --mcdc/--mcdc-file/--mcdc-threshold pattern. Parses gnatprove's own native .spark JSON output (a single per-unit object, or a JSON array of them for a whole project) via Fusa.Proof_Analyze: only the top-level \"proof\" array counts as a proof obligation; a verification condition counts as proved when every one of its check_tree entries has at least one prover attempt with result \"Valid\". Emits the section 13 canonical proof-report.json shape (tool/totalObligations/provedObligations/proofPct/gatePassed/functions[]), with proofPct rounded to exactly one decimal place via the new Fusa.Json.Writer.Decimal_Value/Decimal_Field. Gates (exit 1) when proofPct < --proof-threshold; threshold 0 or absent disables the gate. totalObligations = 0 reports proofPct 100 and gatePassed true.",
+      "level": "SW"
     }
   ]
 }
