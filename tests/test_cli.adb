@@ -369,6 +369,56 @@ begin
           "audit-pack's expanded allowlist bundles boundary.dot, which was "
           & "never one of the original 7 hardcoded filenames");
 
+   --  fusa:test REQ-076 / REQ-014: project.name/version are free-text
+   --  JSON string fields with no path-safety validation of their own --
+   --  a crafted "../.." name must not let release --spdx-version write,
+   --  or audit-pack read, outside the project/output directory.
+   declare
+      Trav_Root : constant String := "tmp_test_cli_path_traversal";
+      Outside_File : constant String := "tmp_test_cli_traversal_outside.txt";
+   begin
+      if Ada.Directories.Exists (Trav_Root) then
+         Ada.Directories.Delete_Tree (Trav_Root);
+      end if;
+      Ada.Directories.Create_Path (Trav_Root);
+      Fusa.Files.Write_File
+        (Outside_File, "should never be read or overwritten");
+      Fusa.Files.Write_File
+        (Trav_Root & "/.fusa.json",
+         "{""project"":{""name"":""../../../../tmp/pwned""," &
+           """version"":""1.0""},""standard"":""generic""}");
+      Check (Fusa.Cli.Run
+               (Args ("release", "--dir", Trav_Root, "--spdx-version", "2.3"))
+               = Exit_Runtime,
+             "release --spdx-version refuses to write the SPDX document "
+             & "when project.name/version would resolve outside --output-dir "
+             & "(exit 3, not a silent escape)");
+      Check (not Fusa.Files.Exists ("/tmp/pwned-1.0.spdx.json"),
+             "no file was actually written outside the project directory");
+
+      --  Same escape attempt, but via a name/version pair crafted to
+      --  resolve exactly onto a real file one level above Trav_Root, to
+      --  prove audit-pack's read side is guarded too (not just release's
+      --  write side).
+      Fusa.Files.Write_File
+        (Trav_Root & "/.fusa.json",
+         "{""project"":{""name"":"".."",""version"":""" &
+           Outside_File & """},""standard"":""generic""}");
+      Check (Fusa.Cli.Run
+               (Args ("audit-pack", "--dir", Trav_Root, "--output",
+                      Trav_Root & "/pack.zip")) = Exit_Ok,
+             "audit-pack still exits 0 (missing/escaping files are silently "
+             & "skipped, same as any other absent evidence artifact)");
+      Check (Ada.Strings.Fixed.Index
+               (Fusa.Files.Read_File (Trav_Root & "/pack.zip"),
+                "should never be read") = 0,
+             "audit-pack did not bundle a file outside the project "
+             & "directory even though the traversal path resolves to a "
+             & "real, readable file");
+      Ada.Directories.Delete_Tree (Trav_Root);
+      Ada.Directories.Delete_File (Outside_File);
+   end;
+
    --  fusa:test REQ-081
    Check (Fusa.Cli.Run (Args ("comp", "--dir", Root)) = Exit_Ok,
           "comp with the default threshold (10) exits 0 for this fixture's "

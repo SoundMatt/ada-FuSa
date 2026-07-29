@@ -1324,6 +1324,17 @@ package body Fusa.Cli is
                 (Output_Dir, To_String (Cfg.Name) & "-" & To_String (Cfg.Version) & ".spdx.json");
             W4 : Fusa.Json.Writer.Instance;
          begin
+            --  project.name/version are free-text JSON string fields with
+            --  no path-safety validation of their own (unlike sourceDirs,
+            --  which Find_Source_Files already boundary-checks) -- a
+            --  crafted "../../etc/whatever" name must not be allowed to
+            --  steer this write outside Output_Dir.
+            if not Fusa.Files.Is_Within (Output_Dir, Spdx_Path) then
+               return Emit_Runtime_Error
+                 (Args, "sbom", "invalid-config",
+                  "project.name/version in .fusa.json would resolve the SPDX "
+                  & "document path outside --output-dir");
+            end if;
             W4.Object_Start;
             W4.Field ("spdxVersion", "SPDX-" & Spdx_Version);
             W4.Field ("dataLicense", "CC0-1.0");
@@ -1461,7 +1472,16 @@ package body Fusa.Cli is
       procedure Add_If_Exists (Name : String) is
          Full : constant String := Fusa.Files.Join (Dir, Name);
       begin
-         if Fusa.Files.Exists (Full) and then not Fusa.Files.Is_Directory (Full) then
+         --  Every other Name passed in below is a fixed literal (always
+         --  within Dir); the SPDX document's name is built from
+         --  project.name/version, free-text JSON fields with no
+         --  path-safety validation of their own -- a crafted
+         --  "../../etc/whatever" name must not let this read (and bundle
+         --  into the zip) a file outside Dir.
+         if Fusa.Files.Is_Within (Dir, Full)
+           and then Fusa.Files.Exists (Full)
+           and then not Fusa.Files.Is_Directory (Full)
+         then
             declare
                Data : constant String := Fusa.Files.Read_File (Full);
             begin

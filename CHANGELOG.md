@@ -5,6 +5,31 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+### Fixed (deep-audit A/8 -- path traversal via project.name/version + glob ReDoS)
+
+Two security findings from a fresh multi-agent deep audit (not previously found by the earlier
+11-PR audit series):
+
+- **Path traversal via `.fusa.json`'s `project.name`/`project.version`.** Unlike `sourceDirs`
+  (which `Find_Source_Files` already boundary-checks), these two free-text JSON fields had no
+  path-safety validation at all before being joined into a filesystem path: `release
+  --spdx-version` joined them into a **write** target (`Fusa.Files.Write_File`), and `audit-pack`
+  joined them into a **read** target bundled into the zip. A crafted `"name": "../../../../etc/
+  whatever"` in a PR's `.fusa.json` could steer either write or read outside the project/output
+  directory. Fixed by validating both call sites against `Fusa.Files.Is_Within` (the same
+  boundary check `sourceDirs` already uses), rejecting with a runtime error on the write side and
+  silently skipping (like any other absent evidence artifact) on the read side.
+- **Exponential-blowup DoS in the glob matcher.** `Fusa.Glob`'s wildcard matcher was a naive
+  recursive backtracker -- a crafted `excludePatterns` entry like `"a*a*a*a*...*b"` (untrusted
+  project config, matched against every scanned filename) could hang any source-scanning command.
+  Rewritten as a dynamic-programming matcher (tokenize the pattern into atoms first, so a `"**"`
+  run becomes a single atom matching the original greedy two-at-a-time `*` consumption exactly,
+  then fill an O(pattern_len x text_len) table) -- polynomial time and space regardless of how
+  adversarial the pattern is, verified against the same pattern that would have taken exponential
+  time under the old matcher.
+
+11 new/updated regression tests; 748/748 checks passing (was 737).
+
 ### Fixed (Docker image's stale spec-version label)
 
 The Docker image build's `SPEC_VERSION` build-arg (`ci.yml`'s `docker` job and the Dockerfile's
