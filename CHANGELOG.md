@@ -5,6 +5,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+### Added (#85 -- real objectives for 6 of 7 standards gap-report commands)
+
+Of the 7 standards gap-report commands, only `do178` shipped with a real, non-empty starter
+objectives checklist -- `iso26262`/`iso21434`/`iec61508`/`iec62443`/`unece`/`slsa` all scaffolded an
+empty `{"objectives": []}` template, so every one of them always reported `0 total / 0 satisfied /
+0 partial / 0 gaps` on every project, indistinguishable in the JSON from "no applicable objectives"
+even though `capabilities` advertises all 7 as supported. Each of the 6 now gets its own small,
+non-authoritative starter checklist (`Iso26262_Starter`, `Iso21434_Starter`, `Iec61508_Starter`,
+`Iec62443_Starter`, `Unece_Starter`, `Slsa_Starter`), following do178's own established convention
+exactly: ada-FuSa's own id scheme, a real clause/practice/track reference per objective, everything
+seeded at status `"gap"`, and each carrying an explicit "non-authoritative reference" disclaimer since
+this tool has not verified the exact clause numbering against each standard's primary text -- treat
+these strictly as checklist starting points. 9 new regression tests; 849/849 checks passing.
+
 ### Fixed (tier-1 audit bundle: #84, #86, #97, #98, #99, #100, #102)
 
 Seven independently-verified defects from a fresh deep-dive audit, bundled into one PR:

@@ -1178,33 +1178,72 @@ begin
    Check (Fusa.Cli.Run (Args ("iso26262", "--dir", Root)) = Exit_Runtime,
           "iso26262 with no objectives file and no --init exits 3");
    Check (Fusa.Cli.Run (Args ("iso26262", "--dir", Root, "--init")) = Exit_Ok,
-          "iso26262 --init scaffolds an empty template and exits 0");
+          "iso26262 --init scaffolds a real, non-empty starter template and exits 0");
    Check (Fusa.Cli.Run (Args ("iso21434", "--dir", Root)) = Exit_Runtime,
           "iso21434 with no objectives file and no --init exits 3");
    Check (Fusa.Cli.Run (Args ("iso21434", "--dir", Root, "--init")) = Exit_Ok,
-          "iso21434 --init scaffolds an empty template and exits 0");
+          "iso21434 --init scaffolds a real, non-empty starter template and exits 0");
    Check (Fusa.Cli.Run (Args ("iec61508", "--dir", Root)) = Exit_Runtime,
           "iec61508 with no objectives file and no --init exits 3");
    Check (Fusa.Cli.Run (Args ("iec61508", "--dir", Root, "--init")) = Exit_Ok,
-          "iec61508 --init scaffolds an empty template and exits 0");
+          "iec61508 --init scaffolds a real, non-empty starter template and exits 0");
    Check (Fusa.Cli.Run (Args ("iec62443", "--dir", Root)) = Exit_Runtime,
           "iec62443 with no objectives file and no --init exits 3");
    Check (Fusa.Cli.Run (Args ("iec62443", "--dir", Root, "--init")) = Exit_Ok,
-          "iec62443 --init scaffolds an empty template and exits 0");
+          "iec62443 --init scaffolds a real, non-empty starter template and exits 0");
    Check (Fusa.Files.Exists (Root & "/.fusa-iec62443-4-1-objectives.json"),
           "iec62443 uses the canonical standard id iec62443-4-1 for its objectives filename");
    Check (Fusa.Cli.Run (Args ("unece", "--dir", Root)) = Exit_Runtime,
           "unece with no objectives file and no --init exits 3");
    Check (Fusa.Cli.Run (Args ("unece", "--dir", Root, "--init")) = Exit_Ok,
-          "unece --init scaffolds an empty template and exits 0");
+          "unece --init scaffolds a real, non-empty starter template and exits 0");
    Check (Fusa.Files.Exists (Root & "/.fusa-unece-r155-objectives.json"),
           "unece uses the canonical standard id unece-r155 for its objectives filename");
    Check (Fusa.Cli.Run (Args ("slsa", "--dir", Root)) = Exit_Runtime,
           "slsa with no objectives file and no --init exits 3");
    Check (Fusa.Cli.Run (Args ("slsa", "--dir", Root, "--init")) = Exit_Ok,
-          "slsa --init scaffolds an empty template and exits 0");
+          "slsa --init scaffolds a real, non-empty starter template and exits 0");
    Check (Fusa.Cli.Run (Args ("iso26262", "--dir", Root, "--format", "bogus")) = Exit_Usage,
           "iso26262 --format bogus exits Exit_Usage");
+
+   --  Regression (fusa#85): 6 of 7 standards commands used to scaffold
+   --  an EMPTY objectives list ("{""objectives"": []}"), always
+   --  reporting 0/0/0/0 on every project -- indistinguishable in the
+   --  JSON from "no applicable objectives", even though `capabilities`
+   --  advertises all 7 as supported. Each of the 6 now seeds a real,
+   --  non-empty starter checklist (matching do178's existing pattern),
+   --  with a real clause reference for every objective.
+   --  fusa:test REQ-085
+   declare
+      procedure Check_Real_Objectives (Std_Cmd, Filename, First_Id : String) is
+         Exit_Code : Integer;
+         Out_Text  : constant String :=
+           Run_Capturing_Stdout (Args (Std_Cmd, "--dir", Root, "--format", "json"), Exit_Code);
+      begin
+         Check (Ada.Strings.Fixed.Index (Out_Text, """id"": """ & First_Id & """") > 0,
+                Std_Cmd & " --init seeds a real starter objective ("""
+                & First_Id & """), not an empty list");
+         Check (Ada.Strings.Fixed.Index (Out_Text, """clause"":") > 0,
+                Std_Cmd & "'s starter objectives each carry a real ""clause"" "
+                & "reference");
+         Check (Ada.Strings.Fixed.Index
+                  (Fusa.Files.Read_File (Root & "/" & Filename), """objectives"": []") = 0,
+                Std_Cmd & "'s scaffolded objectives file is not the bare "
+                & "empty-objectives-array template");
+      end Check_Real_Objectives;
+   begin
+      Check_Real_Objectives
+        ("iso26262", ".fusa-iso26262-objectives.json", "ISO26262-MGMT-1");
+      Check_Real_Objectives
+        ("iso21434", ".fusa-iso21434-objectives.json", "ISO21434-MGMT-1");
+      Check_Real_Objectives
+        ("iec61508", ".fusa-iec61508-objectives.json", "IEC61508-MGMT-1");
+      Check_Real_Objectives
+        ("iec62443", ".fusa-iec62443-4-1-objectives.json", "IEC62443-SM-1");
+      Check_Real_Objectives
+        ("unece", ".fusa-unece-r155-objectives.json", "UNECE-CSMS-1");
+      Check_Real_Objectives ("slsa", ".fusa-slsa-objectives.json", "SLSA-SRC-1");
+   end;
 
    --  fusa:test REQ-086
    Check (Fusa.Cli.Run (Args ("vuln", "--dir", Root)) = Exit_Ok,
