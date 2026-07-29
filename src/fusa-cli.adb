@@ -3043,12 +3043,19 @@ package body Fusa.Cli is
    --  sign
    ----------------------------------------------------------------------
 
-   function Resolve_Key (Args : String_List) return String is
+   --  Joins Path onto Dir unless Path is already absolute -- Fusa.Files.Join
+   --  has no absolute-path awareness of its own (it would otherwise nest an
+   --  already-absolute path underneath Dir instead of using it verbatim).
+   function Resolve_Path (Dir, Path : String) return String is
+     (if Path'Length > 0 and then Path (Path'First) = '/' then Path
+      else Fusa.Files.Join (Dir, Path));
+
+   function Resolve_Key (Dir : String; Args : String_List) return String is
       Key_Str  : constant String := Flag_Value (Args, "--key", "");
       Key_File : constant String := Flag_Value (Args, "--key-file", "");
    begin
       if Key_File'Length > 0 then
-         return Fusa.Files.Read_File (Key_File);
+         return Fusa.Files.Read_File (Resolve_Path (Dir, Key_File));
       end if;
       return Key_Str;
    end Resolve_Key;
@@ -3106,7 +3113,10 @@ package body Fusa.Cli is
             end if;
 
             declare
-               Key : constant String := Resolve_Key (Rest);
+               Dir           : constant String := Dir_Of (Rest);
+               Resolved_File : constant String :=
+                 Resolve_Path (Dir, To_String (File_Path));
+               Key           : constant String := Resolve_Key (Dir, Rest);
             begin
                if Key'Length = 0 then
                   Ada.Text_IO.Put_Line
@@ -3115,19 +3125,30 @@ package body Fusa.Cli is
                   return Exit_Usage;
                end if;
 
-               if not Fusa.Files.Exists (To_String (File_Path)) then
+               if not Fusa.Files.Exists (Resolved_File) then
                   return Emit_Runtime_Error
-                    (Rest, "sign", "no-file", "file not found: " & To_String (File_Path));
+                    (Rest, "sign", "no-file",
+                     "file not found: " & Resolved_File);
                end if;
 
                declare
-                  Content : constant String := Fusa.Files.Read_File (To_String (File_Path));
+                  Content : constant String :=
+                    Fusa.Files.Read_File (Resolved_File);
                   Sig     : constant String := Fusa.Hmac.Sha256_Hex (Key, Content);
                begin
                   if Verb = "sign" then
                      declare
+                        --  An explicit --sig is user-given (resolved
+                        --  against Dir like every other path here); the
+                        --  default is derived from the already-resolved
+                        --  Resolved_File, so it must NOT be re-resolved
+                        --  (that would double-join Dir onto it).
+                        Sig_Flag : constant String :=
+                          Flag_Value (Rest, "--sig", "");
                         Sig_Path : constant String :=
-                          Flag_Value (Rest, "--sig", To_String (File_Path) & ".sig");
+                          (if Sig_Flag'Length > 0
+                           then Resolve_Path (Dir, Sig_Flag)
+                           else Resolved_File & ".sig");
                      begin
                         Fusa.Files.Write_File (Sig_Path, "sha256-hmac:" & Sig & ASCII.LF);
                         Ada.Text_IO.Put_Line ("wrote " & Sig_Path);
@@ -3135,8 +3156,12 @@ package body Fusa.Cli is
                      return Exit_Ok;
                   else --  "verify"
                      declare
+                        Sig_Flag : constant String :=
+                          Flag_Value (Rest, "--sig", "");
                         Sig_Path : constant String :=
-                          Flag_Value (Rest, "--sig", To_String (File_Path) & ".sig");
+                          (if Sig_Flag'Length > 0
+                           then Resolve_Path (Dir, Sig_Flag)
+                           else Resolved_File & ".sig");
                      begin
                         if not Fusa.Files.Exists (Sig_Path) then
                            return Emit_Runtime_Error

@@ -95,7 +95,7 @@ the simplest route, since GNAT is not distributed via Homebrew.
 | `adafusa disposition list\|add <fp-or-ruleId> <status> [rationale]` | Manage `.fusa-dispositions.json` waivers from the CLI | text, json |
 | `adafusa pr init\|list\|add\|close` | Problem-report log (DO-178C §11.17) | text, json |
 | `adafusa metrics [record]` | Append-only safety-metrics history (`.fusa-metrics.json`) | text, json |
-| `adafusa sign sign\|verify <file> --key <key>` | HMAC-SHA256 evidence-file signing | text |
+| `adafusa sign sign\|verify <file> --key <key> [--dir] [--sig] [--key-file]` | HMAC-SHA256 evidence-file signing; `<file>`/`--sig`/`--key-file` resolve against `--dir` unless already absolute | text |
 | `adafusa hooks install\|remove` | Git pre-commit hook running `check --strict` | text |
 | `adafusa do178\|iso26262\|iso21434\|iec61508\|iec62443\|unece\|slsa [--dir]` | Standards gap-report: load/validate `.fusa-<standard>-objectives.json`; scaffolds a template if absent | text, json |
 | `adafusa verify [--dir]` | Load/validate `.fusa-verify.json` test-suite results; scaffolds a template if absent | text, json |

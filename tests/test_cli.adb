@@ -2007,6 +2007,18 @@ begin
                (Args ("sign", "verify", Sign_Root & "/evidence.txt", "--key", "wrong"))
              = Exit_Gate_Fail,
              "sign verify with the wrong key exits 1 (gate fail)");
+
+      --  Regression: sign accepted --dir syntactically (to avoid
+      --  misparsing its value as the positional <file>) but never
+      --  actually resolved <file>/--sig/--key-file against it.
+      Check (Fusa.Cli.Run
+               (Args ("sign", "sign", "evidence.txt", "--key", "k",
+                       "--dir", Sign_Root)) = Exit_Ok,
+             "sign sign resolves a relative <file> against --dir");
+      Check (Fusa.Cli.Run
+               (Args ("sign", "verify", "evidence.txt", "--key", "k",
+                       "--dir", Sign_Root)) = Exit_Ok,
+             "sign verify resolves a relative <file> against --dir too");
       Ada.Directories.Delete_Tree (Sign_Root);
    end;
 
