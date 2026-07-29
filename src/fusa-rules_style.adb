@@ -73,6 +73,29 @@ package body Fusa.Rules_Style is
       return Line;
    end Code_Portion;
 
+   --  The inverse of Code_Portion: everything from the "--" comment
+   --  marker (the same unquoted-marker detection Code_Portion uses) to
+   --  the end of Line, or "" if Line has no comment. Lets a rule whose
+   --  needle is only ever meaningful inside a comment (e.g. ADA007's
+   --  "TODO" marker) search *just* the comment text, instead of either
+   --  Code_Portion (which would strip the very text the rule exists to
+   --  find) or the whole raw line (which also matches an identifier
+   --  that merely contains the needle, e.g. "Todo_List : array (...)").
+   function Comment_Portion (Line : String) return String is
+      In_String : Boolean := False;
+   begin
+      for I in Line'First .. Line'Last loop
+         if Line (I) = '"' then
+            In_String := not In_String;
+         elsif not In_String and then I < Line'Last
+           and then Line (I) = '-' and then Line (I + 1) = '-'
+         then
+            return Line (I .. Line'Last);
+         end if;
+      end loop;
+      return "";
+   end Comment_Portion;
+
    --  Approximate "is Pos inside a quoted region" check: counts
    --  double-quote characters before Pos on the (normalized) line. An odd
    --  count means Pos falls inside quotes -- either a real Ada string
@@ -121,8 +144,14 @@ package body Fusa.Rules_Style is
       Require_No_Unsafe : Boolean;
       --  False for rules whose needle is itself only ever meaningful
       --  inside a comment (e.g. ADA007's "TODO" marker) -- Code_Portion
-      --  would strip exactly the text those rules exist to find.
-      Strip_Comments    : Boolean := True) return Finding_List
+      --  would strip exactly the text those rules exist to find. Ignored
+      --  when Comment_Only is True.
+      Strip_Comments    : Boolean := True;
+      --  True for rules whose needle should be matched only inside a
+      --  comment, never as part of an identifier/code token (e.g.
+      --  ADA007: "TODO" inside "-- TODO: ..." is a marker, but the same
+      --  substring inside a code identifier like "Todo_List" is not).
+      Comment_Only      : Boolean := False) return Finding_List
    is
       Result      : Finding_List;
       Norm_Needle : constant String := Normalize_For_Match (Needle);
@@ -141,7 +170,9 @@ package body Fusa.Rules_Style is
                         Line      : constant String := Lines.Element (I);
                         Norm_Line : constant String :=
                           Normalize_For_Match
-                            (if Strip_Comments then Code_Portion (Line) else Line);
+                            (if Comment_Only then Comment_Portion (Line)
+                             elsif Strip_Comments then Code_Portion (Line)
+                             else Line);
                         Match_Pos : constant Natural :=
                           Ada.Strings.Fixed.Index (Norm_Line, Norm_Needle);
                      begin
@@ -368,6 +399,28 @@ package body Fusa.Rules_Style is
    --  Keyword, then later ":=", then later a '"' (the assigned value is a
    --  string literal, not e.g. a function call reading a secret at
    --  runtime, which is exactly the safe pattern this rule should not flag).
+   --  Regression: each of SEC001/SEC002's own Description says "identifier
+   --  ending in" the keyword -- but a plain substring match (no boundary
+   --  check at all) also fired on any identifier merely *containing* it,
+   --  e.g. "Secretary_Name" (contains "SECRET") or "Password_Hint"
+   --  (contains "PASSWORD" but isn't a credential name ending in it).
+   --  Only the right edge needs checking: "ending in" allows any prefix
+   --  (a real "DB_Password" must still match, and "_" before the keyword
+   --  is itself an identifier character), but the keyword must not be
+   --  immediately followed by another identifier character -- that is
+   --  what distinguishes "...Password" from "...Password_Hint" or
+   --  "...Passwordless".
+   function Is_Suffix_Boundary
+     (Line : String; Match_End : Natural) return Boolean
+   is
+      function Is_Ident_Char (C : Character) return Boolean is
+        (C in 'A' .. 'Z' | '0' .. '9' | '_');
+      After_Pos : constant Natural := Match_End + 1;
+   begin
+      return After_Pos > Line'Last
+        or else not Is_Ident_Char (Line (After_Pos));
+   end Is_Suffix_Boundary;
+
    function Scan_Credential_Literal
      (Project_Root : String;
       Files        : String_List;
@@ -401,6 +454,8 @@ package body Fusa.Rules_Style is
                                   (Norm_Line (Kw_Pos .. Norm_Line'Last), ":="));
                      begin
                         if Kw_Pos > 0 and then Assign_Pos > 0
+                          and then Is_Suffix_Boundary
+                                     (Norm_Line, Kw_Pos + Norm_Kw'Length - 1)
                           and then not Is_Quoted (Norm_Line, Kw_Pos)
                           and then Ada.Strings.Fixed.Index
                                      (Norm_Line (Assign_Pos .. Norm_Line'Last), """") > 0
@@ -655,7 +710,7 @@ package body Fusa.Rules_Style is
          (Project_Root, Files, "ADA007", Info, "TODO",
           "TODO comment marks incomplete work",
           "resolve the TODO or file a tracked issue before release",
-          Require_No_Unsafe => False, Strip_Comments => False));
+          Require_No_Unsafe => False, Comment_Only => True));
 
    ----------------------------------------------------------------------
    --  ADA008 -- unjustified compiler-diagnostic suppression
