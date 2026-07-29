@@ -5,6 +5,33 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+### Added (#101 -- Ravenscar/tasking rule category, and SPARK contracts on ada-FuSa's own source)
+
+Two narrower, immediately-actionable gaps distinct from #24 (SPARK proof-coverage via `gnatprove`,
+which consumes a *target project's* prover output): (1) a new rule category for Ravenscar/tasking
+hazards, and (2) ada-FuSa's own source practicing what it advocates.
+
+- **New `CONC001` rule** (category `concurrency`, per §1.5.1's `CONC`/`RACE` prefix registry): flags
+  any `task`/`protected` type, object, or body declaration found anywhere in the project when no
+  `pragma Profile (Ravenscar)` (or an equivalent hand-rolled `pragma Restrictions` set) is found
+  anywhere in the project's own source -- the Ravenscar profile is the standard restricted tasking
+  subset used throughout DO-178C-context and safety-critical Ada, and a project using tasking at all
+  previously got zero signal about this. Word-boundary matched on the reserved words `task`/
+  `protected` as a line's first token, so it never false-positives on an ordinary identifier that
+  merely ends in `_Task`/`_Protected` (e.g. `Background_Task : Integer`) -- neither reserved word can
+  ever legally be part of a longer identifier.
+- **SPARK contracts on ada-FuSa's own most safety/security-critical units**: `Fusa.Sha256` and
+  `Fusa.Hmac` (every fingerprint, attestation `contentHash`, `qualify` hash, and evidence-file
+  HMAC signature in this tool ultimately goes through one of these two packages) are now marked
+  `pragma SPARK_Mode (On)` (both are pure computation -- no I/O, exceptions, or heap allocation) and
+  carry real `Post` contracts (`Hex_Digest`/`Sha256_Hex` results are always exactly 64 characters;
+  `Constant_Time_Equal`'s result always equals ordinary string equality, i.e. the timing-safe
+  implementation never changes the answer). The test build (`tests/tests.gpr`) now passes `-gnata`,
+  so the existing, already-thorough `test_sha256.adb`/`test_hmac.adb` suites exercise these
+  contracts for real on every run, not just as static documentation.
+
+3 new regression tests (CONC001); 852/852 checks passing.
+
 ### Added (#85 -- real objectives for 6 of 7 standards gap-report commands)
 
 Of the 7 standards gap-report commands, only `do178` shipped with a real, non-empty starter

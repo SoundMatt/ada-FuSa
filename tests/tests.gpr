@@ -10,6 +10,12 @@ project Tests is
       for Default_Switches ("Ada") use
         ("-gnatwa",
          "-gnat2022",
+         --  fusa#101: enables runtime checking of the Pre/Post contracts
+         --  added to Fusa.Sha256/Fusa.Hmac (and any future ones) -- the
+         --  test suite is the one build that actually exercises them,
+         --  rather than the contracts being purely decorative until a
+         --  future gnatprove run statically discharges them.
+         "-gnata",
          "-fprofile-arcs",
          "-ftest-coverage",
          "-g",

@@ -3,6 +3,8 @@ with Fusa.Sha256;
 
 package body Fusa.Hmac is
 
+   pragma SPARK_Mode (On);
+
    Block_Size : constant := 64; --  SHA-256's block size in bytes.
 
    function Nibble (C : Character) return Unsigned_8 is
