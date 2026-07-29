@@ -5,6 +5,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+### Added (deep-audit B/8 -- disposition warning on a colliding fingerprint)
+
+Section 4.2's `fingerprint` algorithm is intentionally content-based (`ruleId` + `location.file` +
+a digit-folded, whitespace-collapsed message), not line-based -- a spec MUST, so that two
+conforming tools produce identical fingerprints and `diff`/baseline works cross-tool, and so a
+fingerprint stays stable across line-number churn. A side effect: two distinct findings (same
+rule, same file, messages differing only in a number -- e.g. two different `ADA005` "line exceeds
+79 characters (N)" findings at different lengths) can share one fingerprint, since digit runs fold
+to `#` before hashing. This is not a bug to route around in the fingerprint algorithm itself
+(changing it would break cross-tool conformance, the opposite of everything else this project
+does) -- but a human waiving one such finding via `disposition add` should know up front that they
+may be waiving more than one real finding.
+
+- `disposition add <fingerprint> ...` now re-scans the project and, when the fingerprint being
+  added currently matches more than one live finding, prints an advisory (non-blocking) warning
+  naming the count before saving the disposition. Best-effort: silently skipped if the project
+  can't be scanned for reasons unrelated to disposition management (e.g. no `.fusa.json`).
+
+2 new regression tests; 750/750 checks passing (was 748).
+
 ### Fixed (deep-audit A/8 -- path traversal via project.name/version + glob ReDoS)
 
 Two security findings from a fresh multi-agent deep audit (not previously found by the earlier

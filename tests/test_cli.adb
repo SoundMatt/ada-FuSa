@@ -1758,6 +1758,76 @@ begin
             (Args ("disposition", "list", "--dir", Root, "--format", "bogus")) = Exit_Usage,
           "disposition list rejects an unsupported --format with a usage error");
 
+   --  fusa:test REQ-091: section 4.2's content-based fingerprint folds
+   --  digit differences together, so two distinct findings (same rule,
+   --  same file, messages differing only in a number) can share one
+   --  fingerprint. This isn't something to route around in the
+   --  fingerprint algorithm itself (the spec MUST-mandates the exact
+   --  algorithm for cross-tool compatibility) -- instead, `disposition
+   --  add` warns the human up front when the fingerprint they're about
+   --  to waive currently matches more than one real finding.
+   declare
+      Fp_Root : constant String := "tmp_test_cli_fp_collision";
+      Shared_Fp : Unbounded_String := Null_Unbounded_String;
+   begin
+      if Ada.Directories.Exists (Fp_Root) then
+         Ada.Directories.Delete_Tree (Fp_Root);
+      end if;
+      Ada.Directories.Create_Path (Fp_Root & "/src");
+      Fusa.Files.Write_File
+        (Fp_Root & "/.fusa.json",
+         "{""project"":{""name"":""t""},""standard"":""generic""}");
+      declare
+         --  Two ADA005 (line-too-long) findings whose actual lengths
+         --  differ (86 vs 96 characters) -- so the pre-normalization
+         --  messages differ ("...(86)" vs "...(96)") but Normalize_Message
+         --  folds both digit runs to "#", producing one identical
+         --  normalized message and hence one shared fingerprint.
+         Long_86 : constant String := "   -- " & String'(1 .. 80 => 'x');
+         Long_96 : constant String := "   -- " & String'(1 .. 90 => 'y');
+      begin
+         Fusa.Files.Write_File
+           (Fp_Root & "/src/x.adb",
+            "procedure X is" & ASCII.LF &
+              "begin" & ASCII.LF &
+              Long_86 & ASCII.LF &
+              "   null;" & ASCII.LF &
+              Long_96 & ASCII.LF &
+              "   null;" & ASCII.LF &
+              "end X;" & ASCII.LF);
+      end;
+      declare
+         Exit_Code : Integer;
+         Out_Json  : constant String :=
+           Run_Capturing_Stdout
+             (Args ("check", "--dir", Fp_Root, "--format", "json"), Exit_Code);
+         Fp_Key   : constant String := """fingerprint"": """;
+         Fp_Start : constant Natural :=
+           Ada.Strings.Fixed.Index (Out_Json, Fp_Key);
+      begin
+         Shared_Fp := To_Unbounded_String
+           (Out_Json (Fp_Start + Fp_Key'Length ..
+                        Ada.Strings.Fixed.Index
+                          (Out_Json, """", Fp_Start + Fp_Key'Length) - 1));
+      end;
+      declare
+         Exit_Code : Integer;
+         Out_Text  : constant String :=
+           Run_Capturing_Stdout
+             (Args ("disposition", "add", To_String (Shared_Fp), "accepted",
+                     "line length is intentional", "--dir", Fp_Root),
+              Exit_Code);
+      begin
+         Check (Exit_Code = Exit_Ok,
+                "disposition add on a colliding fingerprint still succeeds "
+                & "(the warning is advisory, not blocking)");
+         Check (Ada.Strings.Fixed.Index (Out_Text, "currently matches") > 0,
+                "disposition add warns when the fingerprint being waived "
+                & "currently matches more than one finding");
+      end;
+      Ada.Directories.Delete_Tree (Fp_Root);
+   end;
+
    --  fusa:test REQ-095
    declare
       Pr_Root : constant String := "tmp_test_cli_pr";
