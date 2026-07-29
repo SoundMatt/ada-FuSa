@@ -21,11 +21,15 @@ package body Fusa.Stub_Detect is
      (Ada.Strings.Fixed.Index
         (To_Lower_Str (Haystack), To_Lower_Str (Needle)) > 0);
 
+   --  section 1.6.1 rule A's canonical regex is exactly
+   --  \[[A-Za-z ][^\]]*\] -- the character right after '[' is a letter
+   --  *or a space*, not letters only.
    function Has_Bracket_Placeholder (Text : String) return Boolean is
    begin
       for I in Text'Range loop
          if Text (I) = '[' and then I + 1 <= Text'Last
-           and then Text (I + 1) in 'A' .. 'Z' | 'a' .. 'z'
+           and then (Text (I + 1) in 'A' .. 'Z' | 'a' .. 'z'
+                      or else Text (I + 1) = ' ')
          then
             for J in I + 1 .. Text'Last loop
                if Text (J) = ']' then

@@ -5,6 +5,35 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+### Fixed (deep-audit D/8 -- Rule A bracket regex conformance)
+
+The deep audit flagged Rule A (`FUSA-STUB001`) as over-triggering on legitimate technical prose
+using square brackets (`"buffer[i] causes memory corruption"`, `"voltage [V] out of range"`) and
+on the `"tbd"` deny-list substring matching inside real words (`"STBD"`, a real aviation/marine
+abbreviation).
+
+On closer reading of section 1.6.1, both are **spec-intended, not bugs**: the same paragraph that
+defines the canonical deny-list explicitly anticipates this exact failure mode --  "a legitimate
+hazard/failure-mode description that happens to contain a deny-listed string is rare enough to
+warrant an explicit, individually-justified waiver rather than a blanket pass." Narrowing the
+detector (e.g. requiring word boundaries, or requiring multi-word bracket content) would itself be
+a conformance deviation: two tools disagreeing on what counts as a Rule A match undermines the
+"canonical" part of "canonical deny-list." The documented remedy for a false positive is
+`disposition add`, which already works today (verified in deep-audit fix A's own regression
+tests). **No detection-logic change was made for either of these two specific findings.**
+
+What the audit review *did* surface as a genuine, narrow conformance gap: the bracket regex is
+`\[[A-Za-z ][^\]]*\]` -- the character immediately after `[` is a letter **or a space**, not
+letters only. `Has_Bracket_Placeholder` was missing the space option, so `"[ describe hazard]"`
+(a leading-space instructional phrase) went undetected. Fixed.
+
+Filed [SoundMatt/FuSaOps#101](https://github.com/SoundMatt/FuSaOps/issues/101) to give the spec
+owner visibility into this specific false-positive class being raised by outside audit tooling, in
+case the deliberate tradeoff is worth stating even more explicitly in the spec text itself -- per
+the project's own stated protocol for suspected spec ambiguity (raise it, don't silently guess).
+
+2 new regression tests; 756/756 checks passing (was 754).
+
 ### Fixed (deep-audit C/8 -- attestation hardening)
 
 Three robustness/security findings in `Fusa.Attestation`, all from a fresh multi-agent deep audit:
