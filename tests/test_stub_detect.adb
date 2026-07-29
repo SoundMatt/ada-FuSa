@@ -279,6 +279,28 @@ begin
              & "different-case independentReviewer as the same "
              & "self-attesting identity, not a genuine independent one");
    end;
+   --  Regression: a blank independentReviewer must fail the same way a
+   --  self-attested one does -- it asserts no genuine independent review
+   --  happened at all, so it must not slip through simply because it's
+   --  unequal (as an empty string trivially is) to implementationAuthor.
+   --  contentHash matches here specifically to isolate this branch from
+   --  the separate staleness check below.
+   declare
+      Root : constant Fusa.Json.Value_Access := Fusa.Json.Parse ("{""a"":1}");
+      Hash : constant String := Fusa.Attestation.Canonical_Content_Hash (Root);
+      Blank_Reviewer : constant Fusa.Json.Value_Access :=
+        Fusa.Json.Parse
+          ("{""a"":1,""attestation"":{""status"":""reviewed""," &
+           """implementationAuthor"":""Jane Doe""," &
+           """independentReviewer"":""   ""," &
+           """contentHash"":""" & Hash & """}}");
+      Att : constant Fusa.Attestation.Info :=
+        Fusa.Attestation.Parse (Blank_Reviewer);
+   begin
+      Check (not Fusa.Attestation.Is_Fresh_Reviewed (Att, Blank_Reviewer),
+             "Is_Fresh_Reviewed is False when independentReviewer is "
+             & "blank/whitespace-only, even with a matching contentHash");
+   end;
    declare
       Stale : constant Fusa.Json.Value_Access :=
         Fusa.Json.Parse
