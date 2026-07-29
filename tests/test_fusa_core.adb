@@ -115,4 +115,22 @@ begin
                 & "Fusa.Spec_Version (" & Fusa.Spec_Version & ")");
       end if;
    end;
+
+   --  Regression (fusa#102): spec §15 requires io.x-fusa.tool to be the
+   --  human tool name (Fusa.Tool_Name, "ada-FuSa") -- distinct from
+   --  io.x-fusa.binary, the binary contraction ("adafusa") -- precisely
+   --  so an image can be introspected for both without running it.
+   --  Dockerfile used to set io.x-fusa.tool="adafusa" (the binary name,
+   --  in the wrong label) and never set io.x-fusa.binary at all.
+   declare
+      Docker : constant String := Fusa.Files.Read_File ("Dockerfile");
+   begin
+      Check (Ada.Strings.Fixed.Index
+               (Docker, "io.x-fusa.tool=""" & Fusa.Tool_Name & """") > 0,
+             "Dockerfile's io.x-fusa.tool label is the human tool name ("
+             & Fusa.Tool_Name & "), not the binary contraction");
+      Check (Ada.Strings.Fixed.Index (Docker, "io.x-fusa.binary=""adafusa""") > 0,
+             "Dockerfile carries an io.x-fusa.binary label with the binary "
+             & "contraction, distinct from io.x-fusa.tool");
+   end;
 end Test_Fusa_Core;

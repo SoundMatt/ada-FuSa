@@ -5,6 +5,69 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+### Fixed (tier-1 audit bundle: #84, #86, #97, #98, #99, #100, #102)
+
+Seven independently-verified defects from a fresh deep-dive audit, bundled into one PR:
+
+- **#97** -- `fmea`, `safety-case`, `verify`, and all 7 standards gap-report commands
+  (`do178`/`iso26262`/`iso21434`/`iec61508`/`iec62443`/`unece`/`slsa`) used to scaffold their input
+  file unconditionally on first run, printing a plain-text line and exiting 0 even under
+  `--format json` -- silently producing no JSON document at all. All 10 now require an explicit
+  `--init` before scaffolding, matching `hara`/`tara`'s existing correct behaviour: absent `--init`,
+  a missing input file is a proper `--format json` error envelope, exit 3.
+- **#84** -- `release --full` silently omitted `fmea.json`, `fmea.csv`, and `boundary.mermaid` with
+  no stderr warning. `boundary.mermaid` was a pure omission (now called alongside `boundary.dot`);
+  `fmea.json`/`fmea.csv` were victims of #97's fix interacting with fmea's human-authored-input
+  contract -- `--full` now seeds `.fusa-fmea.json` via `fmea --init` first (on a project's first run)
+  so both are genuinely rendered, even if honestly empty, rather than silently missing.
+- **#99** -- Three `.fusa-hara.json` gaps: `check` never read/validated it at all (now surfaces
+  `Load_Hara`'s findings, including a dangling `fssrRefs` id as a `category: requirement` finding,
+  per section 1.2.5's explicit text); `hara`'s Rule A (FUSA-STUB001) scan only covered
+  `hazards[].description`, missing `operationalSituations[].description` and
+  `safetyGoals[].description`; the MUST `project` field was never scaffolded or emitted in `hara`'s
+  own report output.
+- **#100** -- `tara` emitted a non-conformant `risk: ""` when every SFOP impact axis failed to parse
+  (risk is a closed enum: `critical|high|medium|low` -- `""` is not a member); it now fails safe to
+  the worst-case rank for lookup purposes, same as an unrecognised `attackFeasibility`, never a blank
+  string. `fmea`'s `FMEA002` wrongly required `occurrence`/`detection` in addition to `severity`,
+  though section 9.2 marks only `severity` MUST -- a fully spec-conformant entry supplying only
+  severity no longer gets a spurious warning.
+- **#86** -- `hara`/`fmea`/`tara`/`safety-case` each independently re-ran the "orphaned disposition"
+  scan (DISP001, section 4.1) against `.fusa-dispositions.json`, but none of the four scan real
+  project source -- every accepted/deferred disposition (correctly matched by `check`'s own finding
+  set) looked orphaned from their narrow point of view, guaranteeing a false positive. The
+  orphaned-disposition rule is `check`-only now; the four still apply/suppress matching dispositions
+  against their own findings, they just no longer emit a bogus DISP001 for one that doesn't.
+- **#98** -- Any unrecognised `--flag` was silently accepted and ignored across every command,
+  proceeding as if nothing were wrong (exit 0) -- section 2.3 requires a usage error (exit 2). A
+  centrally-checked, per-command exhaustive known-flag set now rejects a genuinely unrecognised flag
+  before dispatch.
+- **#102** -- Dockerfile's `io.x-fusa.tool` label held the binary name (`"adafusa"`) instead of the
+  human tool name (`"ada-FuSa"`), and never set the separate `io.x-fusa.binary` label at all (section
+  15). `init`'s interactive-mode blank-answer default was the non-canonical `"generic"`; now
+  `"iso26262"`, a real section 2.4.1 id.
+
+42 new/updated regression tests; 831/831 checks passing (was 789, after #96's fix).
+
+### Fixed (#96 -- Is_Within's default relative --dir false-clean bug)
+
+`Fusa.Files.Join(Dir, Name)` runs its result through `Normalize_Dot_Segments`, which drops a leading
+`.` path segment, but `Is_Within(Root, Path)` still compared `Path` against the raw, un-normalised
+`Root` string. Since `Dir_Of`'s own default (no `--dir` flag at all -- by far the most common real
+invocation) is the literal `"."`, every `Is_Within` boundary check built on `Join`'s output silently
+rejected every real, in-tree path as "outside" the project root. This broke three independent
+subsystems under the default invocation: `sourceDirs` scanning (`check`/`trace`/`fmea`/`coupling`/
+`comp`/`boundary`/`cyber`/`vuln`/`analyze`/`lint`/`fix` all silently scanned zero files, a false-clean
+exit-0 result), `audit-pack` bundling (silently produced an archive with only an empty
+`manifest.json`), and `release --spdx-version` (spuriously failed with exit 3 on a normal invocation).
+`Is_Within` now normalizes `Root` through the same pass `Join` already applies, and special-cases a
+`Root` that normalizes away entirely by checking `Path` for an absolute prefix or an escaping `..`
+segment instead of a now-empty common string prefix. Regression coverage specifically exercises a
+relative, non-"." `--dir` and a genuine default-`"."` end-to-end CLI invocation via
+`Ada.Directories.Set_Directory` -- the existing suite only ever passed an explicit, already-relative-
+but-not-"." `--dir`, which never exercised this path. 11 new regression tests; 789/789 checks passing
+(was 778).
+
 ### Changed (adopt spec v1.15.2: schemaVersion/specVersion unification)
 
 Spec v1.15.1 clarified §3.2 "schemaVersion semantics": `schemaVersion` (report documents, §3.1) and

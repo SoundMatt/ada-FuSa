@@ -229,7 +229,7 @@ package Fusa.Config is
    --  1.6) if .fusa-hara.json does not already exist; a no-op (does not
    --  overwrite) if it does.
    --  fusa:req REQ-082
-   procedure Scaffold_Hara (Project_Root : String; Standard : String);
+   procedure Scaffold_Hara (Project_Root : String; Standard : String; Project : String := "");
 
    ------------------------------------------------------------------
    --  .fusa-tara.json (spec section 13 "canonical direction": threat
