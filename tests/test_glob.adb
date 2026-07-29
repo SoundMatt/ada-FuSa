@@ -41,4 +41,37 @@ begin
       Check (not Fusa.Glob.Is_Excluded (Patterns, "src/other/lib.adb"),
              "slash-anchored pattern does not match a different directory");
    end;
+
+   --  fusa:test REQ-048
+   --  Regression: Match_Rec used to be a naive recursive backtracking
+   --  matcher -- exponential time on a pattern with many '*' atoms
+   --  against text with no valid match. excludePatterns is untrusted
+   --  project config, so a crafted pattern could hang any source-scanning
+   --  command. This is a canary: if the DP-based matcher ever regresses
+   --  back to exponential recursion, this test (a moderately adversarial
+   --  case, deliberately not huge so the *fixed* matcher still runs this
+   --  instantly) will hang the whole suite rather than fail fast.
+   declare
+      Adversarial_Pattern : constant String :=
+        "a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*ab";
+      Adversarial_Text    : constant String (1 .. 40) := (others => 'a');
+   begin
+      Check (not Fusa.Glob.Match (Adversarial_Pattern, Adversarial_Text),
+             "an adversarial many-'*' pattern against non-matching text "
+             & "resolves (in polynomial time, not exponential) to no match");
+   end;
+
+   --  fusa:test REQ-048: '*' still matches zero characters (an empty run)
+   Check (Fusa.Glob.Match ("foo*.adb", "foo.adb"),
+          "'*' matches a zero-length run");
+   --  fusa:test REQ-048: three consecutive '*' == "**" + "*" (matches the
+   --  original greedy two-at-a-time consumption exactly)
+   Check (Fusa.Glob.Match ("a***b", "a/x/yb"),
+          "three consecutive '*' behaves as '**' followed by '*'");
+   --  fusa:test REQ-048: empty pattern/text edge cases
+   Check (Fusa.Glob.Match ("", ""), "empty pattern matches empty text");
+   Check (not Fusa.Glob.Match ("", "x"),
+          "empty pattern does not match non-empty text");
+   Check (Fusa.Glob.Match ("**", ""), "'**' alone matches empty text");
+   Check (Fusa.Glob.Match ("**", "a/b/c"), "'**' alone matches everything");
 end Test_Glob;

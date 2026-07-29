@@ -1,63 +1,100 @@
+with Ada.Containers.Vectors;
+
 package body Fusa.Glob is
 
-   function Match_Rec
-     (Pattern : String; Pi : Integer; Text : String; Ti : Integer) return Boolean;
+   --  Regression: the original Match_Rec was a naive recursive
+   --  backtracking matcher -- for a pattern with several '*' atoms
+   --  against a text with no valid match, it explores exponentially many
+   --  split points (e.g. "a*a*a*a*...*b" against a long run of "a"s with
+   --  no trailing "b"). Since excludePatterns is untrusted project
+   --  config, a crafted pattern hangs any source-scanning command. This
+   --  is a textbook wildcard-matching problem with a well-known
+   --  polynomial solution: tokenize the pattern into atoms first (so a
+   --  "**" run is a single Double_Star atom, matching the original
+   --  greedy two-at-a-time '*' consumption exactly), then fill a
+   --  dynamic-programming table of size (atom count + 1) x
+   --  (text length + 1) -- O(pattern_len * text_len) time and space,
+   --  never exponential, regardless of how adversarial the pattern is.
 
-   function Match_Rec
-     (Pattern : String; Pi : Integer; Text : String; Ti : Integer) return Boolean
-   is
+   type Atom_Kind is (Lit, Any_Char, Star, Double_Star);
+
+   type Atom is record
+      Kind : Atom_Kind;
+      Ch   : Character := ' ';  --  meaningful only when Kind = Lit
+   end record;
+
+   package Atom_Vectors is new Ada.Containers.Vectors (Positive, Atom);
+
+   function Tokenize (Pattern : String) return Atom_Vectors.Vector is
+      Result : Atom_Vectors.Vector;
+      I      : Integer := Pattern'First;
    begin
-      if Pi > Pattern'Last then
-         return Ti > Text'Last;
-      end if;
-
-      declare
-         C : constant Character := Pattern (Pi);
-      begin
-         if C = '*' and then Pi < Pattern'Last and then Pattern (Pi + 1) = '*' then
-            for J in Ti .. Text'Last + 1 loop
-               if Match_Rec (Pattern, Pi + 2, Text, J) then
-                  return True;
-               end if;
-            end loop;
-            return False;
-
-         elsif C = '*' then
-            declare
-               Limit : Integer := Text'Last + 1;
-            begin
-               for J in Ti .. Text'Last loop
-                  if Text (J) = '/' then
-                     Limit := J;
-                     exit;
-                  end if;
-               end loop;
-               for J in Ti .. Limit loop
-                  if Match_Rec (Pattern, Pi + 1, Text, J) then
-                     return True;
-                  end if;
-               end loop;
-               return False;
-            end;
-
-         elsif C = '?' then
-            if Ti <= Text'Last and then Text (Ti) /= '/' then
-               return Match_Rec (Pattern, Pi + 1, Text, Ti + 1);
+      while I <= Pattern'Last loop
+         if Pattern (I) = '*' then
+            if I < Pattern'Last and then Pattern (I + 1) = '*' then
+               Result.Append (Atom'(Kind => Double_Star, Ch => ' '));
+               I := I + 2;
+            else
+               Result.Append (Atom'(Kind => Star, Ch => ' '));
+               I := I + 1;
             end if;
-            return False;
-
+         elsif Pattern (I) = '?' then
+            Result.Append (Atom'(Kind => Any_Char, Ch => ' '));
+            I := I + 1;
          else
-            if Ti <= Text'Last and then Text (Ti) = C then
-               return Match_Rec (Pattern, Pi + 1, Text, Ti + 1);
-            end if;
-            return False;
+            Result.Append (Atom'(Kind => Lit, Ch => Pattern (I)));
+            I := I + 1;
          end if;
-      end;
-   end Match_Rec;
+      end loop;
+      return Result;
+   end Tokenize;
 
    function Match (Pattern, Text : String) return Boolean is
+      Atoms : constant Atom_Vectors.Vector := Tokenize (Pattern);
+      An    : constant Natural := Natural (Atoms.Length);
+      Tn    : constant Natural := Text'Length;
+
+      --  Dp (I, J) = True iff Atoms (1 .. I) matches Text's first J
+      --  characters.
+      Dp : array (0 .. An, 0 .. Tn) of Boolean :=
+        (others => (others => False));
    begin
-      return Match_Rec (Pattern, Pattern'First, Text, Text'First);
+      Dp (0, 0) := True;
+      for I in 1 .. An loop
+         case Atoms (I).Kind is
+            when Star | Double_Star => Dp (I, 0) := Dp (I - 1, 0);
+            when Lit | Any_Char      => Dp (I, 0) := False;
+         end case;
+      end loop;
+
+      for I in 1 .. An loop
+         declare
+            A : constant Atom := Atoms (I);
+         begin
+            for J in 1 .. Tn loop
+               declare
+                  Tc : constant Character := Text (Text'First + J - 1);
+               begin
+                  case A.Kind is
+                     when Lit =>
+                        Dp (I, J) := Dp (I - 1, J - 1) and then Tc = A.Ch;
+                     when Any_Char =>
+                        Dp (I, J) := Dp (I - 1, J - 1) and then Tc /= '/';
+                     when Star =>
+                        --  Zero or more characters, never crossing '/'.
+                        Dp (I, J) :=
+                          Dp (I - 1, J)
+                          or else (Dp (I, J - 1) and then Tc /= '/');
+                     when Double_Star =>
+                        --  Zero or more characters, '/' included.
+                        Dp (I, J) := Dp (I - 1, J) or else Dp (I, J - 1);
+                  end case;
+               end;
+            end loop;
+         end;
+      end loop;
+
+      return Dp (An, Tn);
    end Match;
 
    function Is_Excluded (Patterns : String_List; Rel_Path : String) return Boolean is
