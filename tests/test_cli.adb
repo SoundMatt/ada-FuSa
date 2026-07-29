@@ -1392,6 +1392,56 @@ begin
       Ada.Directories.Delete_Tree (Analyze_Root);
    end;
 
+   --  Regression: analyze was one of only two gating commands (of 11)
+   --  that never applied .fusa-dispositions.json.
+   declare
+      Analyze_Disp_Root : constant String := "tmp_test_cli_analyze_disp";
+   begin
+      if Ada.Directories.Exists (Analyze_Disp_Root) then
+         Ada.Directories.Delete_Tree (Analyze_Disp_Root);
+      end if;
+      Ada.Directories.Create_Path (Analyze_Disp_Root & "/src");
+      Fusa.Files.Write_File
+        (Analyze_Disp_Root & "/.fusa.json",
+         "{""project"":{""name"":""t""},""standard"":""generic""}");
+      Fusa.Files.Write_File
+        (Analyze_Disp_Root & "/src/many_params.adb",
+         "procedure Many_Params (A, B, C, D, E, F, G : Integer) is" &
+           ASCII.LF &
+         "begin" & ASCII.LF & "   null;" & ASCII.LF &
+           "end Many_Params;" & ASCII.LF);
+      Check (Fusa.Cli.Run
+               (Args ("analyze", "--dir", Analyze_Disp_Root, "--strict")) =
+               Exit_Gate_Fail,
+             "analyze --strict gate-fails on the ANAL002 (too many "
+             & "parameters) WARNING before any disposition exists");
+      declare
+         Exit_Code : Integer;
+         Out_Json  : constant String :=
+           Run_Capturing_Stdout
+             (Args ("analyze", "--dir", Analyze_Disp_Root, "--format", "json"),
+              Exit_Code);
+         Fp_Key   : constant String := """fingerprint"": """;
+         Fp_Start : constant Natural :=
+           Ada.Strings.Fixed.Index (Out_Json, Fp_Key);
+         Fp       : constant String :=
+           Out_Json (Fp_Start + Fp_Key'Length ..
+                       Ada.Strings.Fixed.Index
+                         (Out_Json, """", Fp_Start + Fp_Key'Length) - 1);
+      begin
+         Check (Fusa.Cli.Run
+                  (Args ("disposition", "add", Fp, "accepted", "reviewed",
+                          "--dir", Analyze_Disp_Root)) = Exit_Ok,
+                "disposition add against the ANAL002 finding exits 0");
+      end;
+      Check (Fusa.Cli.Run
+               (Args ("analyze", "--dir", Analyze_Disp_Root, "--strict")) =
+               Exit_Ok,
+             "analyze --strict no longer gate-fails once the ANAL002 "
+             & "finding is accepted via .fusa-dispositions.json");
+      Ada.Directories.Delete_Tree (Analyze_Disp_Root);
+   end;
+
    --  fusa:test REQ-113
    Check (Fusa.Cli.Run (Args ("lint", "--dir", Root, "--format", "bogus")) = Exit_Usage,
           "lint --format bogus exits 2");
@@ -1413,6 +1463,32 @@ begin
              "lint exits 0 without --strict (LINT findings are WARNING)");
       Check (Fusa.Cli.Run (Args ("lint", "--dir", Lint_Root, "--strict")) = Exit_Gate_Fail,
              "lint --strict gate-fails on the trailing-whitespace WARNING");
+
+      --  Regression: lint was the other of only two gating commands (of
+      --  11) that never applied .fusa-dispositions.json.
+      declare
+         Exit_Code : Integer;
+         Out_Json  : constant String :=
+           Run_Capturing_Stdout
+             (Args ("lint", "--dir", Lint_Root, "--format", "json"),
+              Exit_Code);
+         Fp_Key   : constant String := """fingerprint"": """;
+         Fp_Start : constant Natural :=
+           Ada.Strings.Fixed.Index (Out_Json, Fp_Key);
+         Fp       : constant String :=
+           Out_Json (Fp_Start + Fp_Key'Length ..
+                       Ada.Strings.Fixed.Index
+                         (Out_Json, """", Fp_Start + Fp_Key'Length) - 1);
+      begin
+         Check (Fusa.Cli.Run
+                  (Args ("disposition", "add", Fp, "accepted", "reviewed",
+                          "--dir", Lint_Root)) = Exit_Ok,
+                "disposition add against the LINT finding exits 0");
+      end;
+      Check (Fusa.Cli.Run
+               (Args ("lint", "--dir", Lint_Root, "--strict")) = Exit_Ok,
+             "lint --strict no longer gate-fails once the trailing-"
+             & "whitespace finding is accepted via .fusa-dispositions.json");
       Ada.Directories.Delete_Tree (Lint_Root);
    end;
 

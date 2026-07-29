@@ -5,6 +5,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+### Fixed (deep-audit F/8 -- analyze/lint disposition wiring)
+
+`analyze` and `lint` were the only 2 of 11 gating commands that never applied
+`.fusa-dispositions.json` -- a user had no way to waive an ANAL00x/LINT00x false positive short of
+suppressing the whole rule. Both now apply dispositions the same way `check`/`report`/`hara`/
+`tara`/`fmea`/`safety-case`/`cyber`/`diff`/`badge` already do: load `.fusa-dispositions.json` (if
+present) right after computing findings, before rendering output or gating. README's "Dispositions
+/ waivers" section, which claimed only `check`/`report` did this, is corrected to list all 11.
+
+5 new regression tests; 763/763 checks passing (was 758).
+
 ### Fixed (deep-audit E/8 -- SEC001/SEC002/ADA007 correctness)
 
 Unlike Rule A (finding D, above), SEC001/SEC002/ADA007 are ada-FuSa's own starter-rule-pack
