@@ -5289,7 +5289,14 @@ package body Fusa.Cli is
                           (Fusa.Json.Parse
                              (Fusa.Files.Read_File (Prior_Path)));
                      exception
-                        when Fusa.Json.Json_Error =>
+                        --  Fusa.Files.Read_File wraps every OS-level
+                        --  failure (permission denied, deleted between
+                        --  the Exists check above and this read, ...) as
+                        --  Read_Error, not Json_Error -- an unreadable
+                        --  prior sas.json must degrade to "no attestation
+                        --  to carry forward", the same as a malformed one,
+                        --  not crash the whole run.
+                        when Fusa.Json.Json_Error | Fusa.Files.Read_Error =>
                            null;
                      end;
                   end if;

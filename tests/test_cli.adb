@@ -2,6 +2,8 @@ with Ada.Directories;
 with GNAT.OS_Lib;
 with Ada.Text_IO;
 with Ada.Strings.Fixed;
+with Interfaces.C;
+with Interfaces.C.Strings;
 with Ada.Strings.Unbounded; use Ada.Strings.Unbounded;
 with Fusa; use Fusa;
 with Fusa.Cli;
@@ -1583,6 +1585,37 @@ begin
                            (Content, """status"": ""reviewed""") > 0,
                 "sas carries a prior run's attestation forward onto the "
                 & "freshly-regenerated document rather than discarding it");
+      end;
+
+      --  Regression: Fusa.Files.Read_File wraps every OS-level failure
+      --  (not just malformed JSON) as Read_Error -- an unreadable prior
+      --  sas.json (permission denied) must degrade to "no attestation to
+      --  carry forward", not crash the whole run.
+      declare
+         function C_Chmod
+           (Path : Interfaces.C.Strings.chars_ptr; Mode : Interfaces.C.int)
+            return Interfaces.C.int;
+         pragma Import (C, C_Chmod, "chmod");
+
+         procedure Chmod (Path : String; Mode : Interfaces.C.int) is
+            C_Path : Interfaces.C.Strings.chars_ptr :=
+              Interfaces.C.Strings.New_String (Path);
+            Rc     : Interfaces.C.int;
+            pragma Unreferenced (Rc);
+         begin
+            Rc := C_Chmod (C_Path, Mode);
+            Interfaces.C.Strings.Free (C_Path);
+         end Chmod;
+      begin
+         --  Write-only, no read permission -- unreadable (what this
+         --  regression is about) without also blocking the write this
+         --  same command run needs to perform to regenerate sas.json.
+         Chmod (Sas_Root & "/sas.json", 8#200#);
+         Check (Fusa.Cli.Run (Args ("sas", "--dir", Sas_Root)) = Exit_Ok,
+                "sas re-run exits 0 (not a crash) when the prior sas.json "
+                & "is unreadable -- degrades to no attestation to carry "
+                & "forward, same as a malformed prior file");
+         Chmod (Sas_Root & "/sas.json", 8#644#);
       end;
       Ada.Directories.Delete_Tree (Sas_Root);
    end;

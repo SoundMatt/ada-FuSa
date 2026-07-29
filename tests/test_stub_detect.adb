@@ -183,6 +183,23 @@ begin
                Fusa.Attestation.Canonical_Content_Hash (Root_B),
              "Canonical_Content_Hash differs when substantive content differs");
    end;
+   --  Regression: a number too large for Long_Long_Integer anywhere in the
+   --  document (a stray extra digit, a fat-fingered value) used to raise
+   --  an uncaught Constraint_Error, crashing the whole hash computation
+   --  instead of degrading gracefully.
+   declare
+      Huge : constant Fusa.Json.Value_Access :=
+        Fusa.Json.Parse ("{""a"":1e300}");
+      Hash : constant String := Fusa.Attestation.Canonical_Content_Hash (Huge);
+   begin
+      Check (Hash'Length > 0,
+             "Canonical_Content_Hash does not crash on a number too large "
+             & "for Long_Long_Integer -- it degrades to a still-deterministic "
+             & "fallback rather than raising Constraint_Error");
+      Check (Fusa.Attestation.Canonical_Content_Hash (Huge) = Hash,
+             "the fallback formatting is deterministic (same input -> "
+             & "same hash)");
+   end;
    declare
       With_Att : constant Fusa.Json.Value_Access :=
         Fusa.Json.Parse ("{""a"":1,""attestation"":{""status"":""reviewed""}}");
@@ -225,6 +242,26 @@ begin
       Check (not Fusa.Attestation.Is_Fresh_Reviewed (Att, Self_Attested),
              "Is_Fresh_Reviewed downgrades a same-identity "
              & "(self-attested) ""reviewed"" claim to False");
+   end;
+   --  Regression: a naive string-equality self-attestation check is
+   --  trivially bypassed by a trailing space or different casing on the
+   --  same real identity.
+   declare
+      Root : constant Fusa.Json.Value_Access := Fusa.Json.Parse ("{""a"":1}");
+      Hash : constant String := Fusa.Attestation.Canonical_Content_Hash (Root);
+      Whitespace_Bypass : constant Fusa.Json.Value_Access :=
+        Fusa.Json.Parse
+          ("{""a"":1,""attestation"":{""status"":""reviewed""," &
+           """implementationAuthor"":""Jane Doe""," &
+           """independentReviewer"":""  JANE DOE  ""," &
+           """contentHash"":""" & Hash & """}}");
+      Att : constant Fusa.Attestation.Info :=
+        Fusa.Attestation.Parse (Whitespace_Bypass);
+   begin
+      Check (not Fusa.Attestation.Is_Fresh_Reviewed (Att, Whitespace_Bypass),
+             "Is_Fresh_Reviewed treats a trailing-whitespace, "
+             & "different-case independentReviewer as the same "
+             & "self-attesting identity, not a genuine independent one");
    end;
    declare
       Stale : constant Fusa.Json.Value_Access :=

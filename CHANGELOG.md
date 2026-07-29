@@ -5,6 +5,31 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+### Fixed (deep-audit C/8 -- attestation hardening)
+
+Three robustness/security findings in `Fusa.Attestation`, all from a fresh multi-agent deep audit:
+
+- **Self-attestation bypass via naive string equality.** `Is_Fresh_Reviewed`'s independence check
+  compared `independentReviewer`/`implementationAuthor` with raw `Unbounded_String` equality --
+  `"Jane Doe"` vs. `"Jane Doe "` (trailing space) or `"JANE DOE"` (different casing) compared
+  unequal, trivially defeating the anti-self-review gate that is section 1.6.2's entire point.
+  Fixed by trimming and case-folding both sides before comparing (still not full identity
+  resolution -- a display name vs. an email for the same person won't be caught -- but the cheap
+  bypasses are closed).
+- **Uncaught crash on oversized JSON numbers.** `Format_Number` converted every number in a
+  document to `Long_Long_Integer` unconditionally; a value like `1e300` anywhere in a hand-edited
+  hara/tara/fmea/safety-case file raised an uncaught `Constraint_Error`, crashing the whole content
+  -hash computation. Fixed with an explicit range check before the conversion, falling back to
+  `Long_Float'Image` (still deterministic, just not JCS-perfect for magnitudes no real artifact
+  would ever contain) instead of crashing.
+- **`Cmd_Sas`'s prior-attestation load only caught `Json_Error`.** `Fusa.Files.Read_File` wraps
+  every OS-level failure (permission denied, deleted between the existence check and the read,
+  ...) as `Read_Error`, not `Json_Error` -- an unreadable prior `sas.json` crashed the whole `sas`
+  run instead of degrading to "no attestation to carry forward". Fixed by also catching
+  `Fusa.Files.Read_Error`.
+
+5 new regression tests; 754/754 checks passing (was 750).
+
 ### Added (deep-audit B/8 -- disposition warning on a colliding fingerprint)
 
 Section 4.2's `fingerprint` algorithm is intentionally content-based (`ruleId` + `location.file` +

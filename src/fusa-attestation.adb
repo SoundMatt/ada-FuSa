@@ -1,3 +1,5 @@
+with Ada.Characters.Handling;
+with Ada.Strings.Fixed;
 with Fusa.Json;
 with Fusa.Sha256;
 use type Fusa.Json.Value_Access;
@@ -61,14 +63,25 @@ package body Fusa.Attestation is
 
    function Jstr (S : String) return String is (Q & Jcs_Escape (S) & Q);
 
+   function Trim_Sign (Img : String) return String is
+     (if Img (Img'First) = ' ' then Img (Img'First + 1 .. Img'Last) else Img);
+
    function Format_Number (N : Long_Float) return String is
-      I   : constant Long_Long_Integer := Long_Long_Integer (N);
-      Img : constant String := Long_Long_Integer'Image (I);
    begin
-      if Img (Img'First) = ' ' then
-         return Img (Img'First + 1 .. Img'Last);
+      --  Every number this actually applies to (severities, counts,
+      --  ratios) is a small integer, but Root can hold any document a
+      --  human hand-edits -- a stray extra digit or fat-fingered huge
+      --  value must not crash the hash computation. Guard the
+      --  Long_Long_Integer conversion's range explicitly rather than
+      --  letting it raise Constraint_Error uncaught; the fallback stays
+      --  deterministic (same input -> same output), just not
+      --  JCS-perfect for magnitudes no real artifact would ever contain.
+      if N >= Long_Float (Long_Long_Integer'First)
+        and then N <= Long_Float (Long_Long_Integer'Last)
+      then
+         return Trim_Sign (Long_Long_Integer'Image (Long_Long_Integer (N)));
       else
-         return Img;
+         return Trim_Sign (Long_Float'Image (N));
       end if;
    end Format_Number;
 
@@ -178,6 +191,17 @@ package body Fusa.Attestation is
         Fusa.Sha256.Hex_Digest (Encode_Members (Root.Members, Exclude));
    end Canonical_Content_Hash;
 
+   --  Identity comparison for the independence check below: trimmed and
+   --  case-folded, so "Jane Doe" / "Jane Doe " / "JANE DOE" are all
+   --  recognised as the same self-attesting identity rather than
+   --  trivially bypassing the anti-self-review gate on whitespace or
+   --  casing alone. Still not full identity resolution (a display name
+   --  vs. an email for the same real person won't be caught) -- that is
+   --  a human-process concern this tool cannot verify.
+   function Normalize_Identity (S : Unbounded_String) return String is
+     (Ada.Characters.Handling.To_Lower
+        (Ada.Strings.Fixed.Trim (To_String (S), Ada.Strings.Both)));
+
    function Is_Fresh_Reviewed
      (Att : Info; Root : Fusa.Json.Value_Access) return Boolean
    is
@@ -185,8 +209,9 @@ package body Fusa.Attestation is
       if not Att.Present or else To_String (Att.Status) /= "reviewed" then
          return False;
       end if;
-      if Length (Att.Independent_Reviewer) = 0
-        or else Att.Independent_Reviewer = Att.Implementation_Author
+      if Normalize_Identity (Att.Independent_Reviewer)'Length = 0
+        or else Normalize_Identity (Att.Independent_Reviewer)
+                  = Normalize_Identity (Att.Implementation_Author)
       then
          return False;
       end if;
