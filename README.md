@@ -193,8 +193,9 @@ comment block immediately above, i.e. a multi-line doc comment). The counting ru
 
 ### Dispositions / waivers (spec §4.1, SHOULD)
 
-`check` and `report` read a `.fusa-dispositions.json` at the project root, if present, and apply
-each entry's `status` to matching findings before gating:
+Every gating finding-list command reads a `.fusa-dispositions.json` at the project root, if
+present, and applies each entry's `status` to matching findings before gating: `check`, `report`,
+`hara`, `tara`, `fmea`, `safety-case`, `cyber`, `analyze`, `lint`, `diff`, `badge`.
 
 ```jsonc
 {

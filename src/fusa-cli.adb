@@ -5054,8 +5054,25 @@ package body Fusa.Cli is
 
          declare
             Files    : constant String_List := Fusa.Source_Scan.Find_Source_Files (Dir, Cfg);
-            Findings : constant Finding_List := Fusa.Analyze.Analyze (Dir, Files);
+            Findings : Finding_List := Fusa.Analyze.Analyze (Dir, Files);
          begin
+            --  Regression: analyze was one of only two gating commands
+            --  (of 11) that never applied .fusa-dispositions.json -- a
+            --  user had no way to waive an ANAL00x false positive.
+            if Fusa.Config.Dispositions_Exist (Dir) then
+               declare
+                  Disps           : constant Fusa.Config.Disposition_List :=
+                    Fusa.Config.Load_Dispositions (Dir);
+                  Orphan_Findings : Finding_List;
+               begin
+                  Fusa.Config.Apply_Dispositions
+                    (Findings, Disps, Orphan_Findings);
+                  for F of Orphan_Findings loop
+                     Findings.Append (F);
+                  end loop;
+               end;
+            end if;
+
             if Format = "json" then
                declare
                   W : Fusa.Json.Writer.Instance;
@@ -5114,8 +5131,25 @@ package body Fusa.Cli is
 
          declare
             Files    : constant String_List := Fusa.Source_Scan.Find_Source_Files (Dir, Cfg);
-            Findings : constant Finding_List := Fusa.Rules_Lint.Scan (Dir, Files);
+            Findings : Finding_List := Fusa.Rules_Lint.Scan (Dir, Files);
          begin
+            --  Regression: lint was the other of only two gating commands
+            --  (of 11) that never applied .fusa-dispositions.json -- a
+            --  user had no way to waive a LINT00x false positive.
+            if Fusa.Config.Dispositions_Exist (Dir) then
+               declare
+                  Disps           : constant Fusa.Config.Disposition_List :=
+                    Fusa.Config.Load_Dispositions (Dir);
+                  Orphan_Findings : Finding_List;
+               begin
+                  Fusa.Config.Apply_Dispositions
+                    (Findings, Disps, Orphan_Findings);
+                  for F of Orphan_Findings loop
+                     Findings.Append (F);
+                  end loop;
+               end;
+            end if;
+
             if Format = "json" then
                declare
                   W : Fusa.Json.Writer.Instance;
