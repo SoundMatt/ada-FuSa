@@ -41,6 +41,15 @@ package Fusa.Json.Writer is
    procedure Value      (W : in out Instance; N : Integer);
    --  fusa:req REQ-027
    procedure Value      (W : in out Instance; B : Boolean);
+   --  fusa#24: a JSON number with exactly one decimal place (e.g.
+   --  coverage --proof's "proofPct": 96.3) -- the plain Integer overload
+   --  above cannot represent this, and Ada's default Float'Image isn't
+   --  valid JSON number syntax (exponent form, leading space). Rounds
+   --  Tenths_Of a whole-number "value * 10" to the nearest integer, so
+   --  the caller controls rounding explicitly rather than depending on
+   --  floating-point formatting.
+   --  fusa:req REQ-124
+   procedure Decimal_Value (W : in out Instance; Tenths : Integer);
    --  fusa:req REQ-028
    procedure Null_Value  (W : in out Instance);
 
@@ -51,6 +60,8 @@ package Fusa.Json.Writer is
    procedure Field (W : in out Instance; K : String; V : Integer);
    --  fusa:req REQ-029
    procedure Field (W : in out Instance; K : String; V : Boolean);
+   --  fusa:req REQ-124
+   procedure Decimal_Field (W : in out Instance; K : String; Tenths : Integer);
 
    --  Field (W, K, V) is skipped entirely (no key/value written) when V
    --  is blank -- used for MAY string fields the spec says to omit rather

@@ -172,6 +172,18 @@ package body Fusa.Json.Writer is
       Append (W.Buf, "null");
    end Null_Value;
 
+   procedure Decimal_Value (W : in out Instance; Tenths : Integer) is
+      Whole : constant Integer := Tenths / 10;
+      Frac  : constant Integer := abs (Tenths) mod 10;
+      Sign  : constant String := (if Tenths < 0 and then Whole = 0 then "-" else "");
+   begin
+      Before_Item (W);
+      Append
+        (W.Buf,
+         Sign & Ada.Strings.Fixed.Trim (Integer'Image (Whole), Ada.Strings.Left) &
+         "." & Ada.Strings.Fixed.Trim (Integer'Image (Frac), Ada.Strings.Left));
+   end Decimal_Value;
+
    procedure Field (W : in out Instance; K, V : String) is
    begin
       Key (W, K);
@@ -189,6 +201,12 @@ package body Fusa.Json.Writer is
       Key (W, K);
       Value (W, V);
    end Field;
+
+   procedure Decimal_Field (W : in out Instance; K : String; Tenths : Integer) is
+   begin
+      Key (W, K);
+      Decimal_Value (W, Tenths);
+   end Decimal_Field;
 
    procedure Field_If_Non_Blank (W : in out Instance; K, V : String) is
    begin

@@ -5,6 +5,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+### Added (#24 -- SPARK proof-coverage via gnatprove, ada-FuSa's flagship differentiator)
+
+New `coverage --proof --proof-file <path> [--proof-threshold N]` command, modelled on the family's
+existing `--mcdc`/`--mcdc-file`/`--mcdc-threshold` pattern (spec section 9.2/13 -- a "draft" schema no
+tool had implemented yet). `Fusa.Proof_Analyze` parses gnatprove's own native `.spark` JSON output
+(reverse-engineered field-level schema, since AdaCore's own SPARK User's Guide documents the files'
+existence but not their exact JSON fields) -- accepting either a single per-unit object or a JSON
+array of them, since gnatprove itself writes one file per compilation unit with no native "whole
+project" aggregate. Only the top-level `"proof"` array counts as a proof obligation; a verification
+condition counts as proved when every one of its `check_tree` entries has at least one prover attempt
+with `"result": "Valid"`. Emits the canonical `proof-report.json` shape (`tool`/`totalObligations`/
+`provedObligations`/`proofPct`/`gatePassed`/`functions[]`), gates (exit 1) when `proofPct` is below
+`--proof-threshold` (absent/0 disables the gate), and reports `proofPct: 100`/`gatePassed: true` when
+there are zero obligations.
+
+Also adds `Fusa.Json.Writer.Decimal_Value`/`Decimal_Field`, a small, genuinely reusable addition to the
+shared JSON writer for a JSON number with exactly one decimal place (`proofPct` needs `96.3`, which
+neither the existing `Integer` overload nor Ada's default float formatting can produce correctly).
+
+1 new requirement (REQ-124), 1 new package, 2 new writer procedures; 20 new regression tests;
+887/887 checks passing.
+
 ### Added (#83 -- fmea/tara/safety-case now analyze the project's own real source)
 
 `fmea`, `tara`, and `safety-case` used to only load-and-validate a hand-authored input file,

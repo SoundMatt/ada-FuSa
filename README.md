@@ -11,13 +11,12 @@ tool-qualification-grade functional safety CLI, implemented independently for se
 
 Ada/SPARK is the reference language for DO-178C Level A avionics software and for formal
 verification — a gap none of the other six x-FuSa tools natively cover. ada-FuSa's flagship
-differentiator, SPARK proof-coverage via `gnatprove`, is **deferred to a later release** (see
-[Known limitations](#known-limitations-v010) below); this first release lands a complete,
-spec-conformant CLI contract for that to build on.
+differentiator, SPARK proof-coverage via `gnatprove` (`adafusa coverage --proof ...`), is
+implemented — see the [Commands](#commands) table below.
 
 ## Features
 
-- **41 commands** spanning the full x-FuSa spec surface (see the [Commands](#commands) table
+- **42 commands** spanning the full x-FuSa spec surface (see the [Commands](#commands) table
   below): `version`, `capabilities`, `init`, `check`, `trace`, `qualify`, `release`, `audit-pack`,
   `report` are the §9.1 MUST set; the rest are §9.2 SHOULD/§9.3 MAY evidence, risk-analysis, and
   hygiene commands.
@@ -113,6 +112,7 @@ the simplest route, since GNAT is not distributed via Homebrew.
 | `adafusa sas [--dir] [--output-dir]` | Software Accomplishment Summary (DO-178C section 11.20): a `checklist[]` of the section 11 data items, `present` set only from real artifacts this tool can see on disk; always writes both `sas.json` and `sas.md`; always exits 0 | json, md |
 | `adafusa template list\|apply <name> [--dir] [--project-name] [--force]` | Scaffold a source-tree/build/CI skeleton (`.gpr`, `src/`, `tests/`, README, CI workflow) complementary to `init`; never writes a LICENSE | text, json |
 | `adafusa fix [--dir] [--apply]` | Whitespace/formatting-only auto-fix (tabs, trailing whitespace, blank-line runs, trailing newline); dry-run by default, gate-fails if any file would change | text, json |
+| `adafusa coverage --proof --proof-file <path> [--proof-threshold N]` | SPARK proof-coverage: parses gnatprove's own `.spark` JSON output (a single per-unit object, or a JSON array of them) into the canonical `proof-report.json` shape; gate-fails if `proofPct < N` (`N` absent/0 disables the gate) | text, json |
 
 **Shared flags:** `--dir <path>` (project root, default `.`), `--output <file>` (write instead of
 stdout), `--no-color` (accepted; ada-FuSa does not currently emit ANSI colour), `--format <fmt>`.
@@ -462,11 +462,7 @@ requirement for images composed into the multi-language FuSaOps container.
 This release lands the §9.1 MUST command set end-to-end, not full rule-pack or platform parity
 with the other six x-FuSa tools:
 
-- **SPARK proof-coverage** (`adafusa coverage --proof ...`, per
-  [FuSaOps#78](https://github.com/SoundMatt/FuSaOps/issues/78) §B) is not implemented yet — it's
-  meant to land once the proof-coverage schema has shipped and proven itself against `gnatprove`'s
-  sibling `cbmc`-based tools first.
-- **MC/DC coverage** (`adafusa coverage --mcdc ...`, the direct sibling of proof-coverage above,
+- **MC/DC coverage** (`adafusa coverage --mcdc ...`, the direct sibling of proof-coverage,
   sourced from `gnatcov`'s output rather than `gnatprove`'s) is not implemented yet
   ([#32](https://github.com/SoundMatt/ada-FuSa/issues/32) tracks it as a follow-up to `comp`, which
   *is* implemented).
