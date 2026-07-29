@@ -556,6 +556,83 @@ begin
              & "identifier (word-boundary check)");
    end;
 
+   --  fusa#101: CONC001 flags task/protected declarations when no
+   --  Ravenscar profile (or equivalent pragma Restrictions set) is
+   --  found anywhere in the project, without false-positiving on
+   --  ordinary identifiers that merely end in "_Task"/"_Protected".
+   Fusa.Files.Write_File
+     (Root & "/src/tasking_no_profile.adb",
+      "package body Tasking_No_Profile is" & ASCII.LF &
+      "   task Background_Worker is" & ASCII.LF &
+      "      entry Start;" & ASCII.LF &
+      "   end Background_Worker;" & ASCII.LF & ASCII.LF &
+      "   task body Background_Worker is" & ASCII.LF &
+      "   begin" & ASCII.LF & "      accept Start;" & ASCII.LF &
+      "   end Background_Worker;" & ASCII.LF &
+      "   protected Shared_State is" & ASCII.LF &
+      "      procedure Set (V : Integer);" & ASCII.LF &
+      "   end Shared_State;" & ASCII.LF &
+      "end Tasking_No_Profile;" & ASCII.LF);
+   Fusa.Files.Write_File
+     (Root & "/src/tasking_word_ok.adb",
+      "procedure Tasking_Word_Ok is" & ASCII.LF &
+      "   Background_Task : Integer := 0;" & ASCII.LF &
+      "   Current_Protected_Data : Boolean := False;" & ASCII.LF &
+      "begin" & ASCII.LF & "   null;" & ASCII.LF & "end Tasking_Word_Ok;" & ASCII.LF);
+   declare
+      Files          : String_List;
+      Findings       : Finding_List;
+      Hits_No_Profile, Hits_Word_Ok : Natural := 0;
+   begin
+      Files.Append ("src/tasking_no_profile.adb");
+      Files.Append ("src/tasking_word_ok.adb");
+      Findings := Fusa.Engine.Run_All (Root, Files);
+      for F of Findings loop
+         if To_String (F.Rule_Id) = "CONC001" then
+            if To_String (F.Loc.File) = "src/tasking_no_profile.adb" then
+               Hits_No_Profile := Hits_No_Profile + 1;
+            elsif To_String (F.Loc.File) = "src/tasking_word_ok.adb" then
+               Hits_Word_Ok := Hits_Word_Ok + 1;
+            end if;
+         end if;
+      end loop;
+      Check (Hits_No_Profile = 3,
+             "CONC001 fires once each for the task spec, task body, and "
+             & "protected spec declarations, with no Ravenscar profile "
+             & "found anywhere in the project (3 hits)");
+      Check (Hits_Word_Ok = 0,
+             "CONC001 does not fire on ""Background_Task""/""Current_" &
+             "Protected_Data"", ordinary identifiers that merely end in "
+             & "the reserved words, not standalone task/protected "
+             & "declarations (word-boundary check)");
+   end;
+   --  Adding a Ravenscar profile pragma anywhere in the project
+   --  suppresses CONC001 entirely.
+   Fusa.Files.Write_File
+     (Root & "/src/ravenscar_config.ads",
+      "pragma Profile (Ravenscar);" & ASCII.LF);
+   declare
+      Files    : String_List;
+      Findings : Finding_List;
+      Hits     : Natural := 0;
+   begin
+      Files.Append ("src/tasking_no_profile.adb");
+      Files.Append ("src/tasking_word_ok.adb");
+      Files.Append ("src/ravenscar_config.ads");
+      Findings := Fusa.Engine.Run_All (Root, Files);
+      for F of Findings loop
+         if To_String (F.Rule_Id) = "CONC001" then
+            Hits := Hits + 1;
+         end if;
+      end loop;
+      Check (Hits = 0,
+             "CONC001 does not fire at all once a ""pragma Profile "
+             & "(Ravenscar);"" is found anywhere in the project");
+   end;
+   Ada.Directories.Delete_File (Root & "/src/tasking_no_profile.adb");
+   Ada.Directories.Delete_File (Root & "/src/tasking_word_ok.adb");
+   Ada.Directories.Delete_File (Root & "/src/ravenscar_config.ads");
+
    --  Regression: ADA008's needle never matched the GNATprove-scoped
    --  three-argument form "pragma Warnings (GNATprove, Off, ...)".
    Fusa.Files.Write_File

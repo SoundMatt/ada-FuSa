@@ -2,6 +2,8 @@ with Interfaces; use Interfaces;
 
 package body Fusa.Sha256 is
 
+   pragma SPARK_Mode (On);
+
    subtype Word is Unsigned_32;
 
    type Word_Array is array (Natural range <>) of Word;

@@ -836,6 +836,144 @@ package body Fusa.Rules_Style is
    is (Scan_Os_Lib_Spawn (Project_Root, Files));
 
    ----------------------------------------------------------------------
+   --  CONC001 -- task/protected declaration with no Ravenscar profile
+   ----------------------------------------------------------------------
+
+   --  fusa#101: the Ravenscar profile (pragma Profile (Ravenscar), or an
+   --  equivalent hand-rolled pragma Restrictions set) is the standard
+   --  restricted tasking subset used throughout DO-178C-context and
+   --  safety-critical Ada -- the concurrency-model equivalent of what
+   --  MISRA C is for C. A project that declares any task/protected
+   --  construct at all, with no such pragma found anywhere in its own
+   --  source, gets no signal today about unrestricted tasking (dynamic
+   --  task creation, unbounded queuing, priority-ceiling violations,
+   --  etc.) -- exactly what Ravenscar exists to rule out. §1.5.1's rule
+   --  prefix registry already reserves CONC/RACE -> category
+   --  "concurrency" for exactly this purpose.
+   function Has_Ravenscar_Profile
+     (Project_Root : String; Files : String_List) return Boolean
+   is
+   begin
+      for Rel of Files loop
+         declare
+            Full : constant String := Fusa.Files.Join (Project_Root, Rel);
+         begin
+            if Fusa.Files.Exists (Full) then
+               declare
+                  Lines : constant String_List :=
+                    Fusa.Files.Split_Lines (Fusa.Files.Read_File (Full));
+               begin
+                  for Line of Lines loop
+                     declare
+                        Norm : constant String :=
+                          Normalize_For_Match (Code_Portion (Line));
+                     begin
+                        --  Both "Profile (Ravenscar)" and "Profile(Ravenscar)"
+                        --  (Normalize_For_Match only collapses whitespace, it
+                        --  doesn't insert/remove spaces around punctuation)
+                        --  are legal Ada, so both spellings are checked. A
+                        --  hand-rolled "pragma Restrictions (...)" set is
+                        --  accepted too -- Ravenscar is itself just a named
+                        --  bundle of Restrictions pragmas (Annex D.13), so a
+                        --  project may reasonably assemble an equivalent set
+                        --  directly instead of naming the profile.
+                        if Ada.Strings.Fixed.Index
+                             (Norm, "PRAGMA PROFILE (RAVENSCAR)") > 0
+                          or else Ada.Strings.Fixed.Index
+                                    (Norm, "PRAGMA PROFILE(RAVENSCAR)") > 0
+                          or else Ada.Strings.Fixed.Index
+                                    (Norm, "PRAGMA RESTRICTIONS") > 0
+                        then
+                           return True;
+                        end if;
+                     end;
+                  end loop;
+               end;
+            end if;
+         end;
+      end loop;
+      return False;
+   end Has_Ravenscar_Profile;
+
+   --  True when Norm_Line's first token (word-boundary matched, so this
+   --  never fires on an ordinary identifier that merely ends in "_Task"/
+   --  "_Protected", e.g. "Background_Task : Task_Id;") is the reserved
+   --  word "task" or "protected". Since both are full Ada reserved
+   --  words, neither can ever legally be an identifier -- a match here
+   --  can only be a real task/protected type, single-object, or body
+   --  declaration.
+   function Starts_With_Tasking_Keyword (Norm_Line : String) return Boolean is
+   begin
+      return (Norm_Line'Length >= 4
+              and then Norm_Line (Norm_Line'First .. Norm_Line'First + 3) = "TASK"
+              and then Is_Word_Boundary_Match (Norm_Line, Norm_Line'First, 4))
+        or else (Norm_Line'Length >= 9
+                 and then Norm_Line (Norm_Line'First .. Norm_Line'First + 8) = "PROTECTED"
+                 and then Is_Word_Boundary_Match (Norm_Line, Norm_Line'First, 9));
+   end Starts_With_Tasking_Keyword;
+
+   function Scan_Ravenscar_Tasking
+     (Project_Root : String; Files : String_List) return Finding_List
+   is
+      Result : Finding_List;
+   begin
+      if Has_Ravenscar_Profile (Project_Root, Files) then
+         return Result;
+      end if;
+      for Rel of Files loop
+         declare
+            Full : constant String := Fusa.Files.Join (Project_Root, Rel);
+         begin
+            if Fusa.Files.Exists (Full) then
+               declare
+                  Lines : constant String_List :=
+                    Fusa.Files.Split_Lines (Fusa.Files.Read_File (Full));
+               begin
+                  for I in 1 .. Natural (Lines.Length) loop
+                     declare
+                        Norm_Line : constant String :=
+                          Normalize_For_Match (Code_Portion (Lines.Element (I)));
+                     begin
+                        if Starts_With_Tasking_Keyword (Norm_Line) then
+                           Result.Append
+                             (Make_Finding
+                                (Rule_Id     => "CONC001",
+                                 Severity    => Warning,
+                                 Message     =>
+                                   "task/protected construct declared with no " &
+                                   "Ravenscar profile (or equivalent pragma " &
+                                   "Restrictions set) found anywhere in the " &
+                                   "project",
+                                 Loc         => Make_Location (Rel, I),
+                                 Category    => Concurrency,
+                                 Remediation =>
+                                   "add ""pragma Profile (Ravenscar);"" (or an " &
+                                   "equivalent pragma Restrictions set) if this " &
+                                   "project is meant to use the restricted " &
+                                   "tasking subset, or waive via a disposition " &
+                                   "if unrestricted tasking is a deliberate " &
+                                   "choice"));
+                        end if;
+                     end;
+                  end loop;
+               end;
+            end if;
+         end;
+      end loop;
+      return Result;
+   end Scan_Ravenscar_Tasking;
+
+   type Conc001_Rule is new Rule_Interface with null record;
+
+   overriding function Id (R : Conc001_Rule) return String is ("CONC001");
+   overriding function Description (R : Conc001_Rule) return String is
+     ("task/protected construct declared with no Ravenscar profile (or " &
+      "equivalent pragma Restrictions set) anywhere in the project");
+   overriding function Run
+     (R : Conc001_Rule; Project_Root : String; Files : String_List) return Finding_List
+   is (Scan_Ravenscar_Tasking (Project_Root, Files));
+
+   ----------------------------------------------------------------------
    --  Registration
    ----------------------------------------------------------------------
 
@@ -851,6 +989,7 @@ package body Fusa.Rules_Style is
    S002 : aliased Sec002_Rule;
    S003 : aliased Sec003_Rule;
    S004 : aliased Sec004_Rule;
+   C001 : aliased Conc001_Rule;
 
 begin
    Register (R001'Access);
@@ -865,4 +1004,5 @@ begin
    Register (S002'Access);
    Register (S003'Access);
    Register (S004'Access);
+   Register (C001'Access);
 end Fusa.Rules_Style;
