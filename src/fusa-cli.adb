@@ -3793,12 +3793,6 @@ package body Fusa.Cli is
       end;
    end Cmd_Gap_Report;
 
-   function Empty_Objective_Starter return Fusa.Config.Gap_Objective_List is
-      Empty : Fusa.Config.Gap_Objective_List;
-   begin
-      return Empty;
-   end Empty_Objective_Starter;
-
    --  A small, non-authoritative starter reference for DO-178C: it uses
    --  ada-FuSa's OWN id scheme ("DO178-<AREA>-<N>") rather than RTCA's
    --  official Annex A table/objective numbers, since this tool has not
@@ -3843,23 +3837,248 @@ package body Fusa.Cli is
    function Cmd_Do178 (Args : String_List) return Integer is
      (Cmd_Gap_Report (Args, "do178", "do178c", Do178_Starter));
 
+   --  fusa#85: the other 6 of 7 standards commands used to scaffold an
+   --  EMPTY objectives list (Empty_Objective_Starter), always reporting
+   --  0/0/0/0 on every project -- indistinguishable in the JSON from "no
+   --  applicable objectives", even though `capabilities` advertises all
+   --  7 as supported. Each gets the same kind of small, non-authoritative
+   --  starter checklist do178's own Do178_Starter already established the
+   --  convention for (ada-FuSa's own id scheme, not the standard's
+   --  official clause/table numbers, which this tool has not verified
+   --  against the primary text) -- a real starting point instead of a
+   --  structurally-guaranteed-empty scaffold.
+
+   --  ISO 26262 (road vehicles functional safety): spans Part 3 (concept
+   --  phase), Part 4 (system level), Part 6 (software level), and Part 8
+   --  (supporting processes, e.g. configuration/change management).
+   function Iso26262_Starter return Fusa.Config.Gap_Objective_List is
+      L : Fusa.Config.Gap_Objective_List;
+
+      procedure Add (Id, Title, Clause : String) is
+         O : Fusa.Config.Gap_Objective;
+      begin
+         O.Id     := To_Unbounded_String (Id);
+         O.Title  := To_Unbounded_String (Title);
+         O.Clause := To_Unbounded_String (Clause);
+         O.Status := To_Unbounded_String ("gap");
+         L.Append (O);
+      end Add;
+   begin
+      Add ("ISO26262-MGMT-1", "Safety management activities planned and documented",
+           "ISO 26262-2 Clause 6 (non-authoritative reference)");
+      Add ("ISO26262-HARA-1", "Hazard analysis and risk assessment performed, ASIL determined",
+           "ISO 26262-3 Clause 6 (non-authoritative reference)");
+      Add ("ISO26262-FSR-1", "Functional safety requirements derived and allocated",
+           "ISO 26262-3 Clause 7 (non-authoritative reference)");
+      Add ("ISO26262-TSR-1", "Technical safety requirements specified at the system level",
+           "ISO 26262-4 Clause 6 (non-authoritative reference)");
+      Add ("ISO26262-SWREQ-1", "Software safety requirements specified and traced",
+           "ISO 26262-6 Clause 6 (non-authoritative reference)");
+      Add ("ISO26262-SWARCH-1", "Software architectural design developed with safety mechanisms",
+           "ISO 26262-6 Clause 7 (non-authoritative reference)");
+      Add ("ISO26262-SWUNIT-1", "Software unit design/implementation follows coding guidelines",
+           "ISO 26262-6 Clause 8 (non-authoritative reference)");
+      Add ("ISO26262-SWVER-1", "Software integration testing and safety requirement verification",
+           "ISO 26262-6 Clause 10/11 (non-authoritative reference)");
+      Add ("ISO26262-CONF-1", "Configuration management and change management applied",
+           "ISO 26262-8 Clause 7/8 (non-authoritative reference)");
+      return L;
+   end Iso26262_Starter;
+
+   --  ISO/SAE 21434 (road vehicles cybersecurity engineering).
+   function Iso21434_Starter return Fusa.Config.Gap_Objective_List is
+      L : Fusa.Config.Gap_Objective_List;
+
+      procedure Add (Id, Title, Clause : String) is
+         O : Fusa.Config.Gap_Objective;
+      begin
+         O.Id     := To_Unbounded_String (Id);
+         O.Title  := To_Unbounded_String (Title);
+         O.Clause := To_Unbounded_String (Clause);
+         O.Status := To_Unbounded_String ("gap");
+         L.Append (O);
+      end Add;
+   begin
+      Add ("ISO21434-MGMT-1", "Organizational cybersecurity management established",
+           "ISO/SAE 21434 Clause 5 (non-authoritative reference)");
+      Add ("ISO21434-MGMT-2", "Project-dependent cybersecurity plan and responsibilities defined",
+           "ISO/SAE 21434 Clause 6 (non-authoritative reference)");
+      Add ("ISO21434-TARA-1",
+           "Threat analysis and risk assessment performed, cybersecurity goals derived",
+           "ISO/SAE 21434 Clause 9 / Clause 15 (non-authoritative reference)");
+      Add ("ISO21434-REQ-1", "Cybersecurity requirements specified and allocated",
+           "ISO/SAE 21434 Clause 10 (non-authoritative reference)");
+      Add ("ISO21434-ARCH-1", "Cybersecurity architecture/design with defined controls",
+           "ISO/SAE 21434 Clause 10 (non-authoritative reference)");
+      Add ("ISO21434-VER-1", "Cybersecurity requirements verified (review, test, penetration test)",
+           "ISO/SAE 21434 Clause 10/11 (non-authoritative reference)");
+      Add ("ISO21434-VAL-1", "Cybersecurity validation of the item performed",
+           "ISO/SAE 21434 Clause 12 (non-authoritative reference)");
+      Add ("ISO21434-MON-1", "Continual monitoring and vulnerability management in place",
+           "ISO/SAE 21434 Clause 8 (non-authoritative reference)");
+      Add ("ISO21434-INC-1", "Cybersecurity incident response process defined",
+           "ISO/SAE 21434 Clause 14 (non-authoritative reference)");
+      return L;
+   end Iso21434_Starter;
+
+   --  IEC 61508 Part 3 (functional safety of E/E/PE systems -- software).
+   function Iec61508_Starter return Fusa.Config.Gap_Objective_List is
+      L : Fusa.Config.Gap_Objective_List;
+
+      procedure Add (Id, Title, Clause : String) is
+         O : Fusa.Config.Gap_Objective;
+      begin
+         O.Id     := To_Unbounded_String (Id);
+         O.Title  := To_Unbounded_String (Title);
+         O.Clause := To_Unbounded_String (Clause);
+         O.Status := To_Unbounded_String ("gap");
+         L.Append (O);
+      end Add;
+   begin
+      Add ("IEC61508-MGMT-1", "Functional safety management planned (safety plan, competence)",
+           "IEC 61508-1 Clause 6 (non-authoritative reference)");
+      Add ("IEC61508-SIL-1", "Safety integrity level (SIL) determined via risk assessment",
+           "IEC 61508-5 (non-authoritative reference)");
+      Add ("IEC61508-SWREQ-1", "Software safety requirements specification developed",
+           "IEC 61508-3 Clause 7.2 (non-authoritative reference)");
+      Add ("IEC61508-SWARCH-1", "Software architecture design with safety integrity techniques",
+           "IEC 61508-3 Clause 7.4.3 (non-authoritative reference)");
+      Add ("IEC61508-SWDES-1", "Software design/development (detailed design and coding)",
+           "IEC 61508-3 Clause 7.4.4-7.4.6 (non-authoritative reference)");
+      Add ("IEC61508-SWTEST-1", "Software module and integration testing performed",
+           "IEC 61508-3 Clause 7.4.7/7.4.8 (non-authoritative reference)");
+      Add ("IEC61508-SWVER-1", "Software verification performed at each life-cycle phase",
+           "IEC 61508-3 Clause 7.9 (non-authoritative reference)");
+      Add ("IEC61508-SWVAL-1", "Software safety validation performed",
+           "IEC 61508-3 Clause 7.7 (non-authoritative reference)");
+      Add ("IEC61508-CM-1", "Configuration management of safety-related software",
+           "IEC 61508-3 Clause 6 (non-authoritative reference)");
+      return L;
+   end Iec61508_Starter;
+
+   --  IEC 62443-4-1 (secure product development lifecycle requirements
+   --  for IACS component/product suppliers -- 8 named practices).
+   function Iec62443_Starter return Fusa.Config.Gap_Objective_List is
+      L : Fusa.Config.Gap_Objective_List;
+
+      procedure Add (Id, Title, Clause : String) is
+         O : Fusa.Config.Gap_Objective;
+      begin
+         O.Id     := To_Unbounded_String (Id);
+         O.Title  := To_Unbounded_String (Title);
+         O.Clause := To_Unbounded_String (Clause);
+         O.Status := To_Unbounded_String ("gap");
+         L.Append (O);
+      end Add;
+   begin
+      Add ("IEC62443-SM-1", "Security management process defined for product development",
+           "IEC 62443-4-1 Practice SM (Security Management, non-authoritative reference)");
+      Add ("IEC62443-SR-1", "Security requirements for the product specified",
+           "IEC 62443-4-1 Practice SR (Security Requirements, non-authoritative reference)");
+      Add ("IEC62443-SD-1", "Secure by design: threat model and security design created",
+           "IEC 62443-4-1 Practice SD (Secure by Design, non-authoritative reference)");
+      Add ("IEC62443-SI-1", "Secure implementation practices applied (secure coding standards)",
+           "IEC 62443-4-1 Practice SI (Secure Implementation, non-authoritative reference)");
+      Add ("IEC62443-SVV-1",
+           "Security verification/validation testing performed (incl. vulnerability testing)",
+           "IEC 62443-4-1 Practice SVV (non-authoritative reference)");
+      Add ("IEC62443-DM-1", "Defect management process covers security defects",
+           "IEC 62443-4-1 Practice DM (Defect Management, non-authoritative reference)");
+      Add ("IEC62443-PM-1", "Security update/patch management process defined",
+           "IEC 62443-4-1 Practice PM (Patch Management, non-authoritative reference)");
+      Add ("IEC62443-SG-1", "Security guidelines provided to product integrators/users",
+           "IEC 62443-4-1 Practice SG (Security Guidelines, non-authoritative reference)");
+      return L;
+   end Iec62443_Starter;
+
+   --  UNECE R155 (cybersecurity management system for vehicle type
+   --  approval). unece maps to r155 here; r156 (software update
+   --  management system) is a separate, not-yet-implemented part.
+   function Unece_Starter return Fusa.Config.Gap_Objective_List is
+      L : Fusa.Config.Gap_Objective_List;
+
+      procedure Add (Id, Title, Clause : String) is
+         O : Fusa.Config.Gap_Objective;
+      begin
+         O.Id     := To_Unbounded_String (Id);
+         O.Title  := To_Unbounded_String (Title);
+         O.Clause := To_Unbounded_String (Clause);
+         O.Status := To_Unbounded_String ("gap");
+         L.Append (O);
+      end Add;
+   begin
+      Add ("UNECE-CSMS-1",
+           "Cybersecurity management system (CSMS) covers development/production/post-production",
+           "UN R155 Section 7.2 (non-authoritative reference)");
+      Add ("UNECE-RISK-1", "Risks to the vehicle type identified and managed",
+           "UN R155 Annex 5 Part A (non-authoritative reference)");
+      Add ("UNECE-MITIG-1",
+           "Threats/vulnerabilities in Annex 5 mitigated or assessed as not applicable",
+           "UN R155 Annex 5 Parts A/B (non-authoritative reference)");
+      Add ("UNECE-TEST-1", "Cybersecurity testing of the vehicle type performed",
+           "UN R155 Section 7.2 (non-authoritative reference)");
+      Add ("UNECE-SUPPLY-1", "Cybersecurity risks from suppliers managed",
+           "UN R155 Section 7.2 (non-authoritative reference)");
+      Add ("UNECE-MON-1",
+           "Monitoring/detection/response to cyberattacks and vulnerabilities in the field",
+           "UN R155 Section 7.2 (non-authoritative reference)");
+      Add ("UNECE-FORENSIC-1", "Data forensic capability to analyze detected cyberattacks",
+           "UN R155 Section 7.2 (non-authoritative reference)");
+      return L;
+   end Unece_Starter;
+
+   --  SLSA v1.0 (Supply-chain Levels for Software Artifacts) -- Build
+   --  and Source tracks.
+   function Slsa_Starter return Fusa.Config.Gap_Objective_List is
+      L : Fusa.Config.Gap_Objective_List;
+
+      procedure Add (Id, Title, Clause : String) is
+         O : Fusa.Config.Gap_Objective;
+      begin
+         O.Id     := To_Unbounded_String (Id);
+         O.Title  := To_Unbounded_String (Title);
+         O.Clause := To_Unbounded_String (Clause);
+         O.Status := To_Unbounded_String ("gap");
+         L.Append (O);
+      end Add;
+   begin
+      Add ("SLSA-SRC-1", "Source code is version controlled with a verified change history",
+           "SLSA Source Track L2 (non-authoritative reference)");
+      Add ("SLSA-SRC-2", "Two-person review is required before a source change is accepted",
+           "SLSA Source Track L3 (non-authoritative reference)");
+      Add ("SLSA-BUILD-1", "The build process is fully scripted/automated, not run manually",
+           "SLSA Build Track L1 (non-authoritative reference)");
+      Add ("SLSA-BUILD-2", "The build runs on a hosted/managed build platform",
+           "SLSA Build Track L2 (non-authoritative reference)");
+      Add ("SLSA-BUILD-3", "Build provenance is generated for each released artifact",
+           "SLSA Build Track L1/L2 (non-authoritative reference)");
+      Add ("SLSA-BUILD-4", "Build provenance is authenticated (signed) by the build platform",
+           "SLSA Build Track L2 (non-authoritative reference)");
+      Add ("SLSA-BUILD-5", "The build runs in an isolated, ephemeral environment",
+           "SLSA Build Track L3 (non-authoritative reference)");
+      Add ("SLSA-PROV-1",
+           "Provenance is non-falsifiable: generated/signed by the platform, not the build itself",
+           "SLSA Build Track L3 (non-authoritative reference)");
+      return L;
+   end Slsa_Starter;
+
    function Cmd_Iso26262 (Args : String_List) return Integer is
-     (Cmd_Gap_Report (Args, "iso26262", "iso26262", Empty_Objective_Starter));
+     (Cmd_Gap_Report (Args, "iso26262", "iso26262", Iso26262_Starter));
 
    function Cmd_Iso21434 (Args : String_List) return Integer is
-     (Cmd_Gap_Report (Args, "iso21434", "iso21434", Empty_Objective_Starter));
+     (Cmd_Gap_Report (Args, "iso21434", "iso21434", Iso21434_Starter));
 
    function Cmd_Iec61508 (Args : String_List) return Integer is
-     (Cmd_Gap_Report (Args, "iec61508", "iec61508", Empty_Objective_Starter));
+     (Cmd_Gap_Report (Args, "iec61508", "iec61508", Iec61508_Starter));
 
    function Cmd_Iec62443 (Args : String_List) return Integer is
-     (Cmd_Gap_Report (Args, "iec62443", "iec62443-4-1", Empty_Objective_Starter));
+     (Cmd_Gap_Report (Args, "iec62443", "iec62443-4-1", Iec62443_Starter));
 
    function Cmd_Unece (Args : String_List) return Integer is
-     (Cmd_Gap_Report (Args, "unece", "unece-r155", Empty_Objective_Starter));
+     (Cmd_Gap_Report (Args, "unece", "unece-r155", Unece_Starter));
 
    function Cmd_Slsa (Args : String_List) return Integer is
-     (Cmd_Gap_Report (Args, "slsa", "slsa", Empty_Objective_Starter));
+     (Cmd_Gap_Report (Args, "slsa", "slsa", Slsa_Starter));
 
    ----------------------------------------------------------------------
    --  verify -- evidence manifest (#26)
