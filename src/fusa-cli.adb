@@ -2621,6 +2621,60 @@ package body Fusa.Cli is
                   E.Note    := Rationale;
                   E.By      := To_Unbounded_String (Flag_Value (Rest, "--by", ""));
                   E.At_Time := To_Unbounded_String (Fusa.Report.Now_Rfc3339);
+
+                  --  section 4.2's fingerprint is intentionally content-
+                  --  based, not line-based (MUST, for cross-tool/line-churn
+                  --  stability) -- so two distinct findings whose only
+                  --  difference is a digit (folded to "#" by
+                  --  Normalize_Message) share one fingerprint by design.
+                  --  That's not a bug to route around here (it would break
+                  --  spec conformance), but a human waiving one SHOULD
+                  --  know up front that they may be waiving more than one
+                  --  real finding -- best-effort, since this requires a
+                  --  full project scan that may itself fail for reasons
+                  --  unrelated to disposition management.
+                  if Length (E.Fingerprint) > 0 then
+                     begin
+                        declare
+                           Cfg     : constant Fusa.Config.Project_Config :=
+                             Fusa.Config.Load (Dir);
+                           Files   : constant String_List :=
+                             Fusa.Source_Scan.Find_Source_Files (Dir, Cfg);
+                           Live    : constant Finding_List :=
+                             Fusa.Engine.Run_All (Dir, Files);
+                           Matches : Natural := 0;
+                        begin
+                           for F of Live loop
+                              if F.Fingerprint = E.Fingerprint then
+                                 Matches := Matches + 1;
+                              end if;
+                           end loop;
+                           if Matches > 1 then
+                              --  Advisory, not a failure -- printed the
+                              --  same way this command's own success
+                              --  confirmation below is (the default
+                              --  output stream), not to Standard_Error
+                              --  (which, once explicitly named as a Put_Line
+                              --  argument, can never be redirected to the
+                              --  "current default error file" -- it always
+                              --  targets the real process stderr).
+                              Ada.Text_IO.Put_Line
+                                ("ada-FuSa: warning: this fingerprint "
+                                 & "currently matches"
+                                 & Natural'Image (Matches)
+                                 & " findings in the project (section 4.2's "
+                                 & "content-based fingerprint folds digit "
+                                 & "differences together) -- this disposition "
+                                 & "will suppress all of them, not just one");
+                           end if;
+                        end;
+                     exception
+                        when Fusa.Config.No_Config_Error
+                          | Fusa.Config.Invalid_Config_Error =>
+                           null;
+                     end;
+                  end if;
+
                   Disps.Append (E);
                   Fusa.Config.Save_Dispositions (Dir, Disps);
                   Ada.Text_IO.Put_Line
