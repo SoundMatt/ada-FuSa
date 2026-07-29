@@ -1000,6 +1000,70 @@ begin
              & "when assetsInProject understates the real denominator");
    end;
 
+   --  Regression (fusa#83): tara used to be permanently vacuous
+   --  ("threats": []) with no hand-authored input, even on a project
+   --  with real public functions. It now derives one real threat per
+   --  real component instead.
+   --  fusa:test REQ-122
+   declare
+      Tara_Analyze_Root : constant String := "tmp_test_cli_tara_analyze";
+   begin
+      if Ada.Directories.Exists (Tara_Analyze_Root) then
+         Ada.Directories.Delete_Tree (Tara_Analyze_Root);
+      end if;
+      Ada.Directories.Create_Path (Tara_Analyze_Root & "/src");
+      Fusa.Files.Write_File
+        (Tara_Analyze_Root & "/.fusa.json",
+         "{""project"":{""name"":""t""},""standard"":""generic""}");
+      Fusa.Files.Write_File (Tara_Analyze_Root & "/.fusa-reqs.json", "{""requirements"":[]}");
+      Fusa.Files.Write_File
+        (Tara_Analyze_Root & "/src/store.ads",
+         "package Store is" & ASCII.LF &
+         "   procedure Save_Record (Data : String);" & ASCII.LF &
+         "end Store;" & ASCII.LF);
+      Fusa.Files.Write_File
+        (Tara_Analyze_Root & "/.fusa-tara.json", "{""threats"": []}");
+      declare
+         Exit_Code : Integer;
+         Out_Text  : constant String :=
+           Run_Capturing_Stdout
+             (Args ("tara", "--dir", Tara_Analyze_Root, "--format", "json"), Exit_Code);
+      begin
+         Check (Ada.Strings.Fixed.Index (Out_Text, """assetsAnalyzed"": 1") > 0
+                and then Ada.Strings.Fixed.Index (Out_Text, """coveragePct"": 100") > 0,
+                "tara with an empty threats array derives 1 real threat "
+                & "(the ""store"" component), not 0");
+         Check (Ada.Strings.Fixed.Index (Out_Text, """id"": ""AUTO-TARA-") > 0,
+                "the derived threat is traceably marked as auto-derived "
+                & "(an ""AUTO-TARA-"" id prefix)");
+         Check (Ada.Strings.Fixed.Index (Out_Text, """risk"": """"") = 0,
+                "the auto-derived threat's risk is a real, non-empty "
+                & "closed-enum value (computed via the same "
+                & "Determine_Tara_Risk table hand-authored threats use)");
+      end;
+      --  A project that DOES hand-author real threats keeps them
+      --  completely unchanged.
+      Fusa.Files.Write_File
+        (Tara_Analyze_Root & "/.fusa-tara.json",
+         "{""threats"":[{""id"":""HAND-1"",""asset"":""a""," &
+         """threat"":""hand-authored threat""," &
+         """attackVector"":""network"",""attackFeasibility"":""low""," &
+         """impact"":{""safety"":""negligible"",""financial"":""negligible""," &
+         """operational"":""negligible"",""privacy"":""negligible""}}]}");
+      declare
+         Exit_Code : Integer;
+         Out_Text  : constant String :=
+           Run_Capturing_Stdout
+             (Args ("tara", "--dir", Tara_Analyze_Root, "--format", "json"), Exit_Code);
+      begin
+         Check (Ada.Strings.Fixed.Index (Out_Text, """HAND-1""") > 0
+                and then Ada.Strings.Fixed.Index (Out_Text, """AUTO-TARA-") = 0,
+                "a project with a real (non-empty) hand-authored threats "
+                & "array is NOT touched by auto-derivation");
+      end;
+      Ada.Directories.Delete_Tree (Tara_Analyze_Root);
+   end;
+
    Fusa.Files.Write_File
      (Root & "/.fusa-tara.json", "{""threats"":[{""threat"":""no id or asset""}]}");
    Check (Fusa.Cli.Run (Args ("tara", "--dir", Root)) = Exit_Gate_Fail,
@@ -1746,6 +1810,55 @@ begin
       Check (Fusa.Cli.Run
                (Args ("fmea", "--dir", Fmea_Cov_Root, "--min-coverage", "bogus")) = Exit_Usage,
              "fmea --min-coverage bogus exits 2 (usage), not a crash");
+
+      --  Regression (fusa#83): fmea used to be permanently vacuous
+      --  ("entries": []) with no hand-authored input, even though
+      --  Fmea_Cov_Root genuinely has 2 real public functions (Pkg.A/
+      --  Pkg.B). It now derives one real entry per function instead.
+      --  fusa:test REQ-121
+      Fusa.Files.Write_File
+        (Fmea_Cov_Root & "/.fusa-fmea.json", "{""entries"": []}");
+      declare
+         Exit_Code : Integer;
+         Out_Text  : constant String :=
+           Run_Capturing_Stdout
+             (Args ("fmea", "--dir", Fmea_Cov_Root, "--format", "json"), Exit_Code);
+      begin
+         Check (Ada.Strings.Fixed.Index (Out_Text, """total"": 2") > 0,
+                "fmea with an empty entries array derives 2 real entries "
+                & "(one per real public function), not 0");
+         Check (Ada.Strings.Fixed.Index (Out_Text, """componentsAnalyzed"": 2") > 0
+                and then Ada.Strings.Fixed.Index (Out_Text, """coveragePct"": 100") > 0,
+                "the derived entries count as real coverage (2/2 = 100%), "
+                & "not the permanent 0% a vacuous scaffold used to report");
+         Check (Ada.Strings.Fixed.Index (Out_Text, """id"": ""AUTO-") > 0,
+                "each derived entry is traceably marked as auto-derived "
+                & "(an ""AUTO-"" id prefix), not presented as if a human "
+                & "had authored it");
+      end;
+      --  A project that DOES hand-author real entries keeps them
+      --  completely unchanged -- auto-derivation is strictly a fallback
+      --  for the empty-entries case, never a silent override.
+      Fusa.Files.Write_File
+        (Fmea_Cov_Root & "/.fusa-fmea.json",
+         "{""entries"":[{""id"":""FMEA-HAND-1"",""item"":""Pkg.A""," &
+         """file"":""src/pkg.ads"",""failureMode"":""hand-authored fm""," &
+         """effect"":""hand-authored effect"",""severity"":8}]}");
+      declare
+         Exit_Code : Integer;
+         Out_Text  : constant String :=
+           Run_Capturing_Stdout
+             (Args ("fmea", "--dir", Fmea_Cov_Root, "--format", "json"), Exit_Code);
+      begin
+         Check (Ada.Strings.Fixed.Index (Out_Text, """total"": 1") > 0,
+                "a project with a real (non-empty) hand-authored entries "
+                & "array is NOT touched by auto-derivation -- still "
+                & "exactly the 1 hand-authored entry");
+         Check (Ada.Strings.Fixed.Index (Out_Text, """FMEA-HAND-1""") > 0
+                and then Ada.Strings.Fixed.Index (Out_Text, """AUTO-") = 0,
+                "the hand-authored entry's own id/content is preserved "
+                & "verbatim, with no auto-derived entries mixed in");
+      end;
       Ada.Directories.Delete_Tree (Fmea_Cov_Root);
    end;
 
@@ -1778,6 +1891,80 @@ begin
           "safety-case --init scaffolds a template and exits 0");
    Check (Fusa.Files.Exists (Root & "/.fusa-safety-case.json"),
           "safety-case --init created .fusa-safety-case.json");
+
+   --  Regression (fusa#83): safety-case used to be permanently vacuous
+   --  ("nodes": []) with no hand-authored GSN argument, even when the
+   --  project has real evidence artifacts already sitting on disk. It
+   --  now derives a real goal/strategy/solution skeleton citing only
+   --  the evidence that actually exists -- and, separately, fabricates
+   --  nothing when no evidence exists at all.
+   --  fusa:test REQ-123
+   declare
+      Sc_Analyze_Root : constant String := "tmp_test_cli_sc_analyze";
+   begin
+      if Ada.Directories.Exists (Sc_Analyze_Root) then
+         Ada.Directories.Delete_Tree (Sc_Analyze_Root);
+      end if;
+      Ada.Directories.Create_Path (Sc_Analyze_Root);
+      Fusa.Files.Write_File
+        (Sc_Analyze_Root & "/.fusa.json",
+         "{""project"":{""name"":""scproj""},""standard"":""generic""}");
+      Fusa.Files.Write_File (Sc_Analyze_Root & "/.fusa-reqs.json", "{""requirements"":[]}");
+      Fusa.Files.Write_File
+        (Sc_Analyze_Root & "/.fusa-safety-case.json", "{""nodes"": []}");
+      Check (Fusa.Cli.Run (Args ("safety-case", "--dir", Sc_Analyze_Root)) = Exit_Ok,
+             "safety-case with an empty nodes array and no evidence "
+             & "artifacts yet exits 0 with an honestly-empty argument");
+      declare
+         Exit_Code0 : Integer;
+         Out_Empty  : constant String :=
+           Run_Capturing_Stdout
+             (Args ("safety-case", "--dir", Sc_Analyze_Root, "--format", "json"), Exit_Code0);
+      begin
+         Check (Ada.Strings.Fixed.Index (Out_Empty, """nodes"": []") > 0,
+                "no evidence artifacts exist yet, so nothing is "
+                & "fabricated -- the derived argument is honestly empty, "
+                & "not a fake claim about non-existent evidence");
+      end;
+      --  Now real evidence exists -- the derived argument should cite it.
+      Fusa.Files.Write_File (Sc_Analyze_Root & "/qualify-report.json", "{}" & ASCII.LF);
+      Fusa.Files.Write_File (Sc_Analyze_Root & "/sbom.json", "{}" & ASCII.LF);
+      declare
+         Exit_Code1 : Integer;
+         Out_Text   : constant String :=
+           Run_Capturing_Stdout
+             (Args ("safety-case", "--dir", Sc_Analyze_Root, "--format", "json"), Exit_Code1);
+      begin
+         Check (Ada.Strings.Fixed.Index (Out_Text, """rootGoal"": ""G1""") > 0,
+                "safety-case derives a real root goal once real evidence exists");
+         Check (Ada.Strings.Fixed.Index (Out_Text, """evidence"": ""qualify-report.json""") > 0
+                and then Ada.Strings.Fixed.Index (Out_Text, """evidence"": ""sbom.json""") > 0,
+                "the derived argument cites both real evidence artifacts "
+                & "that actually exist on disk");
+         Check (Ada.Strings.Fixed.Index (Out_Text, "scproj") > 0,
+                "the derived root goal names the project by its real "
+                & "configured name, not a generic placeholder");
+      end;
+      --  A project that DOES hand-author a real GSN argument keeps it
+      --  completely unchanged.
+      Fusa.Files.Write_File
+        (Sc_Analyze_Root & "/.fusa-safety-case.json",
+         "{""rootGoal"":""HAND-G1"",""nodes"":[" &
+         "{""id"":""HAND-G1"",""type"":""goal"",""text"":""hand-authored""}]}");
+      declare
+         Exit_Code2 : Integer;
+         Out_Text2  : constant String :=
+           Run_Capturing_Stdout
+             (Args ("safety-case", "--dir", Sc_Analyze_Root, "--format", "json"), Exit_Code2);
+      begin
+         Check (Ada.Strings.Fixed.Index (Out_Text2, """HAND-G1""") > 0
+                and then Ada.Strings.Fixed.Index (Out_Text2, "SLN-") = 0,
+                "a project with a real (non-empty) hand-authored GSN "
+                & "argument is NOT touched by auto-derivation");
+      end;
+      Ada.Directories.Delete_Tree (Sc_Analyze_Root);
+   end;
+
    Fusa.Files.Write_File (Root & "/qualify-report.json", "{}" & ASCII.LF);
    Fusa.Files.Write_File
      (Root & "/.fusa-safety-case.json",

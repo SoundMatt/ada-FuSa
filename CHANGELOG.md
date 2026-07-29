@@ -5,6 +5,39 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+### Added (#83 -- fmea/tara/safety-case now analyze the project's own real source)
+
+`fmea`, `tara`, and `safety-case` used to only load-and-validate a hand-authored input file,
+scaffolding an *empty* template on first run -- unlike `comp`/`sci`/`boundary`, which already derive
+their results from the project's real source. In practice this meant all three were permanently
+vacuous on every real project (including ada-FuSa's own), and `release --full` silently produced no
+real `fmea.json` content for the same reason. Each command now derives real content from source when
+its own input file's array is empty -- and, critically, this is strictly a *fallback*: a project with
+genuine hand-authored content keeps it completely unchanged.
+
+- **`fmea`** (`Fusa.Fmea_Analyze`): derives one real, source-traced FMEA entry per public function/
+  procedure `Fusa.Func_Scan` already finds (the same list `--func-coverage`'s denominator uses), with
+  failure mode/effect/cause/severity heuristically varying by the function's actual name (write/save/
+  store -> data-corruption risk; sign/verify/hash/hmac -> cryptographic-correctness risk; run/execute/
+  scan/analyze/process -> resource-exhaustion risk; parse/load/read/decode -> malformed-input risk;
+  otherwise a generic logic-error entry) -- modelled on go-FuSa's own `fmea.deriveAnalysis`.
+- **`tara`** (`Fusa.Tara_Analyze`): derives one real threat per real public package/component, classified
+  by the worst heuristic signal across that component's functions (the same buckets as fmea, mapped onto
+  SFOP impact + a STRIDE-lite threat description), with `risk` computed via the existing
+  `Determine_Tara_Risk` combination table -- consistent with hand-authored threats.
+- **`safety-case`** (`Fusa.Safety_Case_Analyze`): derives a real goal/strategy/solution GSN skeleton citing
+  only the evidence artifacts (`fusa-report.json`, `qualify-report.json`, `comp-report.json`, `sbom.json`,
+  `vuln.json`, `fmea.json`, `sci.json`, `sas.json`) that *actually exist on disk* for this project right
+  now -- never a fabricated claim about one that doesn't exist. If no evidence artifact exists yet, the
+  derived argument is honestly empty rather than faked.
+- `release --full`'s existing `fmea --init`-then-render flow (see the tier-1 bundle entry below) now
+  produces genuinely populated `fmea.json`/`fmea.csv` on a project's first run, not just an
+  honestly-empty-but-still-real one.
+
+Every auto-derived entry/threat/node is traceably marked (`AUTO-`/`SLN-` id prefixes), so it is never
+mistaken for genuine human analysis. 3 new requirements (REQ-121/122/123) and 3 new packages; 15 new
+regression tests; 867/867 checks passing.
+
 ### Added (#101 -- Ravenscar/tasking rule category, and SPARK contracts on ada-FuSa's own source)
 
 Two narrower, immediately-actionable gaps distinct from #24 (SPARK proof-coverage via `gnatprove`,
