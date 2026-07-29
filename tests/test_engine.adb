@@ -711,15 +711,28 @@ begin
              & "on both inputs, not driven by feasibility alone");
       Check (Fusa.Config.Determine_Tara_Risk ("high", Critical_Impact) = "critical",
              "high feasibility with a critical SFOP impact yields critical risk");
-      Check (Fusa.Config.Determine_Tara_Risk ("bogus", Moderate_Impact) = "",
-             "an unrecognised attackFeasibility fails safe to blank");
+      --  Regression (fusa#100): "risk" is a closed enum (critical|high|
+      --  medium|low) -- "" is not a member of it, and a consumer mapping
+      --  risk against that enum has no defined behaviour for a blank
+      --  string. An unrecognised attackFeasibility or a completely
+      --  unrecognised set of impact axes now fails safe to the
+      --  worst-case (most conservative) rank for lookup purposes instead
+      --  of returning "", so risk is always a genuine enum value -- the
+      --  caller (Load_Tara) separately raises its own TARA003/TARA004
+      --  WARNING for the bad vocabulary, so nothing is silently hidden.
+      Check (Fusa.Config.Determine_Tara_Risk ("bogus", Moderate_Impact) = "medium",
+             "an unrecognised attackFeasibility fails safe to the "
+             & "worst-case feasibility rank (high) -- looked up against "
+             & "Moderate_Impact's real ""moderate"" that's still medium, "
+             & "never a blank string");
       Check (Fusa.Config.Determine_Tara_Risk ("high", Fusa.Config.Sfop_Impact'
                (Safety => To_Unbounded_String ("bogus"),
                 Financial => To_Unbounded_String ("bogus"),
                 Operational => To_Unbounded_String ("bogus"),
-                Privacy => To_Unbounded_String ("bogus"))) = "",
+                Privacy => To_Unbounded_String ("bogus"))) = "critical",
              "when none of the four impact axes is a recognised value, "
-             & "risk fails safe to blank too, even with valid feasibility");
+             & "risk fails safe to the worst-case impact rank (""critical""), "
+             & "never a blank string, even with valid feasibility");
    end;
 
    Ada.Directories.Delete_Tree (Root);

@@ -848,11 +848,12 @@ package body Fusa.Config is
       return Result;
    end Load_Hara;
 
-   procedure Scaffold_Hara (Project_Root : String; Standard : String) is
+   procedure Scaffold_Hara (Project_Root : String; Standard : String; Project : String := "") is
    begin
       if not Hara_Exists (Project_Root) then
          Fusa.Files.Write_File
            (Fusa.Files.Join (Project_Root, Hara_File), "{" & ASCII.LF &
+              "  ""project"": """ & Project & """," & ASCII.LF &
               "  ""standard"": """ & Standard & """," & ASCII.LF &
               "  ""operationalSituations"": []," & ASCII.LF &
               "  ""hazards"": []," & ASCII.LF &
@@ -907,7 +908,22 @@ package body Fusa.Config is
          Major      => (Very_Low => R_Medium, Low => R_Medium, Medium => R_High,     High => R_High),
          Critical   => (Very_Low => R_Medium, Low => R_High,   Medium => R_Critical, High => R_Critical));
 
-      Feas  : constant Feasibility_Rank := Feasibility_Of (Attack_Feasibility);
+      Raw_Feas : constant Feasibility_Rank := Feasibility_Of (Attack_Feasibility);
+      --  Regression (fusa#100): "risk" is a closed enum (critical|high|
+      --  medium|low, section 9.2) -- "" is not a member of it, and a
+      --  consumer mapping risk against that enum has no defined
+      --  behaviour for an empty string (unlike an *unrecognised* value,
+      --  which section 4's fail-safe convention explicitly covers).
+      --  When attackFeasibility or every one of the four impact axes
+      --  fails to parse (TARA004 already flags this as its own WARNING
+      --  finding -- nothing is silently swept under the rug), this
+      --  function used to return "" outright. It now fails safe to the
+      --  most conservative (worst-case) rank for whichever axis/axes
+      --  didn't resolve, so risk is always a genuine, real enum value --
+      --  never underestimating risk on bad input, consistent with a
+      --  safety tool's fail-safe posture.
+      Feas  : constant Feasibility_Rank :=
+        (if Raw_Feas = Unrecognised then High else Raw_Feas);
       Worst : Impact_Rank := Unknown;
 
       procedure Consider (S : String) is
@@ -918,15 +934,12 @@ package body Fusa.Config is
          end if;
       end Consider;
    begin
-      if Feas = Unrecognised then
-         return "";
-      end if;
       Consider (To_String (Impact.Safety));
       Consider (To_String (Impact.Financial));
       Consider (To_String (Impact.Operational));
       Consider (To_String (Impact.Privacy));
       if Worst = Unknown then
-         return "";
+         Worst := Critical;
       end if;
       case Table (Worst, Feas) is
          when R_Low      => return "low";
@@ -1608,19 +1621,23 @@ package body Fusa.Config is
                         Any_Rated := True;
                      end if;
 
-                     if E.Severity = 0 or else E.Occurrence = 0 or else E.Detection = 0 then
+                     --  Regression (fusa#100): section 9.2 marks only
+                     --  "severity" MUST -- "occurrence"/"detection" are
+                     --  each MAY. This used to also fire FMEA002 whenever
+                     --  either was absent (defaulted to 0), which meant
+                     --  every spec-conformant entry that supplies only
+                     --  severity got a spurious validation warning.
+                     if E.Severity = 0 then
                         Findings.Append
                           (Make_Finding
                              (Rule_Id     => "FMEA002",
                               Severity    => Warning,
                               Message     =>
-                                "FMEA entry """ & Id & """ has a missing/invalid severity, " &
-                                "occurrence, or detection rating (must each be a whole number " &
-                                "1..10) in " & Fmea_File,
+                                "FMEA entry """ & Id & """ has a missing/invalid severity " &
+                                "rating (must be a whole number 1..10) in " & Fmea_File,
                               Loc         => Make_Location (Fmea_File),
                               Category    => Fusa.Safety,
-                              Remediation =>
-                                "set severity/occurrence/detection to whole numbers 1..10"));
+                              Remediation => "set severity to a whole number 1..10"));
                      end if;
 
                      if Length (E.Item) = 0 or else Length (E.File) = 0

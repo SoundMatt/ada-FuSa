@@ -34,8 +34,9 @@ LABEL org.opencontainers.image.title="adafusa" \
       org.opencontainers.image.revision="${GIT_COMMIT}" \
       org.opencontainers.image.licenses="MPL-2.0" \
       org.opencontainers.image.vendor="SoundMatt" \
-      io.x-fusa.tool="adafusa" \
+      io.x-fusa.tool="ada-FuSa" \
       io.x-fusa.language="ada" \
+      io.x-fusa.binary="adafusa" \
       io.x-fusa.spec-version="${SPEC_VERSION}"
 
 # Non-root user for security

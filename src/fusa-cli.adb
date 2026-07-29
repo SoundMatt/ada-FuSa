@@ -73,6 +73,212 @@ package body Fusa.Cli is
    function Dir_Of (Args : String_List) return String is
      (Flag_Value (Args, "--dir", "."));
 
+   ----------------------------------------------------------------------
+   --  Unknown-flag rejection (fusa#98)
+   ----------------------------------------------------------------------
+
+   --  Builds a small fixed set of known "--flag" names for a single
+   --  command, skipping any blank trailing parameter -- the same
+   --  variadic-via-defaults idiom the test suite's own Args helper uses.
+   function Flag_Set
+     (F1  : String := ""; F2  : String := ""; F3  : String := "";
+      F4  : String := ""; F5  : String := ""; F6  : String := "";
+      F7  : String := ""; F8  : String := ""; F9  : String := "")
+      return String_List
+   is
+      L : String_List;
+   begin
+      if F1'Length > 0 then L.Append (F1); end if;
+      if F2'Length > 0 then L.Append (F2); end if;
+      if F3'Length > 0 then L.Append (F3); end if;
+      if F4'Length > 0 then L.Append (F4); end if;
+      if F5'Length > 0 then L.Append (F5); end if;
+      if F6'Length > 0 then L.Append (F6); end if;
+      if F7'Length > 0 then L.Append (F7); end if;
+      if F8'Length > 0 then L.Append (F8); end if;
+      if F9'Length > 0 then L.Append (F9); end if;
+      return L;
+   end Flag_Set;
+
+   --  Returns the first token in Args that looks like a long flag
+   --  ("--something", with the value-bearing "--name=value" form
+   --  handled by comparing only the part before the "="), but whose
+   --  name is not a member of Known -- or "" if every "--"-prefixed
+   --  token is recognised. A bare "-x" or a positional argument/value
+   --  (including one that happens to follow a recognised flag) never
+   --  matches, since only genuine "--"-prefixed tokens are considered
+   --  flags at all.
+   function Unknown_Flag
+     (Args : String_List; Known : String_List) return String
+   is
+   begin
+      for A of Args loop
+         if A'Length >= 2
+           and then A (A'First) = '-' and then A (A'First + 1) = '-'
+         then
+            declare
+               Eq : Natural := 0;
+            begin
+               for I in A'Range loop
+                  if A (I) = '=' then
+                     Eq := I;
+                     exit;
+                  end if;
+               end loop;
+               declare
+                  Name  : constant String :=
+                    (if Eq > 0 then A (A'First .. Eq - 1) else A);
+                  Found : Boolean := False;
+               begin
+                  for K of Known loop
+                     if K = Name then
+                        Found := True;
+                        exit;
+                     end if;
+                  end loop;
+                  if not Found then
+                     return A;
+                  end if;
+               end;
+            end;
+         end if;
+      end loop;
+      return "";
+   end Unknown_Flag;
+
+   --  section 2.3 MUST: an unrecognised flag name is a usage error (exit
+   --  2), not silently accepted and ignored. Checked once, centrally, at
+   --  Run's dispatch site for every command -- Known is each command's
+   --  real, exhaustive flag set (every "--dir"/"--format"/"--output"
+   --  etc. it actually consumes, derived directly from its own
+   --  implementation), so this rejects only a genuinely unrecognised
+   --  flag, never a legitimate one.
+   function Reject_Unknown_Flags
+     (Cmd_Name : String; Args : String_List; Known : String_List)
+      return Integer
+   is
+      Bad : constant String := Unknown_Flag (Args, Known);
+   begin
+      if Bad'Length > 0 then
+         Ada.Text_IO.Put_Line
+           (Ada.Text_IO.Standard_Error,
+            "ada-FuSa: " & Cmd_Name & ": unrecognized flag '" & Bad & "'");
+         return Exit_Usage;
+      end if;
+      return Exit_Ok;
+   end Reject_Unknown_Flags;
+
+   --  Every command's exhaustive known-flag set, derived from what each
+   --  Cmd_* function actually consumes (via Flag_Value/Has_Flag calls,
+   --  plus "--dir" for every command that calls Dir_Of and "--output"
+   --  for every one that funnels its result through Emit).
+   function Known_Flags_For (Cmd_Name : String) return String_List is
+   begin
+      if Cmd_Name = "version" then
+         return Flag_Set ("--format");
+      elsif Cmd_Name = "capabilities" then
+         return Flag_Set ("--output");
+      elsif Cmd_Name = "init" then
+         return Flag_Set
+           ("--dir", "--name", "--standard", "--asil", "--sil", "--dal",
+            "--project-version", "--force", "--migrate");
+      elsif Cmd_Name = "check" then
+         return Flag_Set ("--dir", "--format", "--strict", "--output");
+      elsif Cmd_Name = "trace" then
+         return Flag_Set
+           ("--dir", "--format", "--strict", "--req-coverage",
+            "--func-coverage", "--sec-tested", "--gaps", "--output");
+      elsif Cmd_Name = "qualify" then
+         return Flag_Set ("--dir", "--format", "--output");
+      elsif Cmd_Name = "release" then
+         return Flag_Set
+           ("--dir", "--format", "--full", "--output-dir",
+            "--spdx-version", "--output");
+      elsif Cmd_Name = "audit-pack" then
+         return Flag_Set ("--dir", "--output");
+      elsif Cmd_Name = "report" then
+         return Flag_Set ("--dir", "--format", "--strict", "--output");
+      elsif Cmd_Name = "comp" then
+         return Flag_Set
+           ("--dir", "--format", "--threshold", "--dal", "--output");
+      elsif Cmd_Name = "hara" then
+         return Flag_Set
+           ("--dir", "--format", "--init", "--require-attestation",
+            "--strict", "--output");
+      elsif Cmd_Name = "tara" then
+         return Flag_Set
+           ("--dir", "--format", "--init", "--require-attestation",
+            "--strict", "--min-coverage", "--output");
+      elsif Cmd_Name = "vuln" then
+         return Flag_Set ("--dir", "--format", "--output");
+      elsif Cmd_Name = "req" then
+         return Flag_Set
+           ("--dir", "--format", "--standard", "--asil", "--level",
+            "--parent", "--text", "--output");
+      elsif Cmd_Name = "disposition" then
+         return Flag_Set
+           ("--dir", "--format", "--file", "--line", "--rule-id",
+            "--by", "--output");
+      elsif Cmd_Name = "pr" then
+         return Flag_Set
+           ("--dir", "--format", "--severity", "--resolution", "--output");
+      elsif Cmd_Name = "metrics" then
+         return Flag_Set ("--dir", "--format", "--output");
+      elsif Cmd_Name = "sign" then
+         return Flag_Set ("--dir", "--key", "--key-file", "--sig");
+      elsif Cmd_Name = "hooks" then
+         return Flag_Set ("--dir");
+      elsif Cmd_Name = "do178" or else Cmd_Name = "iso26262"
+        or else Cmd_Name = "iso21434" or else Cmd_Name = "iec61508"
+        or else Cmd_Name = "iec62443" or else Cmd_Name = "unece"
+        or else Cmd_Name = "slsa"
+      then
+         return Flag_Set ("--dir", "--format", "--init", "--output");
+      elsif Cmd_Name = "verify" then
+         return Flag_Set ("--dir", "--format", "--init", "--output");
+      elsif Cmd_Name = "diff" then
+         return Flag_Set
+           ("--dir", "--format", "--strict", "--baseline", "--output");
+      elsif Cmd_Name = "badge" then
+         return Flag_Set
+           ("--dir", "--label", "--message", "--color", "--output");
+      elsif Cmd_Name = "boundary" then
+         return Flag_Set ("--dir", "--format", "--output");
+      elsif Cmd_Name = "impact" then
+         return Flag_Set ("--dir", "--format", "--output");
+      elsif Cmd_Name = "coupling" then
+         return Flag_Set ("--dir", "--format", "--output");
+      elsif Cmd_Name = "fmea" then
+         return Flag_Set
+           ("--dir", "--format", "--init", "--require-attestation",
+            "--strict", "--min-coverage", "--output");
+      elsif Cmd_Name = "safety-case" then
+         return Flag_Set
+           ("--dir", "--format", "--init", "--require-attestation",
+            "--strict", "--output");
+      elsif Cmd_Name = "cyber" then
+         return Flag_Set ("--dir", "--format", "--strict", "--output");
+      elsif Cmd_Name = "sci" then
+         return Flag_Set ("--dir", "--format", "--output");
+      elsif Cmd_Name = "analyze" then
+         return Flag_Set ("--dir", "--format", "--strict", "--output");
+      elsif Cmd_Name = "lint" then
+         return Flag_Set ("--dir", "--format", "--strict", "--output");
+      elsif Cmd_Name = "sas" then
+         return Flag_Set ("--dir", "--output-dir");
+      elsif Cmd_Name = "template" then
+         return Flag_Set
+           ("--dir", "--format", "--force", "--project-name", "--output");
+      elsif Cmd_Name = "fix" then
+         return Flag_Set ("--dir", "--format", "--apply", "--output");
+      else
+         --  Unknown command name: no flags recognised (Run's own
+         --  "unknown command" branch handles this case before it would
+         --  ever reach here in practice).
+         return Flag_Set;
+      end if;
+   end Known_Flags_For;
+
    --  fusa:req REQ-021
    --  §3.2 SHOULD: projectRoot is reported resolved to an absolute path,
    --  even though --dir itself keeps accepting (and is used elsewhere as)
@@ -389,11 +595,20 @@ package body Fusa.Cli is
 
       if Length (Standard) = 0 then
          if Is_TTY then
-            Ada.Text_IO.Put ("Standard [generic]: ");
+            --  Regression (fusa#102): a blank answer used to default to
+            --  the literal "generic", which is not one of spec §2.4.1's
+            --  closed standard-id enum values (iso26262 | iec61508 |
+            --  do178c | iso21434 | iec62443-4-1 | iec62443-4-2 | misra-c
+            --  | misra-cpp | autosar-cpp14 | cert-c | cert-cpp |
+            --  unece-r155 | unece-r156 | slsa) -- "iso26262" (the same
+            --  id spec's own examples default to throughout) is used
+            --  instead, so a blank interactive answer still produces a
+            --  conformant .fusa.json.
+            Ada.Text_IO.Put ("Standard [iso26262]: ");
             declare
                S : constant String := Ada.Text_IO.Get_Line;
             begin
-               Standard := To_Unbounded_String (if S'Length = 0 then "generic" else S);
+               Standard := To_Unbounded_String (if S'Length = 0 then "iso26262" else S);
             end;
          else
             --  section 9.1 MUST: "standard" is a required value exactly
@@ -493,6 +708,29 @@ package body Fusa.Cli is
             for F of Dup_Findings loop
                Findings.Append (F);
             end loop;
+
+            --  Regression (fusa#99): .fusa-hara.json is listed in section
+            --  1.2 as MUST read/validate when present, the same tier as
+            --  .fusa.json/.fusa-reqs.json -- and section 1.2.5 is
+            --  explicit that a dangling fssrRefs id is "a check finding
+            --  (category requirement), same as any other dangling
+            --  requirement reference". Load_Hara already produces
+            --  exactly those findings (HARA001-006, including HARA006
+            --  for a dangling fssrRefs); check simply never called it.
+            --  Only the finding side effects matter here -- the returned
+            --  Hara_Document itself is check's own report, not hara's.
+            if Fusa.Config.Hara_Exists (Dir) then
+               declare
+                  Hara_Findings : Finding_List;
+                  Hara_Doc      : constant Fusa.Config.Hara_Document :=
+                    Fusa.Config.Load_Hara (Dir, Hara_Findings);
+                  pragma Unreferenced (Hara_Doc);
+               begin
+                  for F of Hara_Findings loop
+                     Findings.Append (F);
+                  end loop;
+               end;
+            end if;
 
             --  fusa:req REQ-072
             if Fusa.Config.Dispositions_Exist (Dir) then
@@ -1399,25 +1637,51 @@ package body Fusa.Cli is
                Fusa.Json.Writer.To_String (W3) & ASCII.LF);
          end;
          declare
-            Fmea_Args : String_List;
-            Fmea_Rc   : Integer;
+            Fmea_Args     : String_List;
+            Fmea_Csv_Args : String_List;
+            Fmea_Rc       : Integer;
             pragma Unreferenced (Fmea_Rc);
          begin
+            --  Regression (fusa#84/#97): fmea is a fully implemented
+            --  command, but its input, .fusa-fmea.json, is deliberately
+            --  human-authored (see #83) and, since #97, Cmd_Fmea now
+            --  correctly refuses to auto-scaffold one without an
+            --  explicit --init (matching hara/tara), exiting non-zero
+            --  instead of silently substituting a template message for
+            --  the requested report. A --full run on a brand-new project
+            --  must still genuinely produce fmea.json/fmea.csv -- an
+            --  honestly-empty report is real content, not a stub --
+            --  rather than silently omit both, so scaffold the input
+            --  first (exactly as running `fmea --init` by hand would)
+            --  when it doesn't exist yet, then render the real report.
+            if not Fusa.Config.Fmea_Exists (Dir) then
+               declare
+                  Fmea_Init_Args : String_List;
+                  Init_Rc        : Integer;
+                  pragma Unreferenced (Init_Rc);
+               begin
+                  Fmea_Init_Args.Append ("--dir");
+                  Fmea_Init_Args.Append (Dir);
+                  Fmea_Init_Args.Append ("--init");
+                  Init_Rc := Cmd_Fmea (Fmea_Init_Args);
+               end;
+            end if;
+
             Fmea_Args.Append ("--dir");
             Fmea_Args.Append (Dir);
             Fmea_Args.Append ("--format");
             Fmea_Args.Append ("json");
             Fmea_Args.Append ("--output");
             Fmea_Args.Append (Fusa.Files.Join (Output_Dir, "fmea.json"));
-            --  fmea and boundary are fully implemented commands (Cmd_Fmea,
-            --  Cmd_Boundary) -- regression: this used to unconditionally
-            --  print "not yet implemented" and skip both, which was false
-            --  by the time either command shipped. fmea's own
-            --  scaffold-on-first-run behaviour (a missing .fusa-fmea.json
-            --  produces a template, not a report, and exits 0) does not
-            --  abort the rest of --full's evidence pipeline, matching
-            --  vuln's already-skip-don't-abort behaviour below.
             Fmea_Rc := Cmd_Fmea (Fmea_Args);
+
+            Fmea_Csv_Args.Append ("--dir");
+            Fmea_Csv_Args.Append (Dir);
+            Fmea_Csv_Args.Append ("--format");
+            Fmea_Csv_Args.Append ("csv");
+            Fmea_Csv_Args.Append ("--output");
+            Fmea_Csv_Args.Append (Fusa.Files.Join (Output_Dir, "fmea.csv"));
+            Fmea_Rc := Cmd_Fmea (Fmea_Csv_Args);
          end;
          declare
             Boundary_Args : String_List;
@@ -1429,6 +1693,23 @@ package body Fusa.Cli is
             Boundary_Args.Append ("--output");
             Boundary_Args.Append (Fusa.Files.Join (Output_Dir, "boundary.dot"));
             Boundary_Rc := Cmd_Boundary (Boundary_Args);
+         end;
+         declare
+            --  Regression (fusa#84): boundary --format mermaid works
+            --  perfectly well standalone and just was never called here
+            --  -- a pure omission, unlike fmea.json's scaffolding issue
+            --  above.
+            Boundary_Mermaid_Args : String_List;
+            Boundary_Mermaid_Rc   : Integer;
+            pragma Unreferenced (Boundary_Mermaid_Rc);
+         begin
+            Boundary_Mermaid_Args.Append ("--dir");
+            Boundary_Mermaid_Args.Append (Dir);
+            Boundary_Mermaid_Args.Append ("--format");
+            Boundary_Mermaid_Args.Append ("mermaid");
+            Boundary_Mermaid_Args.Append ("--output");
+            Boundary_Mermaid_Args.Append (Fusa.Files.Join (Output_Dir, "boundary.mermaid"));
+            Boundary_Mermaid_Rc := Cmd_Boundary (Boundary_Mermaid_Args);
          end;
          declare
             Vuln_Args : String_List;
@@ -1826,18 +2107,25 @@ package body Fusa.Cli is
          end if;
          declare
             Standard_Hint : Unbounded_String := Null_Unbounded_String;
+            --  Regression (fusa#99): the MUST "project" field (§1.2.5)
+            --  was never populated by --init's own scaffold -- sourced
+            --  from .fusa.json's project.name, the same way Standard_Hint
+            --  already is from project.standard.
+            Project_Hint  : Unbounded_String := Null_Unbounded_String;
          begin
             begin
                declare
                   Hcfg : constant Fusa.Config.Project_Config := Fusa.Config.Load (Dir);
                begin
                   Standard_Hint := Hcfg.Standard;
+                  Project_Hint  := Hcfg.Name;
                end;
             exception
                when Fusa.Config.No_Config_Error | Fusa.Config.Invalid_Config_Error =>
                   null;
             end;
-            Fusa.Config.Scaffold_Hara (Dir, To_String (Standard_Hint));
+            Fusa.Config.Scaffold_Hara
+              (Dir, To_String (Standard_Hint), To_String (Project_Hint));
          end;
          Ada.Text_IO.Put_Line
            ("created " & Fusa.Files.Join (Dir, Fusa.Config.Hara_File) &
@@ -1875,14 +2163,31 @@ package body Fusa.Cli is
 
          --  section 1.6.1: rule A/B run over the content this command
          --  itself just loaded, gating this command's own exit code.
+         --  Regression (fusa#99): Rule A used to scan only
+         --  hazards[].description, but section 1.2.5 puts two more
+         --  fields in section 1.6's scope: operationalSituations[]
+         --  .description (MUST, item-specific) and safetyGoals[]
+         --  .description (SHOULD follow the requirement-language rule)
+         --  -- both are now scanned too. Rule B's blanket-fallback scan
+         --  stays scoped to hazard descriptions only, unchanged.
          declare
             Hazard_Descriptions : String_List;
          begin
+            for OS of Doc.Operational_Situations loop
+               Fusa.Stub_Detect.Check_Placeholder
+                 (Findings, Fusa.Config.Hara_File, To_String (OS.Id),
+                  "description", To_String (OS.Description));
+            end loop;
             for H of Doc.Hazards loop
                Fusa.Stub_Detect.Check_Placeholder
                  (Findings, Fusa.Config.Hara_File, To_String (H.Id),
                   "description", To_String (H.Description));
                Hazard_Descriptions.Append (To_String (H.Description));
+            end loop;
+            for SG of Doc.Safety_Goals loop
+               Fusa.Stub_Detect.Check_Placeholder
+                 (Findings, Fusa.Config.Hara_File, To_String (SG.Id),
+                  "description", To_String (SG.Description));
             end loop;
             Fusa.Stub_Detect.Check_Blanket_Fallback
               (Findings, Fusa.Config.Hara_File, "description",
@@ -1893,13 +2198,21 @@ package body Fusa.Cli is
             declare
                Disps : constant Fusa.Config.Disposition_List :=
                  Fusa.Config.Load_Dispositions (Dir);
+               --  Regression (fusa#86): the orphaned-disposition rule
+               --  (DISP001) is scoped to `check` alone (section 4.1) --
+               --  hara only ever sees its own narrow HARA00x finding
+               --  set, so a disposition entry aimed at some other
+               --  command's finding (the common case) would always look
+               --  "orphaned" from here, even when check's own full
+               --  finding set shows it is correctly matched. Discard the
+               --  orphan list entirely; Apply_Dispositions still does its
+               --  other job of suppressing/waiving any of hara's own
+               --  HARA00x findings that a disposition entry does match.
                Orphan_Findings : Finding_List;
+               pragma Unreferenced (Orphan_Findings);
             begin
                Fusa.Config.Apply_Dispositions
                  (Findings, Disps, Orphan_Findings);
-               for F of Orphan_Findings loop
-                  Findings.Append (F);
-               end loop;
             end;
          end if;
 
@@ -1915,6 +2228,9 @@ package body Fusa.Cli is
                --  block and the usual validation findings/summary
                --  extension.
                Fusa.Report.Write_Header (W, "hara-report");
+               --  Regression (fusa#99): section 1.2.5's MUST "project"
+               --  field was never emitted in hara's own report output.
+               W.Field ("project", To_String (Doc.Project));
                W.Key ("operationalSituations");
                W.Array_Start;
                for OS of Doc.Operational_Situations loop
@@ -2128,13 +2444,15 @@ package body Fusa.Cli is
             declare
                Disps : constant Fusa.Config.Disposition_List :=
                  Fusa.Config.Load_Dispositions (Dir);
+               --  Regression (fusa#86): see Cmd_Hara's identical fix --
+               --  the orphaned-disposition rule (DISP001) is scoped to
+               --  `check` alone (section 4.1); tara only ever sees its
+               --  own narrow TARA00x finding set.
                Orphan_Findings : Finding_List;
+               pragma Unreferenced (Orphan_Findings);
             begin
                Fusa.Config.Apply_Dispositions
                  (Findings, Disps, Orphan_Findings);
-               for F of Orphan_Findings loop
-                  Findings.Append (F);
-               end loop;
             end;
          end if;
 
@@ -3353,6 +3671,7 @@ package body Fusa.Cli is
    is
       Dir    : constant String := Dir_Of (Args);
       Format : constant String := Flag_Value (Args, "--format", "text");
+      Init   : constant Boolean := Has_Flag (Args, "--init");
    begin
       if Format /= "text" and then Format /= "json" then
          Ada.Text_IO.Put_Line
@@ -3363,6 +3682,13 @@ package body Fusa.Cli is
       end if;
 
       if not Fusa.Config.Gap_Objectives_Exist (Dir, Standard_Id) then
+         --  Regression (fusa#97): see Cmd_Fmea's identical fix above.
+         if not Init then
+            return Emit_Runtime_Error
+              (Args, "gap-report", "no-config",
+               "no " & Fusa.Config.Gap_Objectives_File (Standard_Id) & " found in " & Dir &
+               " (pass --init to scaffold one)");
+         end if;
          Fusa.Config.Scaffold_Gap_Objectives (Dir, Standard_Id, Starter);
          Ada.Text_IO.Put_Line
            ("created " & Fusa.Files.Join (Dir, Fusa.Config.Gap_Objectives_File (Standard_Id)) &
@@ -3543,6 +3869,7 @@ package body Fusa.Cli is
    function Cmd_Verify (Args : String_List) return Integer is
       Dir    : constant String := Dir_Of (Args);
       Format : constant String := Flag_Value (Args, "--format", "text");
+      Init   : constant Boolean := Has_Flag (Args, "--init");
    begin
       if Format /= "text" and then Format /= "json" then
          Ada.Text_IO.Put_Line
@@ -3553,6 +3880,13 @@ package body Fusa.Cli is
       end if;
 
       if not Fusa.Config.Verify_Exists (Dir) then
+         --  Regression (fusa#97): see Cmd_Fmea's identical fix above.
+         if not Init then
+            return Emit_Runtime_Error
+              (Args, "verify-report", "no-config",
+               "no " & Fusa.Config.Verify_File & " found in " & Dir &
+               " (pass --init to scaffold one)");
+         end if;
          Fusa.Config.Scaffold_Verify (Dir);
          Ada.Text_IO.Put_Line
            ("created " & Fusa.Files.Join (Dir, Fusa.Config.Verify_File) &
@@ -4352,6 +4686,7 @@ package body Fusa.Cli is
       Dir         : constant String := Dir_Of (Args);
       Format      : constant String := Flag_Value (Args, "--format", "text");
       Min_Cov_Str : constant String := Flag_Value (Args, "--min-coverage", "");
+      Init        : constant Boolean := Has_Flag (Args, "--init");
       Require_Attestation : constant Boolean :=
         Has_Flag (Args, "--require-attestation")
         or else Has_Flag (Args, "--strict");
@@ -4365,6 +4700,19 @@ package body Fusa.Cli is
       end if;
 
       if not Fusa.Config.Fmea_Exists (Dir) then
+         --  Regression (fusa#97): scaffolding used to happen
+         --  unconditionally, printing a plain-text line and exiting 0
+         --  even under --format json, which silently produced no JSON
+         --  document at all on a project's first run. Now matches
+         --  hara/tara: scaffolding requires an explicit --init, and its
+         --  absence is a proper §3 JSON-envelope runtime error (exit 3)
+         --  under --format json, not a false-successful empty report.
+         if not Init then
+            return Emit_Runtime_Error
+              (Args, "fmea-report", "no-config",
+               "no " & Fusa.Config.Fmea_File & " found in " & Dir &
+               " (pass --init to scaffold one)");
+         end if;
          Fusa.Config.Scaffold_Fmea (Dir);
          Ada.Text_IO.Put_Line
            ("created " & Fusa.Files.Join (Dir, Fusa.Config.Fmea_File) &
@@ -4463,13 +4811,15 @@ package body Fusa.Cli is
                declare
                   Disps : constant Fusa.Config.Disposition_List :=
                     Fusa.Config.Load_Dispositions (Dir);
+                  --  Regression (fusa#86): see Cmd_Hara's identical fix
+                  --  -- the orphaned-disposition rule (DISP001) is
+                  --  scoped to `check` alone (section 4.1); fmea only
+                  --  ever sees its own narrow FMEA00x finding set.
                   Orphan_Findings : Finding_List;
+                  pragma Unreferenced (Orphan_Findings);
                begin
                   Fusa.Config.Apply_Dispositions
                     (Findings, Disps, Orphan_Findings);
-                  for F of Orphan_Findings loop
-                     Findings.Append (F);
-                  end loop;
                end;
             end if;
 
@@ -4612,6 +4962,7 @@ package body Fusa.Cli is
    function Cmd_Safety_Case (Args : String_List) return Integer is
       Dir    : constant String := Dir_Of (Args);
       Format : constant String := Flag_Value (Args, "--format", "text");
+      Init   : constant Boolean := Has_Flag (Args, "--init");
       Require_Attestation : constant Boolean :=
         Has_Flag (Args, "--require-attestation")
         or else Has_Flag (Args, "--strict");
@@ -4627,6 +4978,16 @@ package body Fusa.Cli is
       end if;
 
       if not Fusa.Config.Safety_Case_Exists (Dir) then
+         --  Regression (fusa#97): see Cmd_Fmea's identical fix above --
+         --  scaffolding now requires an explicit --init, matching
+         --  hara/tara, instead of silently substituting a plain-text
+         --  line for the requested --format json document.
+         if not Init then
+            return Emit_Runtime_Error
+              (Args, "safety-case", "no-config",
+               "no " & Fusa.Config.Safety_Case_File & " found in " & Dir &
+               " (pass --init to scaffold one)");
+         end if;
          Fusa.Config.Scaffold_Safety_Case (Dir);
          Ada.Text_IO.Put_Line
            ("created " & Fusa.Files.Join (Dir, Fusa.Config.Safety_Case_File) &
@@ -4681,13 +5042,15 @@ package body Fusa.Cli is
             declare
                Disps : constant Fusa.Config.Disposition_List :=
                  Fusa.Config.Load_Dispositions (Dir);
+               --  Regression (fusa#86): see Cmd_Hara's identical fix --
+               --  the orphaned-disposition rule (DISP001) is scoped to
+               --  `check` alone (section 4.1); safety-case only ever
+               --  sees its own narrow finding set over GSN node text.
                Orphan_Findings : Finding_List;
+               pragma Unreferenced (Orphan_Findings);
             begin
                Fusa.Config.Apply_Dispositions
                  (Findings, Disps, Orphan_Findings);
-               for F of Orphan_Findings loop
-                  Findings.Append (F);
-               end loop;
             end;
          end if;
 
@@ -5732,6 +6095,27 @@ package body Fusa.Cli is
          Rest : String_List := Args;
       begin
          Rest.Delete_First;
+
+         --  fusa#98: reject a genuinely unrecognised flag with a usage
+         --  error (exit 2) rather than silently accepting and ignoring
+         --  it. Every real command name maps to a non-empty known-flag
+         --  set (see Known_Flags_For), so this deliberately does NOT
+         --  fire for an unrecognised command name itself (Cmd_Name maps
+         --  to the empty set) -- that case falls through to the
+         --  dispatch's own "unknown command" error below unchanged.
+         declare
+            Known : constant String_List := Known_Flags_For (Cmd);
+         begin
+            if not Known.Is_Empty then
+               declare
+                  Flag_Rc : constant Integer := Reject_Unknown_Flags (Cmd, Rest, Known);
+               begin
+                  if Flag_Rc /= Exit_Ok then
+                     return Flag_Rc;
+                  end if;
+               end;
+            end if;
+         end;
 
          if Cmd = "version" then
             return Cmd_Version (Rest);

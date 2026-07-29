@@ -113,6 +113,37 @@ begin
    Check (Fusa.Cli.Run (Args ("check", "--dir", Root, "--format", "bogus")) = Exit_Usage,
           "check with an unsupported --format exits 2 (usage)");
 
+   --  Regression (fusa#98): section 2.3 MUST -- an unrecognised flag
+   --  NAME (as opposed to a recognised flag with a bad VALUE, already
+   --  covered above) used to be silently accepted and ignored,
+   --  proceeding as if nothing were wrong and exiting 0. A handful of
+   --  commands across the family (a source-scanning one, an artifact
+   --  one, a no-flags-at-all one, and the top-level version command)
+   --  lock in that a genuinely unrecognised "--"-prefixed flag is now a
+   --  usage error (exit 2) everywhere, not just for check.
+   --  fusa:test REQ-098
+   Check (Fusa.Cli.Run (Args ("check", "--dir", Root, "--totally-bogus-flag"))
+            = Exit_Usage,
+          "check rejects a completely unrecognised flag with exit 2, "
+          & "instead of silently ignoring it and proceeding");
+   Check (Fusa.Cli.Run (Args ("version", "--whatever")) = Exit_Usage,
+          "version rejects an unrecognised flag with exit 2, instead of "
+          & "printing the version as if nothing happened");
+   Check (Fusa.Cli.Run (Args ("audit-pack", "--dir", Root, "--bogus-flag"))
+            = Exit_Usage,
+          "audit-pack rejects an unrecognised flag with exit 2");
+   Check (Fusa.Cli.Run (Args ("hooks", "install", "--dir", Root, "--bogus"))
+            = Exit_Usage,
+          "hooks (a subcommand-based, --format-less command) rejects an "
+          & "unrecognised flag with exit 2, after its own positional "
+          & "subcommand verb");
+   --  A recognised flag by name but in "--flag=value" form is still
+   --  correctly recognised (not itself misidentified as unknown).
+   Check (Fusa.Cli.Run (Args ("check", "--dir", Root, "--format=json"))
+            /= Exit_Usage,
+          "the --flag=value form of a recognised flag is not itself "
+          & "misidentified as an unrecognised flag");
+
    --  fusa:test REQ-009
    --  Regression: standard is just as required as name (section 9.1
    --  MUST) -- non-interactively omitting it must exit 2, not silently
@@ -195,6 +226,33 @@ begin
           "check --strict still exits 1 when the disposition is 'rejected' "
           & "(a denied waiver, not a dismissal)");
    Ada.Directories.Delete_File (Root & "/.fusa-dispositions.json");
+
+   --  Regression (fusa#99): section 1.2 lists .fusa-hara.json as MUST
+   --  read/validate when present, the same tier as .fusa.json/
+   --  .fusa-reqs.json -- and section 1.2.5 is explicit that a dangling
+   --  fssrRefs id is "a check finding (category requirement)". check
+   --  never read the file at all before this fix.
+   --  fusa:test REQ-099
+   Fusa.Files.Write_File
+     (Root & "/.fusa-hara.json",
+      "{""standard"":""generic"",""operationalSituations"":[]," &
+        """hazards"":[],""safetyGoals"":[{""id"":""SG-001""," &
+        """description"":""d"",""asil"":""ASIL-B""," &
+        """fssrRefs"":[""REQ-DANGLING-999""]}]}");
+   declare
+      Exit_Code : Integer;
+      Out_Text  : constant String :=
+        Run_Capturing_Stdout (Args ("check", "--dir", Root, "--format", "json"), Exit_Code);
+   begin
+      Check (Ada.Strings.Fixed.Index (Out_Text, """ruleId"": ""HARA006""") > 0,
+             "check surfaces a dangling .fusa-hara.json fssrRefs id "
+             & "(HARA006) as one of its own findings, not just when "
+             & "running hara directly");
+      Check (Ada.Strings.Fixed.Index (Out_Text, """category"": ""requirement""") > 0,
+             "the dangling fssrRefs finding is category ""requirement"", "
+             & "same as any other dangling requirement reference");
+   end;
+   Ada.Directories.Delete_File (Root & "/.fusa-hara.json");
 
    --  Regression: a file-scoped disposition (a "file" given, "line"
    --  omitted) used to match EVERY finding for that rule project-wide,
@@ -362,21 +420,38 @@ begin
    --  Regression: release --full used to print "not yet implemented" and
    --  skip fmea/boundary entirely, even though both are fully shipped
    --  commands. boundary needs no input sidecar, so it writes real
-   --  content on the very first --full run; fmea's own scaffold-on-
-   --  first-run behaviour (no .fusa-fmea.json yet) means this first run
-   --  only creates the *input* sidecar, not a fmea.json report -- that's
-   --  fmea's existing, unrelated first-run contract, not a --full bug.
+   --  content on the very first --full run.
    --  fusa:test REQ-013
    Check (Fusa.Files.Exists (Root & "/boundary.dot"),
           "release --full now writes boundary.dot (boundary is wired in, not skipped)");
+   --  Regression (fusa#84): boundary --format mermaid works standalone
+   --  and was simply never called by --full -- a pure omission.
+   Check (Fusa.Files.Exists (Root & "/boundary.mermaid"),
+          "release --full now also writes boundary.mermaid, not just "
+          & "boundary.dot");
+   --  Regression (fusa#84/#97): fmea's input, .fusa-fmea.json, is
+   --  deliberately human-authored (#83) and, since #97, fmea correctly
+   --  refuses to auto-scaffold one without an explicit --init. A --full
+   --  run on a brand-new project must still genuinely produce
+   --  fmea.json/fmea.csv (an honestly-empty report, since --full seeds
+   --  the input via fmea --init first) rather than silently omit both,
+   --  as it used to.
    Check (Fusa.Files.Exists (Root & "/.fusa-fmea.json"),
-          "release --full's first run scaffolds .fusa-fmea.json via fmea's "
-          & "own template-on-first-run behaviour (fmea is wired in, not skipped)");
-   --  Delete the sidecar scaffold immediately: it's a side effect of this
-   --  release --full run, not deliberately-seeded fixture state, and a
-   --  later test (REQ-106's fmea block) asserts .fusa-fmea.json is absent
-   --  before fmea's own first run against this same shared Root.
+          "release --full's first run scaffolds .fusa-fmea.json via "
+          & "fmea --init, then renders the (empty) report from it");
+   Check (Fusa.Files.Exists (Root & "/fmea.json"),
+          "release --full now genuinely writes fmea.json, not just the "
+          & ".fusa-fmea.json input sidecar");
+   Check (Fusa.Files.Exists (Root & "/fmea.csv"),
+          "release --full now also writes fmea.csv");
+   --  Delete the sidecar scaffold and the artifacts derived from it
+   --  immediately: they're a side effect of this release --full run, not
+   --  deliberately-seeded fixture state, and a later test (REQ-106's fmea
+   --  block) asserts .fusa-fmea.json is absent before fmea's own
+   --  first run against this same shared Root.
    Ada.Directories.Delete_File (Root & "/.fusa-fmea.json");
+   Ada.Directories.Delete_File (Root & "/fmea.json");
+   Ada.Directories.Delete_File (Root & "/fmea.csv");
 
    --  fusa:test REQ-076
    Check (not Fusa.Files.Exists (Root & "/t-0.1.0.spdx.json"),
@@ -591,6 +666,13 @@ begin
    Check (Fusa.Cli.Run (Args ("hara", "--dir", Root, "--init")) = Exit_Ok,
           "hara --init scaffolds a template and exits 0");
    Check (Fusa.Files.Exists (Root & "/.fusa-hara.json"), "hara --init created .fusa-hara.json");
+   --  Regression (fusa#99): section 1.2.5's MUST "project" field was
+   --  never populated by --init's scaffold at all. Root's own .fusa.json
+   --  (written earlier in this test file) has project.name "t".
+   Check (Ada.Strings.Fixed.Index
+            (Fusa.Files.Read_File (Root & "/.fusa-hara.json"), """project"": ""t""") > 0,
+          "hara --init scaffolds the MUST ""project"" field, sourced from "
+          & ".fusa.json's project.name");
    Check (Fusa.Cli.Run (Args ("hara", "--dir", Root)) = Exit_Ok,
           "hara against the (still-empty) scaffolded template exits 0 "
           & "(no --init needed once the file exists)");
@@ -606,11 +688,44 @@ begin
              & "command name ""hara""");
       Check (Ada.Strings.Fixed.Index (Out_Text, """completeness"":") > 0,
              "hara --format json includes the section 1.2.5 completeness block");
+      --  Regression (fusa#99): the MUST "project" field was also never
+      --  emitted in hara's own report output.
+      Check (Ada.Strings.Fixed.Index (Out_Text, """project"": ""t""") > 0,
+             "hara --format json emits the MUST ""project"" field");
    end;
    Fusa.Files.Write_File
      (Root & "/.fusa-hara.json", "{""hazards"":[{""description"":""no id""}]}");
    Check (Fusa.Cli.Run (Args ("hara", "--dir", Root)) = Exit_Gate_Fail,
           "hara gate-fails once a hazard with no id is present (ERROR finding)");
+
+   --  Regression (fusa#99): Rule A (FUSA-STUB001) used to scan only
+   --  hazards[].description -- operationalSituations[].description
+   --  (MUST, item-specific) and safetyGoals[].description (SHOULD
+   --  follow the requirement-language rule) are both in section 1.6's
+   --  scope too and are now scanned as well. A hazard with a genuinely
+   --  specific, non-placeholder description is included so this can't
+   --  pass merely because the (unrelated) hazard scan still fires.
+   --  fusa:test REQ-119
+   Fusa.Files.Write_File
+     (Root & "/.fusa-hara.json",
+      "{""operationalSituations"":[{""id"":""OS-001""," &
+        """description"":""[describe operational situation]""}]," &
+        """hazards"":[{""id"":""H-001""," &
+        """description"":""overheating causes thermal runaway in the " &
+        "battery pack during fast charging""}],""safetyGoals"":[{""id"":""SG-001""," &
+        """description"":""TBD"",""asil"":""ASIL-B""}]}");
+   declare
+      Exit_Code : Integer;
+      Out_Text  : constant String :=
+        Run_Capturing_Stdout (Args ("hara", "--dir", Root, "--format", "json"), Exit_Code);
+   begin
+      Check (Ada.Strings.Fixed.Index (Out_Text, """FUSA-STUB001""") > 0,
+             "hara's Rule A fires against operationalSituations/safetyGoals "
+             & "descriptions, not just hazards[].description");
+      Check (Exit_Code = Exit_Gate_Fail,
+             "the operationalSituations/safetyGoals placeholder text "
+             & "gate-fails hara, same as a hazard placeholder would");
+   end;
 
    --  fusa:test REQ-119 / REQ-120: section 1.6.1/1.6.2 detection and
    --  attestation, exercised end-to-end through the hara command (the
@@ -757,6 +872,77 @@ begin
       Ada.Directories.Delete_Tree (Stub_Root);
    end;
 
+   --  Regression (fusa#86): hara/fmea/tara/safety-case used to re-run
+   --  the "orphaned disposition" scan (DISP001, spec section 4.1) against
+   --  the SAME .fusa-dispositions.json check itself validates -- but
+   --  since none of the four ever scan real project source, every
+   --  accepted/deferred disposition entry (which check's own real
+   --  finding set correctly matches) looked orphaned from their narrow
+   --  point of view, guaranteeing a false-positive DISP001 on any
+   --  project using dispositions at all.
+   --  fusa:test REQ-086
+   declare
+      Disp_Fp_Root : constant String := "tmp_test_cli_disp_orphan_fp";
+      Fp           : Unbounded_String;
+   begin
+      if Ada.Directories.Exists (Disp_Fp_Root) then
+         Ada.Directories.Delete_Tree (Disp_Fp_Root);
+      end if;
+      Ada.Directories.Create_Path (Disp_Fp_Root & "/src");
+      Fusa.Files.Write_File
+        (Disp_Fp_Root & "/.fusa.json",
+         "{""project"":{""name"":""t""},""standard"":""generic""}");
+      Fusa.Files.Write_File (Disp_Fp_Root & "/.fusa-reqs.json", "{""requirements"":[]}");
+      Fusa.Files.Write_File
+        (Disp_Fp_Root & "/src/bad.adb",
+         "procedure Bad is" & ASCII.LF &
+         "   pragma Suppress (All_Checks);" & ASCII.LF &
+         "begin" & ASCII.LF & "   null;" & ASCII.LF & "end Bad;" & ASCII.LF);
+      declare
+         Exit_Code  : Integer;
+         Root_Val   : constant Fusa.Json.Value_Access :=
+           Fusa.Json.Parse
+             (Run_Capturing_Stdout
+                (Args ("check", "--dir", Disp_Fp_Root, "--format", "json"), Exit_Code));
+         Findings_V : constant Fusa.Json.Value_Access :=
+           Fusa.Json.Get_Array (Root_Val, "findings");
+         pragma Unreferenced (Exit_Code);
+      begin
+         Fp := To_Unbounded_String
+           (Fusa.Json.Get_String (Fusa.Json.Array_Item (Findings_V, 1), "fingerprint"));
+      end;
+      Fusa.Files.Write_File
+        (Disp_Fp_Root & "/.fusa-dispositions.json",
+         "{""dispositions"":[{""fingerprint"":""" & To_String (Fp) &
+           """,""status"":""accepted"",""reason"":""waived""}]}");
+      declare
+         Exit_Code2 : Integer;
+         Check_Out  : constant String :=
+           Run_Capturing_Stdout
+             (Args ("check", "--dir", Disp_Fp_Root, "--format", "json"), Exit_Code2);
+      begin
+         Check (Ada.Strings.Fixed.Index (Check_Out, """DISP001""") = 0,
+                "check itself correctly reports 0 orphaned dispositions "
+                & "-- the fingerprint really is matched (test setup sanity)");
+      end;
+      Fusa.Files.Write_File
+        (Disp_Fp_Root & "/.fusa-hara.json",
+         "{""operationalSituations"":[],""hazards"":[],""safetyGoals"":[]}");
+      declare
+         Exit_Code3 : Integer;
+         Hara_Out   : constant String :=
+           Run_Capturing_Stdout
+             (Args ("hara", "--dir", Disp_Fp_Root, "--format", "json"), Exit_Code3);
+      begin
+         Check (Ada.Strings.Fixed.Index (Hara_Out, """DISP001""") = 0,
+                "hara does not report the SAME disposition as orphaned, "
+                & "even though hara has no findings of its own that could "
+                & "possibly match it -- the orphaned-disposition rule "
+                & "belongs to check alone (section 4.1)");
+      end;
+      Ada.Directories.Delete_Tree (Disp_Fp_Root);
+   end;
+
    --  fusa:test REQ-085
    Check (not Fusa.Files.Exists (Root & "/.fusa-tara.json"), "no .fusa-tara.json initially");
    declare
@@ -819,6 +1005,62 @@ begin
    Check (Fusa.Cli.Run (Args ("tara", "--dir", Root)) = Exit_Gate_Fail,
           "tara gate-fails once a threat with no id/asset is present (ERROR finding)");
 
+   --  Regression (fusa#100): "risk" is a closed enum (critical|high|
+   --  medium|low) -- a threat whose impact axes use the wrong vocabulary
+   --  (e.g. "high", which belongs to attackFeasibility's scale, not
+   --  impact's) must never produce risk: "", which is not a member of
+   --  that enum. Three of the four axes here ("moderate"/"moderate"/
+   --  "negligible") ARE valid, so this locks in that the worst REAL
+   --  value among them ("moderate") still correctly wins over the one
+   --  bad axis, producing a real, non-empty risk.
+   --  fusa:test REQ-085
+   Fusa.Files.Write_File
+     (Root & "/.fusa-tara.json",
+      "{""threats"":[{""id"":""T1"",""asset"":""a"",""threat"":""t""," &
+        """attackVector"":""network"",""attackFeasibility"":""high""," &
+        """impact"":{""safety"":""high"",""financial"":""moderate""," &
+        """operational"":""moderate"",""privacy"":""negligible""}," &
+        """treatment"":""mitigate""}]}");
+   declare
+      Exit_Code : Integer;
+      Out_Text  : constant String :=
+        Run_Capturing_Stdout
+          (Args ("tara", "--dir", Root, "--format", "json"), Exit_Code);
+   begin
+      Check (Ada.Strings.Fixed.Index (Out_Text, """risk"": ""medium""") > 0,
+             "an invalid impact.safety value doesn't prevent the worst "
+             & "REAL impact axis (""moderate"") from still winning -- "
+             & "risk is ""medium"", not a blank string");
+      Check (Ada.Strings.Fixed.Index (Out_Text, """ruleId"": ""TARA004""") > 0,
+             "the invalid impact.safety value is still flagged by TARA004");
+   end;
+   --  When EVERY impact axis fails to parse (all four use "high" instead
+   --  of the impact vocabulary), there is no real value left to fall
+   --  back on at all -- this is the case that used to produce risk: "".
+   --  It now fails safe to the worst-case rank instead of an empty,
+   --  non-enum string.
+   Fusa.Files.Write_File
+     (Root & "/.fusa-tara.json",
+      "{""threats"":[{""id"":""T1"",""asset"":""a"",""threat"":""t""," &
+        """attackVector"":""network"",""attackFeasibility"":""high""," &
+        """impact"":{""safety"":""high"",""financial"":""high""," &
+        """operational"":""high"",""privacy"":""high""}," &
+        """treatment"":""mitigate""}]}");
+   declare
+      Exit_Code : Integer;
+      Out_Text  : constant String :=
+        Run_Capturing_Stdout
+          (Args ("tara", "--dir", Root, "--format", "json"), Exit_Code);
+   begin
+      Check (Ada.Strings.Fixed.Index (Out_Text, """risk"": """"") = 0,
+             "risk is never emitted as an empty string, even when every "
+             & "impact axis fails to parse");
+      Check (Ada.Strings.Fixed.Index (Out_Text, """risk"": ""critical""") > 0,
+             "risk fails safe to the worst-case enum value (""critical"") "
+             & "when no impact axis resolves to a real value, rather "
+             & "than silently reporting a non-conformant blank string");
+   end;
+
    --  fusa:test REQ-119: same Rule A wiring as hara (test_stub_detect.adb
    --  unit-tests the underlying logic; test above end-to-end verifies
    --  hara's Rule B/attestation wiring in full) -- this locks in that
@@ -835,12 +1077,37 @@ begin
           & "description");
 
    --  fusa:test REQ-097
+   --  Regression (fusa#97): a gap-report command with a missing
+   --  objectives file and no --init used to scaffold unconditionally
+   --  and print a plain-text line even under --format json, silently
+   --  producing no JSON document at all. Now matches hara/tara: it
+   --  requires an explicit --init, and its absence is a proper JSON
+   --  error envelope (exit 3), not a false-successful exit 0.
    Check (not Fusa.Files.Exists (Root & "/.fusa-do178c-objectives.json"),
           "no .fusa-do178c-objectives.json initially");
-   Check (Fusa.Cli.Run (Args ("do178", "--dir", Root)) = Exit_Ok,
-          "do178 with no objectives file scaffolds a non-empty starter template and exits 0");
+   Check (Fusa.Cli.Run (Args ("do178", "--dir", Root)) = Exit_Runtime,
+          "do178 with no objectives file and no --init exits 3, not a "
+          & "false-successful 0");
+   Check (not Fusa.Files.Exists (Root & "/.fusa-do178c-objectives.json"),
+          "do178 did not scaffold anything without --init");
+   declare
+      Exit_Code : Integer;
+      Out_Json  : constant String :=
+        Run_Capturing_Stdout (Args ("do178", "--dir", Root, "--format", "json"), Exit_Code);
+   begin
+      Check (Exit_Code = Exit_Runtime,
+             "do178 --format json with no objectives file and no --init "
+             & "still exits 3");
+      Check (Ada.Strings.Fixed.Index (Out_Json, """error""") > 0
+             and then Ada.Strings.Fixed.Index (Out_Json, """code"": ""no-config""") > 0,
+             "do178 --format json with no objectives file emits a proper "
+             & "JSON error envelope instead of silently substituting a "
+             & "plain-text scaffold message");
+   end;
+   Check (Fusa.Cli.Run (Args ("do178", "--dir", Root, "--init")) = Exit_Ok,
+          "do178 --init scaffolds a non-empty starter template and exits 0");
    Check (Fusa.Files.Exists (Root & "/.fusa-do178c-objectives.json"),
-          "do178 created .fusa-do178c-objectives.json");
+          "do178 --init created .fusa-do178c-objectives.json");
    declare
       Exit_Code : Integer;
       Out_Text  : constant String :=
@@ -905,24 +1172,37 @@ begin
              & "in the written objectives array too");
    end;
 
+   --  fusa:test REQ-097
    Check (not Fusa.Files.Exists (Root & "/.fusa-iso26262-objectives.json"),
           "no .fusa-iso26262-objectives.json initially");
-   Check (Fusa.Cli.Run (Args ("iso26262", "--dir", Root)) = Exit_Ok,
-          "iso26262 with no objectives file scaffolds an empty template and exits 0");
-   Check (Fusa.Cli.Run (Args ("iso21434", "--dir", Root)) = Exit_Ok,
-          "iso21434 with no objectives file scaffolds an empty template and exits 0");
-   Check (Fusa.Cli.Run (Args ("iec61508", "--dir", Root)) = Exit_Ok,
-          "iec61508 with no objectives file scaffolds an empty template and exits 0");
-   Check (Fusa.Cli.Run (Args ("iec62443", "--dir", Root)) = Exit_Ok,
-          "iec62443 with no objectives file scaffolds an empty template and exits 0");
+   Check (Fusa.Cli.Run (Args ("iso26262", "--dir", Root)) = Exit_Runtime,
+          "iso26262 with no objectives file and no --init exits 3");
+   Check (Fusa.Cli.Run (Args ("iso26262", "--dir", Root, "--init")) = Exit_Ok,
+          "iso26262 --init scaffolds an empty template and exits 0");
+   Check (Fusa.Cli.Run (Args ("iso21434", "--dir", Root)) = Exit_Runtime,
+          "iso21434 with no objectives file and no --init exits 3");
+   Check (Fusa.Cli.Run (Args ("iso21434", "--dir", Root, "--init")) = Exit_Ok,
+          "iso21434 --init scaffolds an empty template and exits 0");
+   Check (Fusa.Cli.Run (Args ("iec61508", "--dir", Root)) = Exit_Runtime,
+          "iec61508 with no objectives file and no --init exits 3");
+   Check (Fusa.Cli.Run (Args ("iec61508", "--dir", Root, "--init")) = Exit_Ok,
+          "iec61508 --init scaffolds an empty template and exits 0");
+   Check (Fusa.Cli.Run (Args ("iec62443", "--dir", Root)) = Exit_Runtime,
+          "iec62443 with no objectives file and no --init exits 3");
+   Check (Fusa.Cli.Run (Args ("iec62443", "--dir", Root, "--init")) = Exit_Ok,
+          "iec62443 --init scaffolds an empty template and exits 0");
    Check (Fusa.Files.Exists (Root & "/.fusa-iec62443-4-1-objectives.json"),
           "iec62443 uses the canonical standard id iec62443-4-1 for its objectives filename");
-   Check (Fusa.Cli.Run (Args ("unece", "--dir", Root)) = Exit_Ok,
-          "unece with no objectives file scaffolds an empty template and exits 0");
+   Check (Fusa.Cli.Run (Args ("unece", "--dir", Root)) = Exit_Runtime,
+          "unece with no objectives file and no --init exits 3");
+   Check (Fusa.Cli.Run (Args ("unece", "--dir", Root, "--init")) = Exit_Ok,
+          "unece --init scaffolds an empty template and exits 0");
    Check (Fusa.Files.Exists (Root & "/.fusa-unece-r155-objectives.json"),
           "unece uses the canonical standard id unece-r155 for its objectives filename");
-   Check (Fusa.Cli.Run (Args ("slsa", "--dir", Root)) = Exit_Ok,
-          "slsa with no objectives file scaffolds an empty template and exits 0");
+   Check (Fusa.Cli.Run (Args ("slsa", "--dir", Root)) = Exit_Runtime,
+          "slsa with no objectives file and no --init exits 3");
+   Check (Fusa.Cli.Run (Args ("slsa", "--dir", Root, "--init")) = Exit_Ok,
+          "slsa --init scaffolds an empty template and exits 0");
    Check (Fusa.Cli.Run (Args ("iso26262", "--dir", Root, "--format", "bogus")) = Exit_Usage,
           "iso26262 --format bogus exits Exit_Usage");
 
@@ -959,10 +1239,18 @@ begin
       Ada.Directories.Create_Path (Verify_Root);
       Check (not Fusa.Files.Exists (Verify_Root & "/.fusa-verify.json"),
              "no .fusa-verify.json initially");
-      Check (Fusa.Cli.Run (Args ("verify", "--dir", Verify_Root)) = Exit_Ok,
-             "verify with no .fusa-verify.json scaffolds a template and exits 0");
+      --  Regression (fusa#97): see the do178 block above -- verify now
+      --  requires an explicit --init before scaffolding, matching
+      --  hara/tara, instead of silently substituting a plain-text line
+      --  for the requested report.
+      Check (Fusa.Cli.Run (Args ("verify", "--dir", Verify_Root)) = Exit_Runtime,
+             "verify with no .fusa-verify.json and no --init exits 3");
+      Check (not Fusa.Files.Exists (Verify_Root & "/.fusa-verify.json"),
+             "verify did not scaffold anything without --init");
+      Check (Fusa.Cli.Run (Args ("verify", "--dir", Verify_Root, "--init")) = Exit_Ok,
+             "verify --init scaffolds a template and exits 0");
       Check (Fusa.Files.Exists (Verify_Root & "/.fusa-verify.json"),
-             "verify created .fusa-verify.json");
+             "verify --init created .fusa-verify.json");
 
       Fusa.Files.Write_File
         (Verify_Root & "/.fusa-verify.json",
@@ -1247,10 +1535,34 @@ begin
    end;
 
    --  fusa:test REQ-106
+   --  Regression (fusa#97): fmea with a missing .fusa-fmea.json and no
+   --  --init now correctly refuses to silently scaffold (matching
+   --  hara/tara), exiting non-zero instead of a false-successful exit 0.
+   --  fusa:test REQ-097
    Check (not Fusa.Files.Exists (Root & "/.fusa-fmea.json"), "no .fusa-fmea.json initially");
-   Check (Fusa.Cli.Run (Args ("fmea", "--dir", Root)) = Exit_Ok,
-          "fmea with no .fusa-fmea.json scaffolds a template and exits 0");
-   Check (Fusa.Files.Exists (Root & "/.fusa-fmea.json"), "fmea created .fusa-fmea.json");
+   Check (Fusa.Cli.Run (Args ("fmea", "--dir", Root)) = Exit_Runtime,
+          "fmea with no .fusa-fmea.json and no --init exits 3, not a "
+          & "false-successful 0");
+   Check (not Fusa.Files.Exists (Root & "/.fusa-fmea.json"),
+          "fmea did not scaffold anything without --init");
+   declare
+      Exit_Code : Integer;
+      Out_Json  : constant String :=
+        Run_Capturing_Stdout
+          (Args ("fmea", "--dir", Root, "--format", "json"), Exit_Code);
+   begin
+      Check (Exit_Code = Exit_Runtime,
+             "fmea --format json with no .fusa-fmea.json and no --init "
+             & "still exits 3");
+      Check (Ada.Strings.Fixed.Index (Out_Json, """error""") > 0
+             and then Ada.Strings.Fixed.Index (Out_Json, """code"": ""no-config""") > 0,
+             "fmea --format json with no .fusa-fmea.json emits a proper "
+             & "JSON error envelope instead of silently substituting a "
+             & "plain-text scaffold message");
+   end;
+   Check (Fusa.Cli.Run (Args ("fmea", "--dir", Root, "--init")) = Exit_Ok,
+          "fmea --init scaffolds a template and exits 0");
+   Check (Fusa.Files.Exists (Root & "/.fusa-fmea.json"), "fmea --init created .fusa-fmea.json");
    Fusa.Files.Write_File
      (Root & "/.fusa-fmea.json",
       "{""entries"":[{""id"":""FMEA-001"",""severity"":8,""occurrence"":3,""detection"":4," &
@@ -1319,6 +1631,44 @@ begin
                 "the config-validation findings tally is under ""findingsSummary"", "
                 & "and ratingScale is present since occurrence/detection were emitted");
       end;
+
+      --  Regression (fusa#100): section 9.2 marks only "severity" MUST
+      --  for a FMEA entry -- "occurrence"/"detection" are each MAY. An
+      --  entry supplying only severity is fully spec-conformant and
+      --  must not trigger FMEA002.
+      Fusa.Files.Write_File
+        (Fmea_Cov_Root & "/.fusa-fmea.json",
+         "{""entries"":[{""id"":""FMEA-001"",""item"":""Pkg.A""," &
+         """file"":""src/pkg.ads"",""failureMode"":""fm"",""effect"":""ef""," &
+         """severity"":8}]}");
+      declare
+         Exit_Code : Integer;
+         Out_Text  : constant String :=
+           Run_Capturing_Stdout (Args ("fmea", "--dir", Fmea_Cov_Root, "--format", "json"),
+                                  Exit_Code);
+      begin
+         Check (Ada.Strings.Fixed.Index (Out_Text, """FMEA002""") = 0,
+                "an entry supplying only severity (occurrence/detection "
+                & "both MAY per section 9.2) does not trigger a spurious "
+                & "FMEA002 finding");
+      end;
+      --  A missing/invalid severity (the one MUST field) still correctly
+      --  triggers FMEA002.
+      Fusa.Files.Write_File
+        (Fmea_Cov_Root & "/.fusa-fmea.json",
+         "{""entries"":[{""id"":""FMEA-001"",""item"":""Pkg.A""," &
+         """file"":""src/pkg.ads"",""failureMode"":""fm"",""effect"":""ef""}]}");
+      declare
+         Exit_Code : Integer;
+         Out_Text  : constant String :=
+           Run_Capturing_Stdout (Args ("fmea", "--dir", Fmea_Cov_Root, "--format", "json"),
+                                  Exit_Code);
+      begin
+         Check (Ada.Strings.Fixed.Index (Out_Text, """FMEA002""") > 0,
+                "a missing severity (the one MUST rating) still correctly "
+                & "triggers FMEA002");
+      end;
+
       --  section 9.2 MUST (spec v1.15.0) -- coveragePct must never
       --  exceed 100, even when an understated componentsInProject
       --  override would otherwise produce an impossible value like 200%.
@@ -1377,12 +1727,18 @@ begin
           & "failureMode");
 
    --  fusa:test REQ-107
+   --  Regression (fusa#97): see the do178/verify blocks above --
+   --  safety-case now requires an explicit --init before scaffolding.
    Check (not Fusa.Files.Exists (Root & "/.fusa-safety-case.json"),
           "no .fusa-safety-case.json initially");
-   Check (Fusa.Cli.Run (Args ("safety-case", "--dir", Root)) = Exit_Ok,
-          "safety-case with no file scaffolds a template and exits 0");
+   Check (Fusa.Cli.Run (Args ("safety-case", "--dir", Root)) = Exit_Runtime,
+          "safety-case with no file and no --init exits 3");
+   Check (not Fusa.Files.Exists (Root & "/.fusa-safety-case.json"),
+          "safety-case did not scaffold anything without --init");
+   Check (Fusa.Cli.Run (Args ("safety-case", "--dir", Root, "--init")) = Exit_Ok,
+          "safety-case --init scaffolds a template and exits 0");
    Check (Fusa.Files.Exists (Root & "/.fusa-safety-case.json"),
-          "safety-case created .fusa-safety-case.json");
+          "safety-case --init created .fusa-safety-case.json");
    Fusa.Files.Write_File (Root & "/qualify-report.json", "{}" & ASCII.LF);
    Fusa.Files.Write_File
      (Root & "/.fusa-safety-case.json",
