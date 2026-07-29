@@ -719,6 +719,24 @@
       "title": "Fusa.Attestation (section 1.6.2 attestation object support)",
       "text": "Parses/writes an artifact's document-level attestation object, computes its RFC 8785 JCS canonical content hash (excluding attestation/generatedAt), and determines whether a non-stale, independently-reviewed attestation suppresses a Rule B finding. hara/fmea/tara/safety-case carry an input file's own attestation through to output; sas (which has no input file) carries a prior run's attestation forward across regeneration. --require-attestation (and --strict, which implies it) escalates an unsuppressed Rule B finding to exit 1.",
       "level": "SW"
+    },
+    {
+      "id": "REQ-121",
+      "title": "Fusa.Fmea_Analyze (fmea derives real entries from source, fusa#83)",
+      "text": "When .fusa-fmea.json's own entries array is empty, fmea derives one real, source-traced FMEA entry per public function/procedure Fusa.Func_Scan finds, with a failure mode/effect/cause/severity heuristically derived from the function's actual name (e.g. write/save/store -> data-corruption risk; sign/verify/hash -> cryptographic-correctness risk; run/execute/scan -> resource-exhaustion risk; parse/load/read -> malformed-input risk; otherwise a generic logic-error entry), rather than always reporting zero components analyzed. A project with hand-authored real entries keeps them completely unchanged.",
+      "level": "SW"
+    },
+    {
+      "id": "REQ-122",
+      "title": "Fusa.Tara_Analyze (tara derives real threats from source, fusa#83)",
+      "text": "When .fusa-tara.json's own threats array is empty, tara derives one real threat per real public package/component Fusa.Func_Scan finds, classified by the worst name-based heuristic signal across that component's functions (sign/verify/hash -> cryptographic-integrity threat; write/save/store -> tampering/data-integrity threat; run/execute/scan -> denial-of-service threat; otherwise a generic unauthorized-modification threat), with risk computed via the existing Determine_Tara_Risk table, rather than always reporting zero assets analyzed. A project with hand-authored real threats keeps them completely unchanged. .fusa.json is optional for this purely-additive scan.",
+      "level": "SW"
+    },
+    {
+      "id": "REQ-123",
+      "title": "Fusa.Safety_Case_Analyze (safety-case derives a real GSN skeleton from actual evidence, fusa#83)",
+      "text": "When .fusa-safety-case.json's own nodes array is empty, safety-case derives a real goal/strategy/solution GSN skeleton citing only the evidence artifacts (fusa-report.json, qualify-report.json, comp-report.json, sbom.json, vuln.json, fmea.json, sci.json, sas.json) that actually exist on disk for this project right now, rather than reporting an empty argument -- never a fabricated claim about an artifact that doesn't exist. If no evidence artifact exists yet, the derived argument is honestly empty. A project with a hand-authored real GSN argument keeps it completely unchanged.",
+      "level": "SW"
     }
   ]
 }

@@ -12,6 +12,9 @@ with Fusa.Source_Scan;
 with Fusa.Engine;
 with Fusa.Annotations; use Fusa.Annotations;
 with Fusa.Func_Scan;
+with Fusa.Fmea_Analyze;
+with Fusa.Tara_Analyze;
+with Fusa.Safety_Case_Analyze;
 with Fusa.Comp;
 with Fusa.Badge;
 with Fusa.Deps;
@@ -2375,6 +2378,36 @@ package body Fusa.Cli is
          Findings : Finding_List;
          Doc      : constant Fusa.Config.Tara_Document := Fusa.Config.Load_Tara (Dir, Findings);
 
+         --  Regression (fusa#83): tara used to be permanently vacuous
+         --  ("threats": []) on every real project unless a human
+         --  hand-authored the entire evidence artifact. When
+         --  .fusa-tara.json's own threats array is empty, derive one
+         --  real threat per real public package/component Func_Scan
+         --  finds (Fusa.Tara_Analyze) instead of reporting zero assets
+         --  analyzed. A project that HAS hand-authored real threats
+         --  keeps them completely unchanged -- this is strictly a
+         --  fallback for the previously-always-vacuous case. .fusa.json
+         --  is optional for this purely-additive source scan: its
+         --  absence just means no auto-derived threats are added (tara
+         --  already worked without .fusa.json before this fix, so that
+         --  is not newly required now).
+         function Scan_Funcs_Or_Empty return Fusa.Func_Scan.Func_List is
+            Cfg : Fusa.Config.Project_Config;
+         begin
+            Cfg := Fusa.Config.Load (Dir);
+            return Fusa.Func_Scan.Scan_Public_Functions
+              (Dir, Fusa.Source_Scan.Find_Source_Files (Dir, Cfg));
+         exception
+            when Fusa.Config.No_Config_Error | Fusa.Config.Invalid_Config_Error =>
+               return Fusa.Func_Scan.Func_Vectors.Empty_Vector;
+         end Scan_Funcs_Or_Empty;
+
+         Funcs   : constant Fusa.Func_Scan.Func_List := Scan_Funcs_Or_Empty;
+         Threats : constant Fusa.Config.Threat_List :=
+           (if Doc.Threats.Is_Empty
+            then Fusa.Tara_Analyze.Derive_Threats (Funcs)
+            else Doc.Threats);
+
          --  summary.assetsAnalyzed: the number of distinct assets actually
          --  covered, not the raw threat count (the same asset can have
          --  several threats).
@@ -2382,7 +2415,7 @@ package body Fusa.Cli is
             Seen  : String_List;
             Count : Natural := 0;
          begin
-            for T of Doc.Threats loop
+            for T of Threats loop
                declare
                   A     : constant String := To_String (T.Asset);
                   Found : Boolean := False;
@@ -2429,7 +2462,7 @@ package body Fusa.Cli is
          declare
             Threat_Descriptions : String_List;
          begin
-            for T of Doc.Threats loop
+            for T of Threats loop
                Fusa.Stub_Detect.Check_Placeholder
                  (Findings, Fusa.Config.Tara_File, To_String (T.Id),
                   "threat", To_String (T.Description));
@@ -2485,7 +2518,7 @@ package body Fusa.Cli is
                Fusa.Report.Write_Header (W, "tara-report");
                W.Key ("threats");
                W.Array_Start;
-               for T of Doc.Threats loop
+               for T of Threats loop
                   W.Object_Start;
                   W.Field ("id", To_String (T.Id));
                   W.Field ("asset", To_String (T.Asset));
@@ -2539,11 +2572,11 @@ package body Fusa.Cli is
             declare
                Buf : Unbounded_String := Null_Unbounded_String;
             begin
-               for T of Doc.Threats loop
+               for T of Threats loop
                   Append (Buf, To_String (T.Id) & ": " & To_String (T.Description) &
                             " (risk " & To_String (T.Risk) & ")" & ASCII.LF);
                end loop;
-               Append (Buf, Trim_Img (Natural (Doc.Threats.Length)) & " threats, " &
+               Append (Buf, Trim_Img (Natural (Threats.Length)) & " threats, " &
                          Trim_Img (Assets_Analyzed) & "/" & Trim_Img (Assets_In_Project) &
                          " assets analyzed (" & Trim_Img (Coverage_Pct) & "%), " &
                          Trim_Img (Natural (Findings.Length)) & " validation findings");
@@ -4956,7 +4989,6 @@ package body Fusa.Cli is
          declare
             Findings : Finding_List;
             Doc      : constant Fusa.Config.Fmea_Document := Fusa.Config.Load_Fmea (Dir, Findings);
-            Entries  : Fusa.Config.Fmea_Entry_List renames Doc.Entries;
 
             --  summary.componentsInProject: the same denominator as
             --  trace --func-coverage (section 5, section 1.4.1) --
@@ -4964,6 +4996,24 @@ package body Fusa.Cli is
             Files       : constant String_List := Fusa.Source_Scan.Find_Source_Files (Dir, Cfg);
             Funcs       : constant Fusa.Func_Scan.Func_List :=
               Fusa.Func_Scan.Scan_Public_Functions (Dir, Files);
+
+            --  Regression (fusa#83): fmea used to be permanently vacuous
+            --  ("entries": []) on every real project unless a human
+            --  hand-authored the entire evidence artifact -- spec
+            --  section 9.2 describes fmea as an analysis command "over
+            --  the project's public functions/components", the same way
+            --  comp already is in this codebase. When .fusa-fmea.json's
+            --  own entries array is empty, derive one real,
+            --  source-traced entry per public function Func_Scan already
+            --  finds (Fusa.Fmea_Analyze) instead of reporting zero
+            --  components analyzed. A project that HAS hand-authored
+            --  real entries keeps them completely unchanged -- this is
+            --  strictly a fallback for the previously-always-vacuous
+            --  case, never a silent override of genuine human analysis.
+            Entries : constant Fusa.Config.Fmea_Entry_List :=
+              (if Doc.Entries.Is_Empty
+               then Fusa.Fmea_Analyze.Derive_Entries (Funcs)
+               else Doc.Entries);
             High_Priority : Natural := 0;
             Components_Analyzed  : constant Natural := Natural (Entries.Length);
             Components_In_Project : constant Natural :=
@@ -5215,10 +5265,28 @@ package body Fusa.Cli is
       end if;
 
       declare
-         Findings  : Finding_List;
-         Root_Goal : Unbounded_String;
+         Findings       : Finding_List;
+         Loaded_Root_Goal : Unbounded_String;
+         Loaded_Nodes   : constant Fusa.Config.Gsn_Node_List :=
+           Fusa.Config.Load_Safety_Case (Dir, Findings, Loaded_Root_Goal);
+
+         --  Regression (fusa#83): safety-case used to be permanently
+         --  vacuous ("nodes": []) with no hand-authored GSN argument.
+         --  When .fusa-safety-case.json's own nodes array is empty,
+         --  derive a real goal/strategy/solution skeleton citing every
+         --  evidence artifact that actually exists on disk right now
+         --  (Fusa.Safety_Case_Analyze) instead of reporting an empty
+         --  argument. A project that HAS hand-authored a real GSN
+         --  argument keeps it completely unchanged.
+         Derived_Root_Goal : Unbounded_String;
+         Derived_Nodes  : constant Fusa.Config.Gsn_Node_List :=
+           (if Loaded_Nodes.Is_Empty
+            then Fusa.Safety_Case_Analyze.Derive_Nodes (Dir, Derived_Root_Goal)
+            else Fusa.Config.Gsn_Node_Vectors.Empty_Vector);
          Nodes     : constant Fusa.Config.Gsn_Node_List :=
-           Fusa.Config.Load_Safety_Case (Dir, Findings, Root_Goal);
+           (if Loaded_Nodes.Is_Empty then Derived_Nodes else Loaded_Nodes);
+         Root_Goal : constant Unbounded_String :=
+           (if Loaded_Nodes.Is_Empty then Derived_Root_Goal else Loaded_Root_Goal);
 
          Raw_Root : constant Fusa.Json.Value_Access :=
            Fusa.Json.Parse
