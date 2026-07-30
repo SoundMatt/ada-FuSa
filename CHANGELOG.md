@@ -5,6 +5,60 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+### Fixed (third-party audit: label/config hardening, no behavioral defect)
+
+A third-party audit independently re-verified the ISO 26262 Table 4 ASIL implementation
+(`src/fusa-config.adb:462-518`) against all 36 (S x E x C) cells and confirmed it is correct
+end-to-end -- **no change was made there**. The audit's "42 vs 45 commands" README finding was
+also independently re-counted against three sources (CLI dispatch table, README's own command
+table, `capabilities`'s self-report); all three agree the true count is **42**, which was
+already correct -- **no change was made there either**. The remaining findings below are
+genuine label/config/diagnostics gaps, now fixed:
+
+- **Docker image spec-version label** (`ada-FuSa-01`): `.github/workflows/docker-publish.yml`
+  passed `SPEC_VERSION=1.11` as a build-arg while the real binary has always been spec 1.15.2 --
+  every previously published image was mislabeled. Now `1.15.2`.
+- **Non-canonical `"generic"` standard id** (`ada-FuSa-02`, `ada-FuSa-03`): both the project's own
+  dogfood `.fusa.json` and the CI self-check (`ci.yml`'s `adafusa init --standard generic`
+  invocation) used the non-canonical `"generic"` standard instead of `"iso26262"` (spec section
+  2.4.1's closed enum). The config loader's own default for a `.fusa.json` that omits `"standard"`
+  entirely had the same non-canonical default. Both now use `"iso26262"`.
+- **`--standard` allow-list validation** (`ada-FuSa-V04`): `adafusa init`'s `--standard` flag (and
+  the interactive prompt it falls back to) accepted any string with zero validation, so a typo or
+  `--standard generic` silently produced a non-conformant `.fusa.json`. It now validates against
+  spec section 2.4.1's closed standard-id enum and exits 2 (usage) on an unrecognised value.
+- **`coverage --proof` default output filename** (`ada-FuSa-10`): unlike every other report command
+  in this codebase (e.g. `qualify` -> `qualify-report.json`, via the existing `Effective_Out`
+  idiom), `coverage --proof --format json` only wrote its report to stdout unless `--output` was
+  given explicitly. It now defaults to `<dir>/proof-report.json`, still echoing to stdout.
+- **Docker build diagnostics** (`ada-FuSa-09`): the shipped image built via a bare `gnatmake`
+  invocation (no `-gnatwa`/`-gnaty`), weaker than the `gprbuild -P adafusa.gpr` build CI actually
+  verifies. The `Dockerfile` now builds via `gprbuild -P adafusa.gpr` (still `-largs -static` for a
+  fully static musl binary), so the shipped binary carries the same diagnostics as the CI-verified
+  build.
+- **README spec-version badge** (`ada-FuSa-12`): the badge read `v1.15` against the real `1.15.2`.
+  Now `v1.15.2`. (The command-count text on the same line was already correct at 42 -- see above --
+  and was deliberately left unchanged.)
+
+Also added `docs/tool-safety-manual.md` (`ada-FuSa-04`), following the sibling tools' tool-safety-
+manual structure (purpose, tool classification/TCL, installation, configuration reference, CI
+integration, known limitations, assumptions of use, qualification-evidence summary).
+
+Two findings were assessed and deliberately deferred as tracked follow-ups rather than fixed in
+this change, each because a partial/untested fix carries more risk than the status quo:
+- `ada-FuSa-06` (124 bare `REQ-NNN` requirement ids with no project-scope token): a repo-wide
+  rename touching ~500 call sites across `.fusa-reqs.json`, every `fusa:req`/`fusa:test`
+  annotation, and README -- SHOULD-level, high blast radius, and any ID mismatch would break the
+  100%-required `trace --req-coverage`/`--func-coverage` CI gate. Left as a follow-up.
+- `ada-FuSa-07` (Windows CI leg): the repo's own CI comments already track this as an open question
+  (#33) since Windows GNAT/Alire toolchain viability in GitHub Actions has not been validated, and
+  no Windows environment was available here to verify a bootstrap step before merging it into CI.
+  Left as a follow-up.
+
+10 regression tests added/updated (`--standard` allow-list rejection, the `iso26262`
+default/dogfood value throughout `test_cli.adb`, and `coverage --proof`'s default
+`proof-report.json` output); 891/891 checks passing. Version bumped to 0.1.7.
+
 ### Added (#24 -- SPARK proof-coverage via gnatprove, ada-FuSa's flagship differentiator)
 
 New `coverage --proof --proof-file <path> [--proof-threshold N]` command, modelled on the family's

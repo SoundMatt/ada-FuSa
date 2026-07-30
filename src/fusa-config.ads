@@ -19,7 +19,7 @@ package Fusa.Config is
    type Project_Config is record
       Name             : Unbounded_String;
       Version          : Unbounded_String := To_Unbounded_String ("0.1.0");
-      Standard         : Unbounded_String := To_Unbounded_String ("generic");
+      Standard         : Unbounded_String := To_Unbounded_String ("iso26262");
       Asil             : Unbounded_String; --  at most one of Asil/Sil/Dal
       Sil              : Unbounded_String; --  is non-blank
       Dal              : Unbounded_String;

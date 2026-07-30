@@ -113,7 +113,7 @@ jobs:
 
       - name: Self-check (dogfood adafusa against its own source)
         run: |
-          bin/adafusa init --name ada-fusa --standard generic
+          bin/adafusa init --name ada-fusa --standard iso26262
           bin/adafusa check --format json --output fusa-report.json
 
       - name: Requirement traceability gate (100% req + function coverage)

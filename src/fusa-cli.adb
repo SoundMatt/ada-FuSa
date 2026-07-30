@@ -634,6 +634,34 @@ package body Fusa.Cli is
          end if;
       end if;
 
+      --  Control-integrity (fusa#102 / audit V04): whatever the source of
+      --  the value (interactive prompt or the --standard flag), it MUST be
+      --  one of spec section 2.4.1's closed standard-id enum values. Without
+      --  this, `--standard generic` (or any typo) silently writes a
+      --  non-conformant .fusa.json.
+      declare
+         Std : constant String := To_String (Standard);
+         function Is_Canonical_Standard (S : String) return Boolean is
+           (S = "iso26262" or else S = "iec61508" or else S = "do178c"
+            or else S = "iso21434" or else S = "iec62443-4-1"
+            or else S = "iec62443-4-2" or else S = "misra-c"
+            or else S = "misra-cpp" or else S = "autosar-cpp14"
+            or else S = "cert-c" or else S = "cert-cpp"
+            or else S = "unece-r155" or else S = "unece-r156"
+            or else S = "slsa");
+      begin
+         if not Is_Canonical_Standard (Std) then
+            Ada.Text_IO.Put_Line
+              (Ada.Text_IO.Standard_Error,
+               "ada-FuSa: standard '" & Std & "' is not one of spec "
+               & "section 2.4.1's canonical standard ids "
+               & "(iso26262 | iec61508 | do178c | iso21434 | iec62443-4-1 | "
+               & "iec62443-4-2 | misra-c | misra-cpp | autosar-cpp14 | "
+               & "cert-c | cert-cpp | unece-r155 | unece-r156 | slsa)");
+            return Exit_Usage;
+         end if;
+      end;
+
       declare
          Config_Path : constant String := Fusa.Files.Join (Dir, Fusa.Config.Config_File);
          Reqs_Path   : constant String := Fusa.Files.Join (Dir, Fusa.Config.Reqs_File);
@@ -6376,6 +6404,13 @@ package body Fusa.Cli is
       Proof_Mode    : constant Boolean := Has_Flag (Args, "--proof");
       Proof_File    : constant String := Flag_Value (Args, "--proof-file", "");
       Threshold_Str : constant String := Flag_Value (Args, "--proof-threshold", "");
+      Out_Path      : constant String := Flag_Value (Args, "--output", "");
+      --  Report documents default to a fixed filename when --output is
+      --  omitted (mirrors `qualify` -> qualify-report.json). Previously the
+      --  JSON proof report only went to stdout unless --output was given.
+      Effective_Out : constant String :=
+        (if Out_Path'Length > 0 then Out_Path
+         else Fusa.Files.Join (Dir, "proof-report.json"));
    begin
       if Format /= "text" and then Format /= "json" then
          Ada.Text_IO.Put_Line
@@ -6470,7 +6505,13 @@ package body Fusa.Cli is
                         end loop;
                         W.Array_End;
                         W.Object_End;
-                        Emit (Args, Fusa.Json.Writer.To_String (W));
+                        Fusa.Files.Write_File
+                          (Effective_Out,
+                           Fusa.Json.Writer.To_String (W) & ASCII.LF);
+                        if Out_Path'Length = 0 then
+                           Ada.Text_IO.Put_Line
+                             (Fusa.Json.Writer.To_String (W));
+                        end if;
                      end;
                   else
                      declare
