@@ -5,6 +5,34 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+### Fixed (hotfix: Docker Publish broken by v0.1.7's Dockerfile change)
+
+v0.1.7's Dockerfile fix (below, "Docker build diagnostics") switched the image build from
+`gnatmake` to `gprbuild -P adafusa.gpr` and added `gprbuild` to the `apk add` line. This broke
+the tag-triggered `docker-publish.yml` workflow for real:
+
+```
+ERROR: unable to select packages:
+  gprbuild (no such package):
+    required by: world[gprbuild]
+```
+
+`gprbuild` is not a package Alpine 3.20 ships in `main` or `community` -- it exists only in the
+`edge`/`testing` repo, which would pin the image's build toolchain to an unstable, version-skewed
+channel relative to the `gcc-gnat` package used alongside it. The regular CI matrix
+(ubuntu-latest/macos-latest) never caught this because `docker-publish.yml` only runs on tag
+pushes, and those runners get `gprbuild` from `apt`/Alire rather than Alpine's apk repos.
+
+Fixed by keeping `gnatmake` for the Docker build, but passing it the same diagnostic flags
+`adafusa.gpr`'s `Compiler` package specifies (`-gnatwa -gnatVa -gnaty -gnat2022`) directly --
+this achieves the diagnostic parity that was the actual point of the v0.1.7 fix, without
+depending on a package Alpine 3.20 doesn't ship. Verified locally: `docker build --target
+builder` and a full multi-stage `docker build` both succeed, the resulting image runs
+(`docker run ... version`), and `docker inspect` confirms the `io.x-fusa.spec-version` label is
+still `1.15.2`.
+
+Version bumped to 0.1.8 (a fresh tag rather than moving the already-published `v0.1.7` tag).
+
 ### Fixed (third-party audit: label/config hardening, no behavioral defect)
 
 A third-party audit independently re-verified the ISO 26262 Table 4 ASIL implementation

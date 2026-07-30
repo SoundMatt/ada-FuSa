@@ -12,7 +12,7 @@ package Fusa is
    subtype String_List is String_Vectors.Vector;
 
    Tool_Name    : constant String := "ada-FuSa";
-   Version      : constant String := "0.1.7";
+   Version      : constant String := "0.1.8";
 
    --  §2.8/§3.2 "schemaVersion semantics" (MUST, clarified in spec
    --  v1.15.1): schemaVersion (report documents, §3.1) and specVersion

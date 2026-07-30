@@ -9,20 +9,26 @@ FROM alpine:3.20 AS builder
 
 LABEL io.x-fusa.stage="build"
 
-RUN apk add --no-cache gcc-gnat gprbuild libgnat-static musl-dev \
+RUN apk add --no-cache gcc-gnat libgnat-static musl-dev \
     && ln -sf /usr/lib/libgnat.a /usr/lib/libgnat-13.a \
     && ln -sf /usr/lib/libgnarl.a /usr/lib/libgnarl-13.a
 
 WORKDIR /build
 
-COPY adafusa.gpr ./
 COPY src ./src
-# Build via the same GNAT project file CI uses (gprbuild -P) so the shipped
-# binary carries the project's full diagnostics (-gnatwa/-gnatVa/-gnaty),
-# rather than the weaker bare `gnatmake` invocation. `-largs -static` keeps
-# the fully static musl link.
+# `gprbuild` is not packaged for Alpine 3.20 (main/community only carry
+# `gcc-gnat`; `gprbuild` exists solely in the edge/testing repo, which would
+# pin this image to an unstable, version-skewed toolchain relative to the
+# gcc-gnat above) -- confirmed by a real `docker buildx` failure ("gprbuild
+# (no such package)") the first time this was tried. Passing the same
+# diagnostic flags `adafusa.gpr`'s Compiler package specifies
+# (-gnatwa/-gnatVa/-gnaty/-gnat2022) directly to `gnatmake` gets the same
+# diagnostic parity with the CI-verified `gprbuild -P adafusa.gpr` build
+# without that unavailable dependency. `-largs -static` keeps the fully
+# static musl link.
 RUN mkdir -p obj bin \
-    && gprbuild -p -P adafusa.gpr -largs -static
+    && gnatmake -gnatwa -gnatVa -gnaty -gnat2022 -Isrc -Dobj \
+         -o bin/adafusa src/adafusa_main.adb -largs -static
 
 # ── Runtime stage ─────────────────────────────────────────────────────────────
 FROM alpine:3.20 AS runtime
