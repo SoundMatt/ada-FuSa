@@ -155,11 +155,35 @@ begin
           "init does not write a placeholder .fusa.json when --standard "
           & "is missing non-interactively");
    Check (Fusa.Cli.Run
-            (Args ("init", "--dir", Root, "--name", "t", "--standard", "generic")) = Exit_Ok,
+            (Args ("init", "--dir", Root, "--name", "t", "--standard", "iso26262")) = Exit_Ok,
           "init exits 0 and creates config files once both --name and "
           & "--standard are given");
    Check (Fusa.Files.Exists (Root & "/.fusa.json"), "init created .fusa.json");
    Check (Fusa.Files.Exists (Root & "/.fusa-reqs.json"), "init created .fusa-reqs.json");
+
+   --  fusa:test REQ-009
+   --  Regression (fusa#102 / audit ada-FuSa-V04): the --standard flag
+   --  (and, by the same code path, the interactive prompt) must be
+   --  validated against spec section 2.4.1's closed standard-id enum --
+   --  a non-canonical value such as "generic" (or any typo) must not
+   --  silently produce a non-conformant .fusa.json.
+   declare
+      Bad_Std_Root : constant String := "tmp_test_cli_bad_standard";
+   begin
+      if Fusa.Files.Exists (Bad_Std_Root) then
+         Ada.Directories.Delete_Tree (Bad_Std_Root);
+      end if;
+      Ada.Directories.Create_Path (Bad_Std_Root);
+      Check (Fusa.Cli.Run
+               (Args ("init", "--dir", Bad_Std_Root, "--name", "t",
+                      "--standard", "generic")) = Exit_Usage,
+             "init --standard generic is rejected as non-canonical "
+             & "(exit 2, usage)");
+      Check (not Fusa.Files.Exists (Bad_Std_Root & "/.fusa.json"),
+             "init does not write .fusa.json when --standard is not "
+             & "one of spec section 2.4.1's canonical standard ids");
+      Ada.Directories.Delete_Tree (Bad_Std_Root);
+   end;
 
    --  fusa:test REQ-010
    Check (Fusa.Cli.Run (Args ("check", "--dir", Root)) = Exit_Ok,
@@ -186,9 +210,9 @@ begin
              "projectRoot in check --format json output resolves to the "
              & "actual project directory, not merely some absolute path");
       Check (Ada.Strings.Fixed.Index
-               (Out_Text, """standard"": ""generic""") > 0,
+               (Out_Text, """standard"": ""iso26262""") > 0,
              "standard in check --format json output carries the "
-             & "project's actual configured standard (""generic""), not "
+             & "project's actual configured standard (""iso26262""), not "
              & "just any non-blank string");
    end;
 
@@ -332,9 +356,9 @@ begin
              "qualify --format json's projectRoot resolves to the actual "
              & "project directory");
       Check (Ada.Strings.Fixed.Index
-               (Out_Text, """standard"": ""generic""") > 0,
+               (Out_Text, """standard"": ""iso26262""") > 0,
              "qualify --format json's standard carries the project's "
-             & "actual configured value (""generic"")");
+             & "actual configured value (""iso26262"")");
    end;
    Check (Fusa.Cli.Run (Args ("qualify", "--dir", Root, "--format", "bogus")) = Exit_Usage,
           "qualify rejects an unsupported --format with a usage error");
@@ -2814,9 +2838,9 @@ begin
              "trace --format json's projectRoot resolves to the actual "
              & "project directory");
       Check (Ada.Strings.Fixed.Index
-               (Out_Text, """standard"": ""generic""") > 0,
+               (Out_Text, """standard"": ""iso26262""") > 0,
              "trace --format json's standard carries the project's "
-             & "actual configured value (""generic"")");
+             & "actual configured value (""iso26262"")");
    end;
    --  fusa:test REQ-011
    Check (Fusa.Cli.Run (Args ("trace", "--dir", Root, "--format", "html")) = Exit_Ok,
@@ -2885,7 +2909,7 @@ begin
       Ada.Directories.Create_Path (Func_Strict_Root & "/src");
       Check (Fusa.Cli.Run
                (Args ("init", "--dir", Func_Strict_Root, "--name", "t",
-                      "--standard", "generic")) = Exit_Ok,
+                      "--standard", "iso26262")) = Exit_Ok,
              "func-strict fixture: init exits 0");
       declare
          Reqs : Fusa.Config.Requirement_List;
@@ -3070,11 +3094,11 @@ begin
 
       Check (Fusa.Cli.Run
                (Args ("init", "--dir", Root2, "positional-name",
-                      "--standard", "generic")) = Exit_Ok,
+                      "--standard", "iso26262")) = Exit_Ok,
              "init accepts a positional project name");
       Check (Fusa.Cli.Run
                (Args ("init", "--dir", Root2, "--name", "ignored",
-                      "--standard", "generic")) = Exit_Ok,
+                      "--standard", "iso26262")) = Exit_Ok,
              "a second init without --force still exits 0 (name/standard "
              & "are still required, but the existing config file is left alone)");
 
@@ -3189,7 +3213,8 @@ begin
          Exit_Code : Integer;
          Out_Text  : constant String :=
            Run_Capturing_Stdout
-             (Args ("coverage", "--proof", "--proof-file", Proof_File, "--format", "json"),
+             (Args ("coverage", "--proof", "--dir", Proof_Root,
+                    "--proof-file", Proof_File, "--format", "json"),
               Exit_Code);
       begin
          Check (Exit_Code = Exit_Ok,
@@ -3214,6 +3239,19 @@ begin
                 and then Ada.Strings.Fixed.Index (Out_Text, """proved"": true") > 0,
                 "Pkg.Compute (1/2 obligations proved) is correctly marked ""proved"": "
                 & "false, while Pkg.Validate (1/1) is marked true");
+         --  Regression (audit ada-FuSa-10): unlike sibling report commands
+         --  (e.g. qualify -> qualify-report.json), coverage --proof used
+         --  to only write its JSON report to stdout unless --output was
+         --  given explicitly. It must now also default to <dir>/
+         --  proof-report.json, mirroring the Effective_Out idiom.
+         Check (Fusa.Files.Exists (Proof_Root & "/proof-report.json"),
+                "coverage --proof --format json with no --output defaults "
+                & "to writing <dir>/proof-report.json");
+         Check (Ada.Strings.Fixed.Index
+                  (Fusa.Files.Read_File (Proof_Root & "/proof-report.json"),
+                   """kind"": ""proof-report""") > 0,
+                "the default proof-report.json contains the same report "
+                & "that was echoed to stdout");
       end;
 
       --  --proof-threshold gates correctly (66.7% actual).
@@ -3243,7 +3281,8 @@ begin
          Exit_Code : Integer;
          Out_Text  : constant String :=
            Run_Capturing_Stdout
-             (Args ("coverage", "--proof", "--proof-file", Proof_File, "--format", "json"),
+             (Args ("coverage", "--proof", "--dir", Proof_Root,
+                    "--proof-file", Proof_File, "--format", "json"),
               Exit_Code);
       begin
          Check (Ada.Strings.Fixed.Index (Out_Text, """totalObligations"": 0") > 0

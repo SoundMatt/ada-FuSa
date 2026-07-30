@@ -1,7 +1,7 @@
 # ada-FuSa — Ada/SPARK Functional Safety Toolkit
 
 [![CI](https://github.com/SoundMatt/ada-FuSa/actions/workflows/ci.yml/badge.svg)](https://github.com/SoundMatt/ada-FuSa/actions/workflows/ci.yml)
-[![x-FuSa spec](https://img.shields.io/badge/x--FuSa%20spec-v1.15-blue)](https://github.com/SoundMatt/FuSaOps)
+[![x-FuSa spec](https://img.shields.io/badge/x--FuSa%20spec-v1.15.2-blue)](https://github.com/SoundMatt/FuSaOps)
 [![License: MPL-2.0](https://img.shields.io/badge/license-MPL--2.0-green)](LICENSE)
 
 **adafusa** is the Ada implementation of the [x-FuSa specification](https://github.com/SoundMatt/FuSaOps) — a

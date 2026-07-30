@@ -81,7 +81,7 @@ package body Fusa.Config is
             end if;
 
             Cfg.Standard :=
-              To_Unbounded_String (Fusa.Json.Get_String (Root, "standard", "generic"));
+              To_Unbounded_String (Fusa.Json.Get_String (Root, "standard", "iso26262"));
             Cfg.Asil   := To_Unbounded_String (Fusa.Json.Get_String (Root, "asil"));
             Cfg.Sil    := To_Unbounded_String (Fusa.Json.Get_String (Root, "sil"));
             Cfg.Dal    := To_Unbounded_String (Fusa.Json.Get_String (Root, "dal"));
